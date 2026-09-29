@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>ブラウザだけで動く道具</title>
+<meta name="description" content="AIで開発する人のための、ブラウザの中だけで動く小さな道具。ファイルは外に送信されません。">
+<style>
+:root{--bg:#F1F3F2;--card:#FFFFFF;--ink:#16201C;--muted:#5A6863;--rule:#D3DBD7;--accent:#2E6A4E;
+--f:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP","Noto Sans CJK JP",system-ui,sans-serif}
+@media (prefers-color-scheme: dark){:root{--bg:#0F1412;--card:#161D1A;--ink:#E3EAE6;--muted:#9BAAA4;--rule:#2A3531;--accent:#8BC9A8;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f);font-size:15px;line-height:1.75}
+main{max-width:760px;margin:0 auto;padding:48px clamp(16px,4vw,32px) 72px;display:grid;gap:28px}
+h1{margin:0;font-size:clamp(28px,5vw,40px);line-height:1.2;text-wrap:balance}
+.lead{margin:0;color:var(--muted)}
+ul{margin:0;padding:0;list-style:none;display:grid;gap:14px}
+a.card{display:grid;gap:4px;padding:20px 22px;border:1px solid var(--rule);border-radius:12px;background:var(--card);color:inherit;text-decoration:none}
+a.card:hover,a.card:focus-visible{border-color:var(--accent);outline:none}
+a.card b{font-size:19px}
+a.card span{color:var(--muted);font-size:14px}
+footer{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>ブラウザだけで動く道具</h1>
+  <p class="lead">AIで開発する人のための、小さな道具です。どれもページの中だけで動き、あなたのファイルを外に送りません（ページ側で通信を禁止しています）。</p>
+  <ul>
+    <li><a class="card" href="cc-tsuchihyo/"><b>Claude Code 通知表</b><span>ログを落とすだけで、「おっしゃる通りです」と言われた回数、謝られた回数、APIのトークン料金に換算した金額を通知表にします。</span></a></li>
+    <li><a class="card" href="fbcheck/"><b>Firebase 公開前チェック</b><span>AIで作ったアプリを公開する前に、ルールの穴・配布ファイルの鍵・.env の扱いを、ファイルの実物の行つきで確かめます。</span></a></li>
+  </ul>
+  <footer>個人が作った非公式の道具です。Anthropic、Google とは関係ありません。</footer>
+</main>
+</body>
+</html>

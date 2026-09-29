@@ -1,0 +1,11 @@
+**/dist/
+test/logs/
+test/shots/
+test/fbproj*/
+test/fbcheck-orig/
+test/real-session.jsonl
+test/cli-out*.txt
+__pycache__/
+test/out/
+test/fbcheck-fix/
+og/card.png

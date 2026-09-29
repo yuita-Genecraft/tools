@@ -1,0 +1,786 @@
+<title>Firebase 公開前チェック</title>
+<meta name="description" content="AIで作ったアプリを公開する前に、実際に漏れた事例と同じ形の穴が空いていないかを、ブラウザの中だけで確かめるツール。">
+<style>
+/* Layout: 1枚の点検レポート。上に投入口、その下に「あなたのファイルの実物の行」を主役にした所見が縦に並ぶ。
+   判定より先に材料（ファイル名と行番号つきの実物）を見せる。 */
+:root{
+  --bg:#F1F3F6;
+  --surface:#FFFFFF;
+  --ink:#141820;
+  --muted:#586071;
+  --rule:#D4D9E1;
+  --code:#EAEEF3;
+  --code-ink:#18202E;
+  --gutter:#667085;
+  --ember:#D9480F;
+  --danger:#C42B2B; --danger-wash:#FBEAEA;
+  --warn:#8F5E00;   --warn-wash:#FFF2D2;
+  --calm:#1C7448;   --calm-wash:#E1F2E8;
+  --mark:#FFE08A;
+  --f-sans:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",system-ui,sans-serif;
+  --f-mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono CJK JP",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1015; --surface:#151A21; --ink:#E6E9EF; --muted:#9AA3B3; --rule:#29303B;
+    --code:#0A0D12; --code-ink:#D6DDE8; --gutter:#7D8799; --ember:#FF7A45;
+    --danger:#FF6B6B; --danger-wash:#361517; --warn:#F0B64A; --warn-wash:#30250D; --calm:#5CCF95; --calm-wash:#11281C;
+    --mark:#6B4F00;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1015; --surface:#151A21; --ink:#E6E9EF; --muted:#9AA3B3; --rule:#29303B;
+  --code:#0A0D12; --code-ink:#D6DDE8; --gutter:#7D8799; --ember:#FF7A45;
+  --danger:#FF6B6B; --danger-wash:#361517; --warn:#F0B64A; --warn-wash:#30250D; --calm:#5CCF95; --calm-wash:#11281C;
+  --mark:#6B4F00;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+img{max-width:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-sans);font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%}
+.page{max-width:880px;margin:0 auto;padding-inline:clamp(16px,4vw,32px);padding-block:36px 72px;display:grid;gap:28px}
+
+.masthead{display:grid;gap:12px}
+.eyebrow{margin:0;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--ember)}
+.eyebrow::before{content:"";width:10px;height:14px;background:var(--ember);clip-path:polygon(50% 0,100% 55%,78% 100%,22% 100%,0 55%)}
+h1{margin:0;font-size:clamp(32px,6vw,50px);line-height:1.15;font-weight:800;letter-spacing:-.01em;text-wrap:balance}
+.lead{margin:0;font-size:16px;color:var(--muted);max-width:40rem}
+.nb{white-space:nowrap}
+.ic{font-family:var(--f-mono);font-size:.9em;background:var(--code);border-radius:4px;padding:1px 5px;white-space:normal;overflow-wrap:anywhere}
+.promises{margin:4px 0 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px}
+.promises li{font-size:13px;font-weight:600;padding:3px 12px;border-radius:99px;border:1px solid var(--rule);background:var(--surface)}
+
+.intake{border:2px dashed var(--rule);border-radius:12px;background:var(--surface);padding:22px;display:grid;gap:12px;transition:border-color .15s,background-color .15s}
+.intake.over{border-color:var(--ember);background:var(--warn-wash)}
+.intake-row{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center;justify-content:space-between}
+.intake-title{margin:0;font-size:17px;font-weight:800}
+.intake-note{margin:0;font-size:13.5px;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 18px;border-radius:8px;border:1.5px solid var(--ink);background:var(--ink);color:var(--surface);font:inherit;font-size:14.5px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn:hover{filter:brightness(1.15)}
+.btn.sub{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn:focus-visible,summary:focus-visible,textarea:focus-visible{outline:2.5px solid var(--ember);outline-offset:2px}
+
+.progress{display:grid;gap:6px}
+.bar{height:6px;border-radius:99px;background:var(--rule);overflow:hidden}
+.bar span{display:block;height:100%;width:0;background:var(--ember);transition:width .2s}
+.progress p{margin:0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+.summary{display:grid;gap:14px}
+.status{margin:0;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:baseline;font-size:14px;color:var(--muted)}
+.pill{flex:none;font-size:12px;font-weight:800;letter-spacing:.06em;padding:2px 10px;border-radius:99px;border:1.5px solid var(--ember);color:var(--ember)}
+.pill.mine{border-color:var(--ink);color:var(--ink)}
+.pill.err{background:var(--danger);border-color:var(--danger);color:var(--surface)}
+.tally{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.tally div{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:12px 14px;display:grid;gap:2px}
+.tally b{font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
+.tally span{font-size:13px;color:var(--muted)}
+.tally .t-danger b{color:var(--danger)} .tally .t-warn b{color:var(--warn)} .tally .t-calm b{color:var(--calm)}
+.meta{margin:0;padding:0;list-style:none;display:grid;gap:4px;font-size:13.5px;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:600}
+
+.group{display:grid;gap:14px}
+.group>h2{margin:0;font-size:19px;font-weight:800;display:flex;align-items:center;gap:10px}
+.group>h2 .n{font-size:13px;font-weight:700;color:var(--muted)}
+.finding{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:18px 20px;display:grid;gap:14px;min-width:0}
+.finding header{display:flex;align-items:flex-start;gap:10px}
+.chip{flex:none;margin-top:3px;font-size:12px;font-weight:800;padding:2px 9px;border-radius:5px;white-space:nowrap}
+.lv-danger .chip{background:var(--danger-wash);color:var(--danger)}
+.lv-warn .chip{background:var(--warn-wash);color:var(--warn)}
+.lv-info .chip{background:var(--calm-wash);color:var(--calm)}
+.finding h3{margin:0;font-size:16.5px;line-height:1.5;font-weight:800;text-wrap:balance;min-width:0}
+.ev{display:grid;gap:6px;min-width:0}
+.ev-label{margin:0;font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.04em}
+.lines{margin:0;padding:10px 0;list-style:none;background:var(--code);border-radius:8px;overflow-x:auto;font-family:var(--f-mono);font-size:13px;line-height:1.7;color:var(--code-ink)}
+.lines li{display:flex;gap:14px;padding:1px 14px;white-space:pre;min-width:max-content}
+.lines .loc{color:var(--gutter);flex:none}
+.lines mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
+.lines .plain{white-space:normal;font-family:var(--f-sans);font-size:13.5px;min-width:0}
+.finding dl{margin:0;display:grid;gap:4px}
+.finding dt{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.04em;margin-top:6px}
+.finding dd{margin:0;white-space:pre-line}
+.ok-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.ok-list li{background:var(--calm-wash);color:var(--calm);border-radius:8px;padding:10px 14px;font-weight:600}
+
+.export{display:grid;gap:10px}
+.export p{margin:0;font-size:14px;color:var(--muted)}
+.export .row{display:flex;flex-wrap:wrap;gap:8px}
+.export textarea{width:100%;min-height:12rem;font-family:var(--f-mono);font-size:12.5px;line-height:1.6;color:var(--code-ink);background:var(--code);border:1px solid var(--rule);border-radius:8px;padding:12px}
+details summary{cursor:pointer;font-size:14px;color:var(--muted)}
+
+.limits{border-top:1.5px solid var(--ink);padding-top:18px;display:grid;gap:10px}
+.limits h2{margin:0;font-size:18px;font-weight:800}
+.limits ul{margin:0;padding-left:1.2em;display:grid;gap:6px;font-size:14.5px}
+.colophon{border-top:1px solid var(--rule);padding-top:16px;display:grid;gap:6px;font-size:13px;color:var(--muted)}
+.colophon p{margin:0}
+.colophon a{color:inherit}
+@media (max-width:560px){.tally{grid-template-columns:minmax(0,1fr)}.tally div{grid-template-columns:auto 1fr;align-items:baseline;gap:12px}.finding{padding:16px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">AIで作ったアプリを、公開する前に</p>
+    <h1>Firebase <span class="nb">公開前チェック</span></h1>
+    <p class="lead">プロジェクトのフォルダを落とすだけで、実際に漏れた事例と同じ形の穴が空いていないかを確かめます。「安全です」とは言いません。あなたのファイルの、実物の行を見せます。</p>
+    <ul class="promises"><li>ファイルはこのブラウザの外に出ません</li><li>インストール不要</li><li>直さなくていいものも言います</li></ul>
+  </header>
+
+  <section class="intake" id="dropZone" aria-label="プロジェクトの読み込み">
+    <div class="intake-row">
+      <p class="intake-title">プロジェクトのフォルダを、<span class="nb">ここにドロップ</span></p>
+      <label class="btn" for="dirInput">フォルダを選ぶ</label>
+      <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
+    </div>
+    <p class="intake-note">フォルダごと渡してください。中の .env や .gitignore も読みます。node_modules などの大きいフォルダは読み飛ばします。</p>
+    <div class="progress" id="progress" hidden>
+      <div class="bar"><span id="progressBar"></span></div>
+      <p id="progressText">読み込み中</p>
+    </div>
+  </section>
+
+  <section class="summary" aria-live="polite">
+    <p class="status"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のプロジェクトで表示しています。フォルダを入れると、あなたのプロジェクトの結果に変わります。</span></p>
+    <div class="tally" id="tally"></div>
+    <ul class="meta" id="meta"></ul>
+  </section>
+
+  <section id="report" class="report" aria-label="結果"></section>
+
+  <section class="export" aria-label="結果の書き出し">
+    <p>結果をテキストにして、Claude や ChatGPT に貼れます。直し方を相談したら、直したあとにもう一度ここで確かめてください。</p>
+    <div class="row">
+      <button type="button" class="btn" id="copyBtn">結果をテキストでコピー</button>
+      <button type="button" class="btn sub" id="againBtn" hidden>見本に戻す</button>
+    </div>
+    <details id="textBox"><summary>テキストを表示</summary><textarea id="reportText" readonly aria-label="結果のテキスト"></textarea></details>
+  </section>
+
+  <section class="limits">
+    <h2>このツールが見ていないこと</h2>
+    <ul>
+      <li>見ているのは、実際の漏洩でよく見られる4か所（ルールの条件なしの許可 if true、ログインだけで許可する request.auth != null、配布ファイルに混ざった秘密鍵、.env の扱い）だけです。ここが通っても、アプリ全体が安全という意味にはなりません。</li>
+      <li>ルールは1行ずつ読んでいます。複数行にまたがる条件や、関数を使った条件は判定していません。</li>
+      <li>ブラウザからは Git の記録（.git の中）を読めません。そのため、.env が Git で追跡済みかどうかと、下の階層の .gitignore の効き方は確かめられません。直下の .gitignore に除外の行があっても「未確認」として出します。Node.js 版の fbcheck を git リポジトリの中で実行すると、この2つを git 自身で確かめます。</li>
+      <li>ルールはファイルから読んでいます。Firebase コンソールで直接書き換えたルールは見えません。コンソールの「ルール」タブの中身も確かめてください。</li>
+      <li>秘密鍵は、よく知られた形との照合で探しています。見落としはあります。</li>
+      <li>逆に、ここが赤い場合は、実際に漏れた事例と同じ形になっています。</li>
+    </ul>
+  </section>
+
+  <footer class="colophon">
+    <p>ファイルはブラウザの中で読み、結果だけを画面に出します。このページはサーバーと通信しません。</p>
+    <p>コマンドで使いたい人向けに、同じ判定の Node.js 版（<a href="https://github.com/yuita-Genecraft/fbcheck" target="_blank" rel="noopener">fbcheck</a>・MIT）もあります。</p>
+    <p>個人が作った非公式のツールです。Google と Firebase とは関係ありません。</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ENGINE:BEGIN — fbcheck の判定本体。CLI（fbcheck.mjs）とブラウザ版で、この区間は同じ文字列を使う。 */
+const FBCHECK_VERSION = "0.2";
+const SKIP_DIRS = new Set([
+  "node_modules", ".git", ".next", ".nuxt", ".cache", ".vercel",
+  ".firebase", "coverage", ".turbo", ".svelte-kit", "vendor",
+]);
+const TEXT_EXT = new Set([
+  ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte",
+  ".json", ".env", ".html", ".rules", ".yml", ".yaml", ".txt", ".md",
+]);
+const MAX_BYTES = 2 * 1024 * 1024;
+const BUNDLE_DIRS = ["dist", "build", "out", "public", ".output"];
+// 見本として Git に入れる前提の .env（中身は本物の鍵を入れない約束のファイル）
+const TEMPLATE_ENV = /^\.env\.(example|sample|template|dist|defaults)$/i;
+const PUBLIC_PREFIX = "(NEXT_PUBLIC_|VITE_|REACT_APP_|PUBLIC_|NUXT_PUBLIC_)";
+const SECRETS = [
+  { name: "Firebase サービスアカウント鍵", re: /"private_key"\s*:\s*"-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  { name: "秘密鍵（PEM）", re: /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/ },
+  { name: "Stripe 本番シークレットキー", re: /\bsk_live_[A-Za-z0-9]{16,}/ },
+  { name: "Stripe テストシークレットキー", re: /\bsk_test_[A-Za-z0-9]{16,}/ },
+  { name: "Anthropic APIキー", re: /\bsk-ant-[A-Za-z0-9\-_]{20,}/ },
+  { name: "OpenAI APIキー", re: /\bsk-(?:proj-)?[A-Za-z0-9]{32,}/ },
+  { name: "AWS アクセスキー", re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: "GitHub トークン", re: /\bgh[pousr]_[A-Za-z0-9]{30,}/ },
+  { name: "Slack トークン", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
+  { name: "SendGrid APIキー", re: /\bSG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}/ },
+];
+
+const extOf = (n) => { const i = n.lastIndexOf("."); return i > 0 ? n.slice(i) : ""; };
+const mask = (s) => (s.length <= 12 ? s.slice(0, 4) + "…" : s.slice(0, 6) + "…" + s.slice(-4));
+const evText = (e) => (e.loc && e.code != null ? `${e.loc}  ${e.code}` : e.loc ? `${e.loc}${e.note || ""}` : e.note);
+
+// 行番号つきで正規表現ヒットを返す
+function matchLines(text, re) {
+  const hits = [];
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(re);
+    if (m) hits.push({ line: i + 1, text: lines[i].trim(), match: m[0] });
+  }
+  return hits;
+}
+
+// ---------- ルールの読み取り（Firestore / Storage） ----------
+
+const READ_OPS = new Set(["read", "get", "list"]);
+const WRITE_OPS = new Set(["write", "create", "update", "delete"]);
+const opFamily = (ops) => {
+  const r = ops.some((o) => READ_OPS.has(o)), w = ops.some((o) => WRITE_OPS.has(o));
+  return r && w ? "rw" : r ? "r" : w ? "w" : "";
+};
+const STATE = { rw: "読み書きできる", r: "読める", w: "書き込める", "": "操作できる" };
+const VERB = { rw: "読み書きできます", r: "読めます", w: "書き込めます", "": "操作できます" };
+const OPS_JA = (ops) => ops.map((o) => `${o}（${READ_OPS.has(o) ? "読み取り" : WRITE_OPS.has(o) ? "書き込み" : "?"}）`).join("・");
+
+// 各行について、その行の allow が入っている match の並び（外側から）を返す。// のコメントは無視。
+function matchChains(text) {
+  const lines = text.split(/\r?\n/);
+  const out = new Array(lines.length);
+  const stack = [];
+  let depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\/\/.*$/, "");
+    const at = line.search(/\ballow\b/);
+    let recorded = null;
+    const re = /\bmatch\s+(\/(?:[^\s{}]|\{[^}\s]*\})*)\s*\{|\{|\}/g;
+    let m;
+    while ((m = re.exec(line))) {
+      if (at >= 0 && recorded === null && m.index > at) recorded = stack.map((s) => s.path);
+      if (m[1] !== undefined) { depth++; stack.push({ path: m[1], depth }); }
+      else if (m[0] === "{") depth++;
+      else { while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop(); depth = Math.max(0, depth - 1); }
+    }
+    out[i] = recorded !== null ? recorded : stack.map((s) => s.path);
+  }
+  return out;
+}
+// サービスの入口（/databases/{database}/documents・/b/{bucket}/o）の直下が {x=**} なら「すべて」に効く
+const isWholeScope = (chain) =>
+  /^\/(databases\/\{[^}]+\}\/documents|b\/\{[^}]+\}\/o)\/\{[^}=]+=\*\*\}$/.test(chain.join(""));
+const ownerVar = (chain) => {
+  for (const p of chain) for (const m of p.matchAll(/\{([A-Za-z_]\w*)(=\*\*)?\}/g)) if (/user|uid|owner|author|member|account/i.test(m[1])) return m[1];
+  return null;
+};
+// 1行の中の allow 文を取り出す：[{ ops, cond }]
+function allowsIn(line) {
+  const out = [];
+  const re = /allow\s+([a-z,\s]+?)\s*:\s*if\s+([^;}]*)/g;
+  let m;
+  while ((m = re.exec(line.replace(/\/\/.*$/, "")))) {
+    out.push({ ops: m[1].split(",").map((s) => s.trim()).filter(Boolean), cond: m[2].trim() });
+  }
+  return out;
+}
+const COND_TRUE = /^true\s*(\|\||$)/;
+const COND_AUTH = /^request\.auth\s*!=\s*null$/;
+const COND_TEST = /^request\.time\s*<\s*timestamp\.date\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)$/;
+
+// Realtime Database のルール JSON から、条件なしの true を探す
+function rtdbTrues(node, path, out) {
+  if (!node || typeof node !== "object") return out;
+  for (const [k, v] of Object.entries(node)) {
+    const p = path ? path + "/" + k : k;
+    if ((k === ".read" || k === ".write") && (v === true || (typeof v === "string" && v.trim() === "true"))) {
+      out.push({ path: p, op: k === ".read" ? "read" : "write", top: path === "rules" });
+    } else if (v && typeof v === "object") rtdbTrues(v, p, out);
+  }
+  return out;
+}
+
+// ---------- .gitignore（プロジェクト直下の1枚だけ・分かる書き方だけ） ----------
+
+function globToRegex(p) {
+  let s = "";
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === "*") {
+      if (p[i + 1] === "*" && (i === 0 || p[i - 1] === "/") && (p[i + 2] === "/" || i + 2 === p.length)) {
+        if (p[i + 2] === "/") { s += "(?:.*/)?"; i += 2; } else { s += ".*"; i += 1; }
+        continue;
+      }
+      if (p[i + 1] === "*") i += 1;
+      s += "[^/]*";
+    } else if (c === "?") s += "[^/]";
+    else s += c.replace(/[.+^${}()|\\]/g, "\\$&");
+  }
+  return new RegExp("^" + s + "$");
+}
+// このファイルが除外されていると「言い切れる」時だけ covered: true。分からない時は false（安全側）。
+function gitignoreCovers(gi, rel) {
+  if (gi == null) return { covered: false, reason: "プロジェクト直下に .gitignore が見つからない" };
+  const segs = rel.split("/");
+  let ignored = false, blocked = null;
+  for (const raw of gi.split(/\r?\n/)) {
+    let line = raw.replace(/\s+$/, "");
+    if (!line || line.startsWith("#")) continue;
+    let neg = false;
+    if (line.startsWith("!")) { neg = true; line = line.slice(1); }
+    const dirOnly = line.endsWith("/");
+    line = line.replace(/\/+$/, "");
+    if (!line) continue;
+    if (/[\[\]\\]/.test(line)) {
+      if (/env/i.test(line)) blocked = blocked || "読み取れない書き方（[ ] や \\ を使った行）がある";
+      continue;
+    }
+    const anchored = line.includes("/");
+    const rx = globToRegex(line.replace(/^\/+/, ""));
+    const upto = dirOnly ? segs.length - 1 : segs.length;
+    let hit = false;
+    for (let k = 0; k < upto && !hit; k++) hit = anchored ? rx.test(segs.slice(0, k + 1).join("/")) : rx.test(segs[k]);
+    if (!hit) continue;
+    if (neg) blocked = "! で除外を打ち消す行がある";
+    else ignored = true;
+  }
+  if (ignored && !blocked) return { covered: true };
+  return { covered: false, reason: blocked || (segs.length > 1 ? "直下の .gitignore に除外する行が見つからない（下の階層の .gitignore は見ていない）" : "除外する行が見つからない") };
+}
+
+// ---------- 判定 ----------
+// P = { files: [{ rel, name }]（rel は / 区切り・並び順どおりに判定）, texts: Map(rel → 中身|null), gitignore: 直下の .gitignore の中身|null, envStatus?: Map(rel → Git の状態) }
+function runChecks(P) {
+  const findings = { danger: [], warn: [], info: [], ok: [] };
+  const add = (level, f) => findings[level].push({ ...f, kind: level });
+  const read = (rel) => (P.texts.has(rel) ? P.texts.get(rel) : null);
+
+  // 0. Firebase を使っているか
+  const reasons = [];
+  for (const f of P.files) {
+    const b = f.name;
+    if (b === "firebase.json") reasons.push("firebase.json");
+    if (b === ".firebaserc") reasons.push(".firebaserc");
+    if (b.endsWith(".rules") || b === "database.rules.json") reasons.push(f.rel);
+    if (b === "package.json") {
+      const t = read(f.rel);
+      if (t && /"(firebase|firebase-admin|firebase-tools|@angular\/fire|react-firebase\S*)"\s*:/.test(t)) reasons.push("package.json の依存に firebase");
+    }
+  }
+  if (!reasons.length) {
+    for (const f of P.files) {
+      const t = read(f.rel);
+      if (!t) continue;
+      if (/from\s+["']firebase\/|require\(["']firebase|firebaseConfig\s*=|FIREBASE_[A-Z_]+\s*=/.test(t)) { reasons.push(`${f.rel} に firebase の記述`); break; }
+    }
+  }
+  const fb = [...new Set(reasons)];
+
+  // 1. セキュリティルール
+  const ruleFiles = P.files.filter((f) => f.name.endsWith(".rules") || f.name === "database.rules.json");
+  const hasFirebaseJson = P.files.some((f) => f.name === "firebase.json");
+  if (ruleFiles.length === 0) {
+    if (fb.length) add("danger", {
+      title: "セキュリティルールのファイルが見つかりません",
+      why: "Firestore / Storage は「誰が何を読み書きしてよいか」をルールで決めます。ファイルが無い場合、コンソールで設定したルールがそのまま生きています。テストモードの期限内なら、ログインなしで誰でも全体を読み書きできます。",
+      how: "Firebase コンソール →（Firestore Database / Storage）→「ルール」タブを開いて、今の中身を確かめてください。中身を AI に貼って「このルールで、誰が何を読めるか1行ずつ説明して」と聞くと、何が起きるかが分かります。",
+      evidence: [{ note: hasFirebaseJson ? "firebase.json はあるのに .rules ファイルが無い＝ルールがコード管理されていない" : "プロジェクト内に *.rules / database.rules.json が1つも見つからない" }],
+    });
+  }
+  for (const f of ruleFiles) {
+    const text = read(f.rel);
+    if (text == null) continue;
+    if (f.name === "database.rules.json") {
+      let json = null;
+      try { json = JSON.parse(text); } catch (e) { json = null; }
+      if (!json) continue;
+      const trues = rtdbTrues(json, "", []);
+      if (!trues.length) continue;
+      const fam = opFamily(trues.map((t) => t.op));
+      const top = trues.filter((t) => t.top);
+      const ev = trues.map((t) => ({ loc: f.rel, code: `${t.path} = true` }));
+      const why = `".read" / ".write" に true を書いた場所は、条件なしで許可されます（ログインも不要）。許可されている操作：${OPS_JA([...new Set(trues.map((t) => t.op))])}。`;
+      if (top.length) add("danger", { title: `Realtime Database 全体を、誰でも${STATE[opFamily(top.map((t) => t.op))]}状態です（${f.rel}）`, why, how: "rules の直下の true を外し、場所ごとに認証と持ち主のチェックを入れます。", evidence: ev });
+      else if (trues.some((t) => t.op === "write")) add("danger", { title: `Realtime Database に、誰でも${STATE[fam]}場所があります（${f.rel}）`, why, how: "書き込みは、認証と持ち主のチェックを入れた条件に変えます。", evidence: ev });
+      else add("warn", { title: `Realtime Database に、誰でも読める場所があります（${f.rel}）`, why: why + "公開してよいデータなら、このままで問題ありません。", how: "個人のデータが入る場所なら、認証と持ち主のチェックを入れます。", evidence: ev });
+      continue;
+    }
+    const noun = /firebase\.storage/.test(text) ? "ファイル" : "文書";
+    const chains = matchChains(text);
+    const lines = text.split(/\r?\n/);
+    const G = { anyoneHard: [], anyoneSoft: [], authAll: [], authPart: [] };
+    const tests = [];
+    for (let i = 0; i < lines.length; i++) {
+      for (const a of allowsIn(lines[i])) {
+        const whole = isWholeScope(chains[i]);
+        const ev = { loc: `${f.rel}:${i + 1}`, code: lines[i].trim(), ops: a.ops, chain: chains[i] };
+        if (COND_TRUE.test(a.cond)) {
+          ev.mark = "if " + a.cond.replace(/\s*\|\|.*$/, "");
+          (opFamily(a.ops).includes("w") || whole ? G.anyoneHard : G.anyoneSoft).push(ev);
+        } else if (COND_AUTH.test(a.cond)) {
+          ev.mark = a.cond;
+          (whole ? G.authAll : G.authPart).push(ev);
+        } else {
+          const t = a.cond.match(COND_TEST);
+          if (t) { ev.mark = a.cond; tests.push({ ev, y: +t[1], m: +t[2], d: +t[3] }); }
+        }
+      }
+    }
+    const fam = (list) => opFamily(list.flatMap((e) => e.ops));
+    const opsOf = (list) => OPS_JA([...new Set(list.flatMap((e) => e.ops))]);
+    const strip = (list) => list.map(({ loc, code, mark }) => ({ loc, code, mark }));
+    if (G.anyoneHard.length) add("danger", {
+      title: `誰でも${STATE[fam(G.anyoneHard)]}状態です（${f.rel}）`,
+      why: `\`if true\` は条件なしで許可するという意味です。ログインも不要で、URL さえ分かれば誰でも行えます。ブラウザの開発者ツールで接続先が見えるので、URL は隠せません。許可されている操作：${opsOf(G.anyoneHard)}。`,
+      how: "この行を、そのデータの持ち主だけが触れる条件に書き換えます。AI に頼むときは「どのデータを、誰に見せたいか」を一緒に伝えてください。書き直したら、もう一度確かめてください。",
+      evidence: strip(G.anyoneHard),
+    });
+    if (G.anyoneSoft.length) add("warn", {
+      title: `誰でも読める場所があります（${f.rel}）`,
+      why: `\`if true\` は条件なしで許可するという意味です。この行で許可されているのは読み取り（${[...new Set(G.anyoneSoft.flatMap((e) => e.ops))].join("・")}）だけで、ログインも不要です。公開してよいデータなら、このままで問題ありません。`,
+      how: "個人のデータや、見せたくないデータが入る場所なら、認証と持ち主のチェックを入れます。",
+      evidence: strip(G.anyoneSoft),
+    });
+    if (G.authAll.length) add("danger", {
+      title: `ログインすれば、すべての${noun}を${VERB[fam(G.authAll)]}（${f.rel}）`,
+      why: `\`request.auth != null\` は「ログインしていれば誰でも許可」という条件です。この行は {…=**} の下にあるので、すべての${noun}に効きます。Firebase Authentication で誰でも新規登録できる設定なら、アカウントを1つ作るだけで、ほかの人のデータにも届きます。許可されている操作：${opsOf(G.authAll)}。`,
+      how: "データの種類ごとに match を分け、ユーザーごとのデータには持ち主のチェック（例：`request.auth.uid == userId`）を入れます。AI に頼むときは、コレクションの構成と「誰に何を見せたいか」を一緒に伝えてください。",
+      evidence: strip(G.authAll),
+    });
+    if (G.authPart.length) {
+      const v = G.authPart.map((e) => ownerVar(e.chain)).find(Boolean);
+      add("warn", {
+        title: `ログインしている人なら誰でも${STATE[fam(G.authPart)]}場所があります（${f.rel}）`,
+        why: `\`request.auth != null\` は「ログインしていれば誰でも許可」という条件です。全員で共有するデータなら、これで意図どおりです。ユーザーごとのデータ（本人だけに見せたいもの）なら、持ち主のチェックが足りません。` + (v ? `この場所はパスに {${v}} があるので、ユーザーごとのデータに見えます。` : "") + `許可されている操作：${opsOf(G.authPart)}。`,
+        how: `ユーザーごとのデータなら、持ち主のチェックを足します。例：\n\`allow read, write: if request.auth != null && request.auth.uid == ${v || "userId"};\`` + (v ? "" : "\n（userId の部分は、match のパスにある名前に合わせてください）"),
+        evidence: strip(G.authPart),
+      });
+    }
+    for (const t of tests) {
+      const expired = new Date(t.y, t.m - 1, t.d).getTime() < Date.now();
+      add(expired ? "warn" : "danger", {
+        title: expired
+          ? `期限切れの無認証許可ルールがあります（Firebase のテストモードと同じ形・${f.rel}）`
+          : `期限まで無認証で許可するルールがあります（Firebase のテストモードと同じ形・${f.rel}）`,
+        why: expired
+          ? `この allow の条件は期限（${t.y}年${t.m}月${t.d}日）を過ぎているので、この条件だけでは許可しません。ただし Firestore / Storage のルールは、同じリクエストに当てはまる allow のどれか1つでも true なら許可します。別の allow が true なら、アクセスは許可されます。この行で許可していた操作：${OPS_JA(t.ev.ops)}。`
+          : `期限（${t.y}年${t.m}月${t.d}日）までは、ログインも不要で誰でも行えます。許可されている操作：${OPS_JA(t.ev.ops)}。`,
+        how: expired
+          ? "使っていない行なら消します。ルールを書き直すときは、どのデータを誰に見せたいかを決めてから、AI に頼んでください。"
+          : "本番用のルールに書き換えます。どのデータを誰に見せたいかを決めてから、AI に書き換えを頼んでください。",
+        evidence: [{ loc: t.ev.loc, code: t.ev.code, mark: t.ev.mark }],
+      });
+    }
+  }
+
+  // 2. 配布物とソースに混ざった秘密の鍵（.env は 3. で見る。見本用の .env.example だけは読まない）
+  const bundleHits = [], sourceHits = [];
+  for (const f of P.files) {
+    const r = f.rel;
+    if (f.name === ".env.example") continue;
+    if (f.name.startsWith(".env") && !TEMPLATE_ENV.test(f.name)) continue;
+    const text = read(r);
+    if (text == null) continue;
+    const inBundle = BUNDLE_DIRS.some((d) => r === d || r.startsWith(d + "/") || r.includes("/" + d + "/"));
+    for (const s of SECRETS) for (const h of matchLines(text, s.re)) (inBundle ? bundleHits : sourceHits).push({ loc: `${r}:${h.line}`, code: `${s.name}  ${mask(h.match)}` });
+  }
+  if (bundleHits.length) add("danger", {
+    title: "配布されるファイルに秘密の鍵が入っています",
+    why: "dist / build / public の中身は、サイトを開いた人全員のブラウザに配られます。開発者ツールを開けば誰でも読めます。課金の乗っ取りや、データの取得につながります。vibe coding のサービスで作られた公開 Web アプリ5,600本超を調べた調査（Escape.tech、2025年10月）では、影響の大きい脆弱性が2,000件超、露出した秘密情報（exposed secrets）が400件超見つかっています。",
+    how: "1) その鍵を、発行元の管理画面で今すぐ無効にして作り直す（漏れた鍵は戻せません）\n2) 鍵を使う処理をサーバー側（Cloud Functions など）に移す\n3) ブラウザに配るファイルには置かない",
+    evidence: bundleHits,
+  });
+  if (sourceHits.length) add("warn", {
+    title: "ソースコードに秘密の鍵が直書きされています",
+    why: "まだ配布物には入っていなくても、ビルドに含めて配ったり、公開リポジトリに上げたりした時点で公開されます。git の履歴に一度入ると、あとからファイルを消しても履歴から取り出せます。",
+    how: "サーバー側だけで読む環境変数に移し、その .env を Git の管理から外します。既に push 済みなら、鍵の作り直しが必要です。",
+    evidence: sourceHits,
+  });
+  if (!bundleHits.length && !sourceHits.length) add("ok", { title: "ソースコードと配布ファイルには、分かる範囲で秘密の鍵の直書きは見つかりませんでした（.env は別の項目で見ています）" });
+
+  // 3. .env の扱い（Git の管理から外れているか／ブラウザに配られる名前になっていないか）
+  //    P.envStatus: Map(rel → "tracked" | "untracked_ignored" | "untracked_not_ignored" | "unknown")
+  //    Node.js 版は git 自身（ls-files / check-ignore）で埋める。Git の記録を読めない時（ブラウザ版など）は unknown。
+  //    unknown の時は「Git の管理外」とは言わない。直下の .gitignore に除外の行があっても「未確認」として出す。
+  const envs = P.files.filter((f) => f.name.startsWith(".env") && !TEMPLATE_ENV.test(f.name));
+  if (envs.length) {
+    const statusOf = (rel) => (P.envStatus && P.envStatus.get(rel)) || "unknown";
+    const keyNote = (rel) => {
+      const t = read(rel);
+      if (t == null) return "";
+      const names = [...new Set(SECRETS.filter((x) => t.split(/\r?\n/).some((ln) => x.re.test(ln))).map((x) => x.name))];
+      return names.length ? `・鍵らしき値あり：${names.join("、")}` : "";
+    };
+    const tracked = [], notIgnored = [], noPattern = [], unconfirmed = [];
+    for (const f of envs) {
+      const st = statusOf(f.rel);
+      if (st === "untracked_ignored") continue;
+      if (st === "tracked") tracked.push({ loc: f.rel, note: `（Git で追跡中${keyNote(f.rel)}）` });
+      else if (st === "untracked_not_ignored") notIgnored.push({ loc: f.rel, note: `（git check-ignore で除外されていない${keyNote(f.rel)}）` });
+      else {
+        const c = gitignoreCovers(P.gitignore, f.rel);
+        if (c.covered) unconfirmed.push({ loc: f.rel, note: `（直下の .gitignore に除外の行あり・追跡済みかは未確認${keyNote(f.rel)}）` });
+        else noPattern.push({ loc: f.rel, note: `（${c.reason}${keyNote(f.rel)}）` });
+      }
+    }
+    const THREE = ".env に鍵を置いてよいのは、1) サーバー側だけで読む 2) Git の管理から外す 3) VITE_ や NEXT_PUBLIC_ などブラウザに配る接頭辞を付けない、の3つがそろう時です。ここでは 2) を見ています。";
+    if (tracked.length) add("danger", {
+      title: "Git で追跡されている .env ファイルがあります",
+      why: THREE + ".gitignore は、まだ Git に入っていないファイルにだけ効きます。一度コミットした .env は、あとから .gitignore に書いても追跡されたままで、公開リポジトリに push すると、そのまま公開されます。git の履歴にも残ります。",
+      how: "`git rm --cached -- ファイル名` で追跡を外してコミットし、中の鍵は発行元で作り直してください（履歴に残った鍵は戻せません）。",
+      evidence: tracked,
+    });
+    if (notIgnored.length) add("danger", {
+      title: "Git の管理から外れていない .env ファイルがあります",
+      why: THREE + "git 自身（git check-ignore）で確かめたところ、除外されていません。下の階層の .gitignore にある `!.env` のような行で、除外が打ち消されていることもあります。",
+      how: "`git check-ignore -v -- ファイル名` でどの行が効いているかを確かめ、.gitignore に `.env*` を足すか、打ち消している行を外します。",
+      evidence: notIgnored,
+    });
+    if (noPattern.length) add("danger", {
+      title: ".gitignore に除外する行が見つからない .env ファイルがあります",
+      why: THREE + "Git の管理から外れていないと、コミットして公開リポジトリに上げた時に、そのまま公開されます。公開リポジトリを機械で巡回して鍵を集める行為が、日常的に行われています。ここでは、プロジェクト直下の .gitignore だけを読んでいます。",
+      how: ".gitignore に `.env*` の行を足すのが確実です（見本として共有したい .env.example は、その下に `!.env.example` と書けば戻せます）。すでにコミットしたことがあるファイルは .gitignore に書いても外れないので、`git rm --cached -- ファイル名` で管理から外し、中の鍵は作り直してください。",
+      evidence: noPattern,
+    });
+    if (unconfirmed.length) add("warn", {
+      title: ".env が Git で追跡済みかは、ここでは確かめられません",
+      why: "直下の .gitignore に除外の行はあります。ただし .gitignore は、まだ Git に入っていないファイルにだけ効きます。一度コミットした .env は追跡されたままです。また、下の階層の .gitignore にある `!.env` のような行で、除外が打ち消されていることもあります。今回は Git の記録（.git の中）を読めていないので（ブラウザ版、または git リポジトリの外や git の無い環境で実行した時）、この2つは確かめられません。",
+      how: "ターミナルでプロジェクトのフォルダに移動して `git ls-files -- .env` を実行します。ファイル名が表示されたら追跡済みです（`git rm --cached -- .env` で外し、鍵を作り直す）。下の階層の .gitignore まで含めて確かめるには `git check-ignore -v -- ファイル名`。Node.js 版の fbcheck を git リポジトリの中で実行すると、この2つを git 自身で確かめます。",
+      evidence: unconfirmed,
+    });
+    for (const f of envs) {
+      const text = read(f.rel);
+      if (text == null) continue;
+      const byName = matchLines(text, new RegExp("^\\s*" + PUBLIC_PREFIX + "\\w*(SECRET|PRIVATE|SERVICE_ROLE|_SK|PASSWORD|TOKEN)\\w*\\s*=", "i"));
+      if (byName.length) add("danger", {
+        title: "ブラウザに配られる環境変数に、秘密らしき名前が入っています",
+        why: "NEXT_PUBLIC_ / VITE_ / REACT_APP_ などの接頭辞は「ブラウザに配ってよい」という意味です。ビルドの時にブラウザ向けのファイルへ埋め込まれるので、ここに SECRET や TOKEN を入れると、隠したつもりで全公開になります。",
+        how: "接頭辞を外し、サーバー側でだけ読むようにします。",
+        evidence: byName.map((h) => ({ loc: `${f.rel}:${h.line}`, code: `${h.text.split("=")[0].trim()}=…` })),
+      });
+      const byValue = [];
+      text.split(/\r?\n/).forEach((ln, i) => {
+        const m = ln.match(new RegExp("^\\s*(?:export\\s+)?(" + PUBLIC_PREFIX + "\\w*)\\s*=\\s*(.*)$", "i"));
+        if (!m) return;
+        const s = SECRETS.find((x) => x.re.test(m[3]));
+        if (s) byValue.push({ loc: `${f.rel}:${i + 1}`, code: `${m[1]}=…（${s.name}）` });
+      });
+      if (byValue.length) add("danger", {
+        title: "ブラウザに配られる環境変数に、秘密の鍵が入っています",
+        why: "接頭辞（VITE_ / NEXT_PUBLIC_ など）がついた変数は、ビルドの時にブラウザ向けのファイルへ埋め込まれます。値が秘密の鍵だと、サイトを開いた人全員に配られます。",
+        how: "1) その鍵を発行元で無効にして作り直す\n2) 接頭辞を外し、鍵を使う処理をサーバー側に移す",
+        evidence: byValue,
+      });
+    }
+  }
+
+  // 4. よくある誤解
+  let found = null;
+  for (const f of P.files) {
+    const text = read(f.rel);
+    if (text == null) continue;
+    const hits = matchLines(text, /apiKey\s*:\s*["'`]AIza[A-Za-z0-9_\-]{10,}/);
+    if (hits.length) { found = `${f.rel}:${hits[0].line}`; break; }
+  }
+  if (found) add("info", {
+    title: "Firebase の apiKey がフロントに出ているのは、正常です",
+    why: "これは秘密の鍵ではなく、どのプロジェクト宛かを示す識別子です。Firebase の公式ドキュメントにも、Firebase のサービスだけに制限されたキーは秘密として扱う必要はない、と書かれています。ここを隠そうとして時間を使う人が多いのですが、守っているのは apiKey ではなく「セキュリティルール」の方です。上のルールの項目を先に見てください。",
+    how: "隠す対応は要りません。確かめるなら、Google Cloud コンソールでこのキーの「API の制限」が Firebase 関連の API だけになっているかを見ます（2024年5月以降に Firebase が自動で作ったキーは、最初からそう制限されています。それより前に作られたキーは、Firebase 以外の API も許可に入っていることがあります）。Maps や Gemini など別の API を使うときは、このキーに足さず、別のキーを作ってその API だけに制限します。",
+    evidence: [{ loc: found, note: "（対応不要）" }],
+  });
+
+  return { findings, fb, count: P.files.length };
+}
+/* ENGINE:END */
+
+/* ---------- 読み込み（ブラウザ版だけ） ---------- */
+// items: [{path, file}] → 読むファイルを選んで中身を持つ
+async function buildProject(items, onProgress){
+  const list = items
+    .map(it => ({ path: String(it.path).replace(/\\/g, '/').replace(/^\/+/, ''), file: it.file }))
+    .filter(it => !it.path.split('/').slice(0, -1).some(seg => SKIP_DIRS.has(seg)));
+  const heads = new Set(list.map(it => it.path.includes('/') ? it.path.split('/')[0] : ''));
+  const root = (heads.size === 1 && !heads.has('')) ? [...heads][0] : '';
+  let gitignore = null, sawEnv = false;
+  const scan = [];
+  for (const it of list) {
+    it.rel = root ? it.path.slice(root.length + 1) : it.path;
+    it.name = it.path.split('/').pop();
+    if (it.rel === '.gitignore') { try { gitignore = await it.file.text(); } catch (e) { gitignore = null; } continue; }
+    const isEnv = it.name.startsWith('.env');
+    if (isEnv) sawEnv = true;
+    if (!TEXT_EXT.has(extOf(it.name)) && !isEnv) continue;
+    if (it.file.size > MAX_BYTES) continue;
+    scan.push(it);
+  }
+  scan.sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+  const texts = new Map();
+  for (let i = 0; i < scan.length; i++) {
+    try { texts.set(scan[i].rel, await scan[i].file.text()); } catch (e) { texts.set(scan[i].rel, null); }
+    if (onProgress && (i % 25 === 0 || i === scan.length - 1)) onProgress(i + 1, scan.length);
+  }
+  return { root, files: scan.map(it => ({ rel: it.rel, name: it.name })), texts, gitignore, sawGitignore: gitignore !== null, sawEnv, total: list.length };
+}
+
+
+/* ---------- 表示 ---------- */
+function evHTML(e){
+  if (e.loc && e.code != null) {
+    let code = esc(e.code);
+    if (e.mark) { const m = esc(e.mark); const i = code.indexOf(m); if (i >= 0) code = code.slice(0, i) + '<mark>' + m + '</mark>' + code.slice(i + m.length); }
+    return `<li><span class="loc">${esc(e.loc)}</span><span>${code}</span></li>`;
+  }
+  if (e.loc) return `<li><span class="loc">${esc(e.loc)}</span><span>${esc(e.note || '')}</span></li>`;
+  return `<li><span class="plain">${esc(e.note)}</span></li>`;
+}
+const ic = s => esc(s).replace(/`([^`]+)`/g, '<code class="ic">$1</code>');
+const LV = {
+  danger: { chip: '直すもの', group: '公開前に直すもの', why: 'なぜ危ないか', how: '直し方' },
+  warn: { chip: '見ておく', group: '見ておくもの', why: 'なぜ危ないか', how: '直し方' },
+  info: { chip: '直さなくていい', group: '直さなくていいもの（よくある誤解）', why: 'なぜそう言えるか', how: 'やること' },
+};
+function findingHTML(f){
+  const L = LV[f.kind];
+  const ev = f.evidence && f.evidence.length ? `<div class="ev"><p class="ev-label">根拠（あなたのファイルの実物）</p><ol class="lines">${f.evidence.slice(0, 12).map(evHTML).join('')}${f.evidence.length > 12 ? `<li><span class="plain">…ほか ${f.evidence.length - 12} 件</span></li>` : ''}</ol></div>` : '';
+  return `<article class="finding lv-${f.kind}"><header><span class="chip">${L.chip}</span><h3>${esc(f.title)}</h3></header>${ev}<dl><dt>${L.why}</dt><dd>${ic(f.why)}</dd><dt>${L.how}</dt><dd>${ic(f.how)}</dd></dl></article>`;
+}
+function reportText(res, label){
+  const out = [`Firebase 公開前チェック（ブラウザ版・fbcheck v${FBCHECK_VERSION} と同じ判定）`, `対象: ${label}`, `読んだファイル: ${res.count} 件`,
+    res.fb.length ? `Firebase を検出: ${res.fb.slice(0, 3).join(' / ')}` : 'Firebase は見つかりませんでした → ルールの確認は飛ばして、鍵まわりだけ見ます'];
+  for (const k of ['danger', 'warn', 'info']) {
+    const list = res.findings[k];
+    if (!list.length) continue;
+    out.push('', `■ ${LV[k].group}（${list.length}件）`);
+    list.forEach((f, i) => {
+      out.push('', `${i + 1}. ${f.title}`);
+      if (f.evidence && f.evidence.length) { out.push('   根拠（あなたのファイルの実物）:'); f.evidence.forEach(e => out.push('     ' + evText(e))); }
+      out.push(`   ${LV[k].why}: ${f.why}`, `   ${LV[k].how}: ${f.how.replace(/\n/g, ' / ')}`);
+    });
+  }
+  if (res.findings.ok.length) { out.push('', '■ 問題なし'); res.findings.ok.forEach(f => out.push('  ・' + f.title)); }
+  out.push('', '■ 結果', (res.findings.danger.length === 0 && res.findings.warn.length === 0) ? '  この4項目については、危ない状態は見つかりませんでした。' : `  公開前に直すもの: ${res.findings.danger.length}件 / 見ておくもの: ${res.findings.warn.length}件`);
+  out.push('  このツールが見ているのは、実際の漏洩でよく見られる4か所だけです。ここが通っても、全部が安全という意味ではありません。');
+  return out.join('\n');
+}
+
+let current = null;
+function render(res, P, isSample){
+  current = { res, P, isSample };
+  const F = res.findings;
+  $('#tally').innerHTML = `<div class="t-danger"><b>${F.danger.length}</b><span>公開前に直すもの</span></div><div class="t-warn"><b>${F.warn.length}</b><span>見ておくもの</span></div><div class="t-calm"><b>${F.info.length}</b><span>直さなくていいもの</span></div>`;
+  const meta = [];
+  meta.push(`<li>読んだファイル <b>${res.count}件</b>${P.total > res.count ? `（フォルダ内 ${P.total}件のうち、設定・コード・配布物だけ）` : ''}</li>`);
+  meta.push(res.fb.length ? `<li>Firebase を検出 <b>${esc(res.fb.slice(0, 3).join(' / '))}</b></li>` : '<li>Firebase は見つかりませんでした。ルールの項目は判定せず、鍵まわりだけ見ています。</li>');
+  if (!isSample) meta.push(`<li>隠しファイル <b>.gitignore ${P.sawGitignore ? 'あり' : '見当たらない'} ・ .env ${P.sawEnv ? 'あり' : '見当たらない'}</b>${(!P.sawGitignore || !P.sawEnv) ? '（無いのか、渡されていないのかは区別できません。フォルダごとドロップすると読めます）' : ''}</li>`);
+  $('#meta').innerHTML = meta.join('');
+  const groups = [];
+  for (const k of ['danger', 'warn', 'info']) {
+    if (!F[k].length) continue;
+    groups.push(`<div class="group"><h2>${LV[k].group}<span class="n">${F[k].length}件</span></h2>${F[k].map(findingHTML).join('')}</div>`);
+  }
+  if (F.ok.length) groups.push(`<div class="group"><h2>問題なし</h2><ul class="ok-list">${F.ok.map(f => `<li>${esc(f.title)}</li>`).join('')}</ul></div>`);
+  if (!F.danger.length && !F.warn.length) groups.unshift('<div class="group"><h2>この4項目については、危ない状態は見つかりませんでした</h2><p class="intake-note">ここが通っても、アプリ全体が安全という意味ではありません。下の「このツールが見ていないこと」も読んでください。</p></div>');
+  $('#report').innerHTML = groups.join('');
+  const label = isSample ? '見本（架空のプロジェクト my-app）' : (P.root || '選んだファイル');
+  $('#reportText').value = reportText(res, label);
+  const pill = $('#statusPill');
+  if (isSample) {
+    pill.textContent = '見本'; pill.className = 'pill';
+    $('#statusText').textContent = '架空のプロジェクトで表示しています。フォルダを入れると、あなたのプロジェクトの結果に変わります。';
+    $('#againBtn').hidden = true;
+  } else {
+    pill.textContent = 'あなたのプロジェクト'; pill.className = 'pill mine';
+    $('#statusText').textContent = `${P.root ? P.root + ' を' : ''}チェックしました。`;
+    $('#againBtn').hidden = false;
+  }
+}
+function setError(msg){
+  const pill = $('#statusPill');
+  pill.textContent = '読めませんでした'; pill.className = 'pill err';
+  $('#statusText').textContent = msg;
+}
+
+/* ---------- 見本（架空のプロジェクトを実際に判定して作る） ---------- */
+async function sample(){
+  const k1 = ['sk', 'proj', 'EXAMPLEONLYnotarealkey0000example9QxA'].join('-');
+  const files = {
+    'my-app/firebase.json': '{\n  "firestore": { "rules": "firestore.rules" }\n}\n',
+    'my-app/firestore.rules': "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /posts/{postId} {\n      allow read: if true;\n      allow write: if true;\n    }\n    match /users/{userId} {\n      allow read, write: if request.auth != null;\n    }\n  }\n}\n",
+    'my-app/storage.rules': "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write: if request.time < timestamp.date(2026, 7, 1);\n    }\n  }\n}\n",
+    'my-app/.gitignore': 'node_modules\ndist\n',
+    'my-app/.env': 'VITE_FIREBASE_API_KEY=AIzaExample\nOPENAI_API_KEY=example\n',
+    'my-app/dist/assets/index-9c1e.js': `const r=await fetch("https://api.openai.com/v1/chat/completions",{headers:{Authorization:"Bearer ${k1}"}});\n`,
+    'my-app/src/firebase.ts': 'import { initializeApp } from "firebase/app";\nconst firebaseConfig = {\n  apiKey: "AIzaSyEXAMPLE-only-not-a-real-key0",\n  authDomain: "my-app.firebaseapp.com",\n};\nexport const app = initializeApp(firebaseConfig);\n',
+    'my-app/package.json': '{\n  "name": "my-app",\n  "dependencies": { "firebase": "^11.0.0" }\n}\n',
+  };
+  const items = Object.entries(files).map(([path, text]) => ({ path, file: new File([text], path.split('/').pop()) }));
+  const P = await buildProject(items);
+  return { res: runChecks(P), P };
+}
+
+/* ---------- 読み込み ---------- */
+function showProgress(i, n){
+  $('#progress').hidden = false;
+  const r = n ? i / n : 0;
+  $('#progressBar').style.width = Math.round(r * 100) + '%';
+  $('#progressText').textContent = `読み込み中　${i} / ${n} ファイル`;
+}
+let busy = false;
+async function handleItems(items){
+  if (busy) return;
+  if (!items.length) { setError('ファイルが見つかりませんでした。プロジェクトのフォルダをドロップしてください。'); return; }
+  busy = true;
+  try {
+    const P = await buildProject(items, showProgress);
+    if (!P.files.length && !P.sawGitignore) { setError('設定やコードのファイルが見つかりませんでした。プロジェクトのフォルダごと渡してください。'); return; }
+    render(runChecks(P), P, false);
+    document.getElementById('report').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    setError('読み込みの途中で止まりました：' + (e && e.message ? e.message : String(e)));
+  } finally {
+    busy = false;
+    $('#progress').hidden = true;
+  }
+}
+async function collectEntries(entries){
+  const out = [];
+  const walk = async (entry, path) => {
+    if (entry.isFile) {
+      const f = await new Promise((res, rej) => entry.file(res, rej));
+      out.push({ path: path + entry.name, file: f });
+    } else if (entry.isDirectory) {
+      if (SKIP_DIRS.has(entry.name)) return;
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e, path + entry.name + '/');
+      }
+    }
+  };
+  for (const e of entries) await walk(e, '');
+  return out;
+}
+const dz = $('#dropZone');
+let depth = 0;
+document.addEventListener('dragenter', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { depth++; dz.classList.add('over'); } });
+document.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) dz.classList.remove('over'); });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async e => {
+  e.preventDefault(); depth = 0; dz.classList.remove('over');
+  const dt = e.dataTransfer; if (!dt) return;
+  const entries = (dt.items ? [...dt.items] : []).map(it => (it.kind === 'file' && it.webkitGetAsEntry) ? it.webkitGetAsEntry() : null).filter(Boolean);
+  let items;
+  if (entries.length) { try { items = await collectEntries(entries); } catch (err) { items = [...dt.files].map(f => ({ path: f.name, file: f })); } }
+  else items = [...dt.files].map(f => ({ path: f.name, file: f }));
+  handleItems(items);
+});
+$('#dirInput').addEventListener('change', e => {
+  const items = [...e.target.files].map(f => ({ path: f.webkitRelativePath || f.name, file: f }));
+  e.target.value = '';
+  handleItems(items);
+});
+$('#againBtn').addEventListener('click', async () => { const s = await sample(); render(s.res, s.P, true); });
+$('#copyBtn').addEventListener('click', async e => {
+  const btn = e.currentTarget, text = $('#reportText').value;
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'コピーしました'; }
+  catch (err) { $('#textBox').open = true; const ta = $('#reportText'); ta.focus(); ta.select(); btn.textContent = '選択しました。コピーしてください'; }
+  setTimeout(() => { btn.textContent = '結果をテキストでコピー'; }, 2200);
+});
+
+window.__fbcheck = { buildProject, runChecks, reportText, get current(){ return current; } };
+sample().then(s => render(s.res, s.P, true));
+})();
+</script>

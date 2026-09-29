@@ -1,0 +1,1166 @@
+<title>Claude Code 通知表</title>
+<meta name="description" content="Claude Code のログをブラウザの中だけで集計して、通知表にします。ログは外に送信されません。">
+<style>
+/* Layout: 机（ページ）の上に一枚の通知表（紙のカード）を置き、となりに内訳のノートを広げる。
+   紙のカードは画像なので、どちらのテーマでも同じ紙色。机とノートだけがテーマで変わる。 */
+:root{
+  --desk:#E3E9E4;
+  --desk-deep:#D4DDD6;
+  --ink:#1B2723;
+  --muted:#56675F;
+  --rule:#BCC9C1;
+  --sheet:#F4F7F2;
+  --green:#2E6A4E;
+  --green-wash:#D8E6DD;
+  --on-green:#F4F7F2;
+  --shu:#B8352A;
+  --heat-0:#E7EEE9; --heat-1:#C2DBCA; --heat-2:#8CBEA0; --heat-3:#569776; --heat-4:#2E6A4E;
+  --f-mincho:"Hiragino Mincho ProN","Hiragino Mincho Pro","Yu Mincho","YuMincho","Noto Serif JP","Noto Serif CJK JP","IPAexMincho","IPAMincho",serif;
+  --f-gothic:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",system-ui,sans-serif;
+  --f-mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono CJK JP",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --desk:#0F1613; --desk-deep:#17211D; --ink:#E2EAE5; --muted:#9DB0A8; --rule:#2B3934;
+    --sheet:#151F1B; --green:#8BC9A8; --green-wash:#1D2F27; --on-green:#0F1613; --shu:#EF7C6F;
+    --heat-0:#1B2621; --heat-1:#22463A; --heat-2:#2F6C54; --heat-3:#4E9A77; --heat-4:#8BC9A8;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --desk:#0F1613; --desk-deep:#17211D; --ink:#E2EAE5; --muted:#9DB0A8; --rule:#2B3934;
+  --sheet:#151F1B; --green:#8BC9A8; --green-wash:#1D2F27; --on-green:#0F1613; --shu:#EF7C6F;
+  --heat-0:#1B2621; --heat-1:#22463A; --heat-2:#2F6C54; --heat-3:#4E9A77; --heat-4:#8BC9A8;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+img{max-width:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font-family:var(--f-gothic);font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%}
+.page{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px);padding-block:32px 64px}
+
+/* 見出し */
+.masthead{display:grid;gap:10px;max-width:46rem;margin-bottom:28px}
+.eyebrow{margin:0;font-size:12.5px;letter-spacing:.12em;color:var(--green);font-weight:600}
+h1{margin:0;font-family:var(--f-mincho);font-weight:700;font-size:clamp(34px,6vw,56px);line-height:1.15;letter-spacing:.02em;text-wrap:balance}
+.lead{margin:0;color:var(--muted);font-size:15.5px;max-width:40rem}
+
+/* 2カラム */
+.layout{display:grid;grid-template-columns:minmax(0,540px) minmax(0,1fr);gap:clamp(24px,4vw,56px);align-items:start}
+@media (max-width:960px){.layout{grid-template-columns:minmax(0,1fr)}}
+.sheet-col{display:grid;gap:14px;min-width:0}
+
+/* 取り込み */
+.intake{border:1.5px dashed var(--rule);border-radius:10px;padding:16px 18px;background:var(--sheet);display:grid;gap:10px;transition:border-color .15s,background-color .15s}
+.intake.over{border-color:var(--green);background:var(--green-wash)}
+.intake-head{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.intake-title{margin:0;font-weight:700;font-size:15.5px}
+.intake-buttons{display:flex;flex-wrap:wrap;gap:8px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:0 16px;border-radius:999px;border:1.5px solid var(--green);background:transparent;color:var(--green);font:inherit;font-weight:700;font-size:14px;text-decoration:none;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--green-wash)}
+.btn.primary{background:var(--green);color:var(--on-green)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{border-color:var(--rule);color:var(--muted)}
+.btn:focus-visible,.copy:focus-visible,summary:focus-visible,input:focus-visible,textarea:focus-visible{outline:2.5px solid var(--green);outline-offset:2px}
+.howto summary{cursor:pointer;color:var(--muted);font-size:14px}
+.howto ol{margin:10px 0 0;padding-left:1.3em;display:grid;gap:10px;font-size:14px}
+.howto li span{display:block}
+.cmd{display:flex;align-items:center;gap:8px;margin-top:4px;min-width:0}
+.cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;font-family:var(--f-mono);font-size:13px;background:var(--desk);border:1px solid var(--rule);border-radius:6px;padding:6px 10px}
+.copy{flex:none;font:inherit;font-size:12.5px;padding:5px 10px;border-radius:6px;border:1px solid var(--rule);background:var(--sheet);color:var(--ink);cursor:pointer}
+.note{margin:8px 0 0;font-size:13px;color:var(--muted)}
+
+/* 進行とステータス */
+.progress{display:grid;gap:6px}
+.bar{height:6px;border-radius:99px;background:var(--desk-deep);overflow:hidden}
+.bar span{display:block;height:100%;width:0;background:var(--green);transition:width .2s}
+.progress p{margin:0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.status{margin:0;display:flex;gap:10px;align-items:baseline;font-size:13.5px;color:var(--muted)}
+.pill{flex:none;font-size:12px;font-weight:700;letter-spacing:.06em;padding:2px 10px;border-radius:99px;border:1.5px solid var(--shu);color:var(--shu)}
+.pill.mine{border-color:var(--green);color:var(--green)}
+.pill.err{border-color:var(--shu);background:var(--shu);color:var(--on-green)}
+
+/* カード（紙） */
+.card{margin:0;position:relative}
+.card img{display:block;width:100%;height:auto;border-radius:3px;box-shadow:0 1px 2px rgba(20,40,30,.18),0 12px 32px -12px rgba(20,40,30,.35)}
+.fields{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:14px}
+.fields label{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.fields input{font:inherit;color:var(--ink);background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:6px 10px;min-width:0}
+#nameInput{width:11em}
+#rateInput{width:5.5em;font-variant-numeric:tabular-nums}
+.share{display:flex;flex-wrap:wrap;gap:8px}
+.hint{margin:0;font-size:13px;color:var(--muted)}
+.share-text{width:100%;font:inherit;font-size:14px;line-height:1.7;color:var(--ink);background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:10px 12px;resize:vertical}
+
+/* 内訳（ノート） */
+.notes{display:grid;gap:34px;min-width:0}
+.sec{display:grid;gap:12px;min-width:0;padding-top:18px;border-top:1.5px solid var(--ink)}
+.sec header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-mincho);font-weight:700;font-size:13px;letter-spacing:.2em;color:var(--on-green);background:var(--green);padding:1px 8px 1px 10px;border-radius:2px}
+.sec h2{margin:0;font-family:var(--f-mincho);font-size:22px;font-weight:700;line-height:1.3;text-wrap:balance}
+.sec .aside{margin-left:auto;font-size:13px;color:var(--muted)}
+.fine{margin:0;font-size:12.5px;color:var(--muted)}
+.big-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+.big-line .usd{font-family:var(--f-mincho);font-weight:700;font-size:clamp(34px,5vw,46px);line-height:1;font-variant-numeric:tabular-nums}
+.big-line .jpy{font-size:17px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.table-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--rule)}
+th:first-child,td:first-child{text-align:left}
+thead th{font-weight:600;color:var(--muted);font-size:12.5px;background:var(--desk)}
+tfoot td{font-weight:700;border-bottom:0}
+.est{font-size:11px;color:var(--shu);margin-left:4px}
+.bars{display:grid;gap:7px;margin:0;padding:0;list-style:none}
+.bars li{display:grid;grid-template-columns:minmax(0,9.5em) minmax(0,1fr) 4.2em;align-items:center;gap:10px;font-size:13.5px}
+.bars .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bars .name code{font-family:var(--f-mono);font-size:13px}
+.bars .track{height:10px;background:var(--desk-deep);border-radius:2px;overflow:hidden}
+.bars .fill{display:block;height:100%;background:var(--green)}
+.bars .n{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.heat{display:grid;gap:8px;min-width:0}
+.heat-grid{display:grid;grid-template-columns:1.6em repeat(24,minmax(0,1fr));gap:2px;align-items:center}
+.heat-grid .d{font-size:11.5px;color:var(--muted);text-align:left}
+.heat-grid .c{aspect-ratio:1;border-radius:2px;background:var(--heat-0)}
+.heat-grid .l1{background:var(--heat-1)} .heat-grid .l2{background:var(--heat-2)} .heat-grid .l3{background:var(--heat-3)} .heat-grid .l4{background:var(--heat-4)}
+.heat-grid .h{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.words{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:18px}
+.words h3{margin:0 0 6px;font-size:13.5px;font-weight:700;color:var(--muted)}
+.rows{margin:0;padding:0;list-style:none;display:grid}
+.rows li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dotted var(--rule);font-size:14px}
+.rows li b{font-variant-numeric:tabular-nums;font-weight:700}
+.rows li small{color:var(--muted);font-size:12px}
+
+.colophon{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);display:grid;gap:8px;font-size:13px;color:var(--muted);max-width:46rem}
+.colophon p{margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">ブラウザの中だけで集計 ・ 通信ゼロ ・ 無料</p>
+    <h1>Claude Code 通知表</h1>
+    <p class="lead">Claude Code が手元に残しているログを、このページに落とすだけ。「おっしゃる通りです」と言われた回数、謝られた回数、API のトークン料金に換算した金額までを、通知表にして返します。</p>
+  </header>
+
+  <main class="layout">
+    <section class="sheet-col" aria-label="通知表">
+      <div class="intake" id="dropZone">
+        <div class="intake-head">
+          <p class="intake-title">ログのフォルダを、ここにドロップ</p>
+          <div class="intake-buttons">
+            <label class="btn primary" for="dirInput">フォルダを選ぶ</label>
+            <label class="btn" for="fileInput">ファイルを選ぶ</label>
+          </div>
+          <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
+          <input type="file" id="fileInput" accept=".jsonl" multiple hidden>
+        </div>
+        <details class="howto" id="howto">
+          <summary>ログの場所と開き方</summary>
+          <ol>
+            <li><span>Mac は「ターミナル」に貼って Enter。ログのフォルダが Finder で開きます。</span>
+              <span class="cmd"><code id="cmdMac">open ~/.claude/projects</code><button type="button" class="copy" data-copy="cmdMac">コピー</button></span></li>
+            <li><span>Windows はエクスプローラーのアドレス欄に貼って Enter。</span>
+              <span class="cmd"><code id="cmdWin">%USERPROFILE%\.claude\projects</code><button type="button" class="copy" data-copy="cmdWin">コピー</button></span></li>
+            <li><span>開いたフォルダの中身をすべて選んで（⌘A か Ctrl+A）、このページにドラッグします。「フォルダを選ぶ」で projects フォルダを指定しても読めます。</span></li>
+          </ol>
+          <p class="note">Claude Code は古いログを自動で消します（初期設定は30日）。通知表の期間は、手元に残っている分です。設定を変えている場合は ~/.config/claude/projects にあることもあります。</p>
+        </details>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><span id="progressBar"></span></div>
+        <p id="progressText">読み込み中</p>
+      </div>
+
+      <p class="status" aria-live="polite"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のデータで表示しています。ログを入れると、あなたの通知表に変わります。</span></p>
+
+      <figure class="card">
+        <img id="cardImg" width="1080" height="1350" alt="通知表の画像">
+      </figure>
+
+      <div class="fields">
+        <label for="nameInput">氏名<input id="nameInput" type="text" maxlength="14" placeholder="あなた" autocomplete="off"></label>
+        <label for="rateInput">1ドル<input id="rateInput" type="number" min="1" max="1000" step="0.1" value="158" inputmode="decimal">円</label>
+      </div>
+      <div class="share">
+        <a class="btn primary" id="xLink" href="https://x.com/intent/tweet" target="_blank" rel="noopener">Xに投稿する</a>
+        <button type="button" class="btn" id="copyText">投稿文をコピー</button>
+        <button type="button" class="btn" id="saveImg" hidden>画像を保存</button>
+        <button type="button" class="btn ghost" id="resetBtn" hidden>見本に戻す</button>
+      </div>
+      <p class="hint" id="saveHint">画像は長押し（スマホ）か右クリック（PC）で保存できます。Xには画像を添えて投稿してください。</p>
+      <textarea id="shareText" class="share-text" rows="7" aria-label="投稿文"></textarea>
+    </section>
+
+    <section class="notes" id="details" aria-label="内訳"></section>
+  </main>
+
+  <footer class="colophon">
+    <p>ファイルはブラウザの中で1行ずつ読み、数えた結果だけを画面に出します。このページはサーバーと通信しません。</p>
+    <p>APIトークン料金換算は、Anthropic が公開している API 料金表（2026年9月29日時点）のトークン単価で計算した目安です。Web検索などのサーバー側ツールの料金は含みません。Pro や Max などの定額プランで使っている場合、実際の請求額とは違います。</p>
+    <p>ログには同じ応答が複数行に分かれて記録されるため、応答のIDで重複を除いてから数えています。</p>
+    <p>個人が作った非公式のツールです。Anthropic 社とは関係ありません。</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const STANDALONE = window.__STANDALONE__ === true;
+const TOOL_URL = typeof window.__TOOL_URL__ === 'string' ? window.__TOOL_URL__ : '';
+
+/* ---------- 表示の小道具 ---------- */
+const fmt = n => Math.round(n || 0).toLocaleString('ja-JP');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct = r => Math.round((r || 0) * 100) + '%';
+function big(n){
+  n = n || 0;
+  if (n >= 1e8) return (n / 1e8).toFixed(n >= 1e10 ? 0 : 1).replace(/\.0$/, '') + '億';
+  if (n >= 1e4) return (n / 1e4).toFixed(n >= 1e6 ? 0 : 1).replace(/\.0$/, '') + '万';
+  return fmt(n);
+}
+function usd(n){ n = n || 0; return '$' + (n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2)); }
+function yen(n){ n = n || 0; return n >= 1e4 ? '約' + (n / 1e4).toFixed(n >= 1e6 ? 0 : 1).replace(/\.0$/, '') + '万円' : '約' + fmt(n) + '円'; }
+
+/* ---------- API料金表（USD / 100万トークン）----------
+   出典: platform.claude.com/docs/en/about-claude/pricing（2026-09-29 取得）
+   [モデルID, 入力, キャッシュ作成5分, キャッシュ作成1時間, キャッシュ読込, 出力] */
+const PRICES = [
+  ['claude-fable-5-1', 10, 12.5, 20, 0.25, 50],
+  ['claude-mythos-5-1', 10, 12.5, 20, 0.25, 50],
+  ['claude-fable-5', 10, 12.5, 20, 1, 50],
+  ['claude-mythos-5', 10, 12.5, 20, 1, 50],
+  ['claude-opus-5-5', 4, 5, 8, 0.2, 20],
+  ['claude-opus-5', 5, 6.25, 10, 0.5, 25],
+  ['claude-opus-4-8', 5, 6.25, 10, 0.5, 25],
+  ['claude-opus-4-7', 5, 6.25, 10, 0.5, 25],
+  ['claude-opus-4-6', 5, 6.25, 10, 0.5, 25],
+  ['claude-opus-4-5', 5, 6.25, 10, 0.5, 25],
+  ['claude-opus-4-1', 15, 18.75, 30, 1.5, 75],
+  ['claude-opus-4', 15, 18.75, 30, 1.5, 75],
+  ['claude-sonnet-5-5', 2, 2.5, 4, 0.2, 10],
+  ['claude-sonnet-5', 2, 2.5, 4, 0.2, 10],
+  ['claude-sonnet-4-6', 3, 3.75, 6, 0.3, 15],
+  ['claude-sonnet-4-5', 3, 3.75, 6, 0.3, 15],
+  ['claude-sonnet-4', 3, 3.75, 6, 0.3, 15],
+  ['claude-haiku-4-5', 1, 1.25, 2, 0.1, 5],
+  ['claude-haiku-3-5', 0.8, 1, 1.6, 0.08, 4],
+  ['claude-3-7-sonnet', 3, 3.75, 6, 0.3, 15],
+  ['claude-3-5-sonnet', 3, 3.75, 6, 0.3, 15],
+  ['claude-3-5-haiku', 0.8, 1, 1.6, 0.08, 4],
+  ['claude-3-opus', 15, 18.75, 30, 1.5, 75],
+  ['claude-3-haiku', 0.25, 0.3, 0.5, 0.03, 1.25],
+];
+const FAMILY_FALLBACK = [['fable', 'claude-fable-5-1'], ['mythos', 'claude-mythos-5-1'], ['opus', 'claude-opus-5-5'], ['sonnet', 'claude-sonnet-5-5'], ['haiku', 'claude-haiku-4-5']];
+const PRICE_BY_ID = new Map(PRICES.map(p => [p[0], p]));
+function priceFor(model){
+  const m = String(model).toLowerCase();
+  let best = null;
+  for (const p of PRICES) if (m.startsWith(p[0]) && (!best || p[0].length > best[0].length)) best = p;
+  if (best) return { p: best, estimated: false };
+  for (const [fam, id] of FAMILY_FALLBACK) if (m.includes(fam)) return { p: PRICE_BY_ID.get(id), estimated: true };
+  return { p: null, estimated: true };
+}
+function modelLabel(model){
+  const m = String(model).toLowerCase().replace(/-\d{8}$/, '');
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  let r = /^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?/.exec(m);
+  if (r) return cap(r[1]) + ' ' + r[2] + (r[3] ? '.' + r[3] : '');
+  r = /^claude-(\d+)(?:-(\d+))?-(opus|sonnet|haiku)/.exec(m);
+  if (r) return cap(r[3]) + ' ' + r[1] + (r[2] ? '.' + r[2] : '');
+  return String(model);
+}
+
+/* ---------- 教科（道具の分類） ---------- */
+const SUBJECTS = [
+  { key: 'read',   label: '読解',     sub: 'Read',        match: n => n === 'Read' || n === 'NotebookRead' },
+  { key: 'write',  label: '作文',     sub: 'Write',       match: n => n === 'Write' },
+  { key: 'edit',   label: '添削',     sub: 'Edit',        match: n => n === 'Edit' || n === 'MultiEdit' || n === 'NotebookEdit' },
+  { key: 'bash',   label: '実技',     sub: 'Bash',        match: n => n === 'Bash' || n === 'BashOutput' || n === 'KillShell' || n === 'KillBash' },
+  { key: 'search', label: '探究',     sub: 'Grep・Glob',  match: n => n === 'Grep' || n === 'Glob' || n === 'LS' },
+  { key: 'web',    label: '調べ学習', sub: 'Web',         match: n => n === 'WebSearch' || n === 'WebFetch' },
+  { key: 'todo',   label: '段取り',   sub: 'ToDo',        match: n => n === 'TodoWrite' || n === 'TodoRead' || /^Task(Create|Update|List|Get)$/.test(n) },
+  { key: 'agent',  label: '委員会',   sub: 'サブエージェント', match: n => n === 'Task' || n === 'Agent' },
+  { key: 'mcp',    label: '課外活動', sub: 'MCP',         match: n => n.startsWith('mcp__') },
+];
+function grade(n){ if (n <= 0) return 0; if (n < 20) return 1; if (n < 100) return 2; if (n < 400) return 3; if (n < 1500) return 4; return 5; }
+
+/* ---------- 言い回しの検出 ---------- */
+const RX = {
+  ossha: /おっしゃる(通り|とおり)|仰る(通り|とおり)|ご指摘の(通り|とおり)|you['’]re (absolutely |completely |totally )?(right|correct)/i,
+  shazai: /申し訳(ありません|ございません|ない|なかった)|すみません|失礼(しました|いたしました)|お詫び|I apologi[sz]e|my apologies|sorry (about|for)/i,
+  kanpeki: /完璧(です|でした|に|な|！|!|。)|perfect[!.]/i,
+  shouchi: /承知(しました|いたしました)|かしこまりました|了解(しました|です)/,
+  chigau: /違う|ちがう|違います|ちがいます|違くて|そうじゃな|そうではな|そういうことじゃな/,
+  arigato: /ありがと|有難う|有り難う|助かった|助かります|助かる|感謝|thanks|thank you|\bthx\b/i,
+  tsuzukete: /^(続けて|つづけて|続き|続行|進めて|すすめて|continue|go on|go ahead|keep going)(ください|下さい|お願い(します)?)?[。．.!！\s]*$/i,
+  naze: /なんで|なぜ|何故|どうして/,
+  modoshite: /戻して|元に戻|もとに戻|もどして|revert|ロールバック|取り消して|やり直し|やりなおし/i,
+  ultrathink: /ultrathink|think harder|think hard|megathink/i,
+  yoshinani: /よしなに|いい感じに|いいかんじに|良い感じに|よい感じに|うまいこと|うまく(やって|して)/,
+  error: /error|エラー|exception|traceback|failed|失敗/i,
+  ugokanai: /動かない|動きません|うごかない|直らない|治らない|直ってない|治ってない|変わってない|変わらない/,
+  onegai: /お願い|おねがい|please|ください|下さい/i,
+  polite: /です|ます|ください|下さい|お願い|でしょうか/,
+  limit: /limit reached|usage limit|hit your limit|rate limit|上限/i,
+  apiError: /API Error|overloaded|Prompt is too long/i,
+};
+const REJECT_MARK = "doesn't want to proceed with this tool use";
+const COMPACT_MARK = 'This session is being continued from a previous conversation';
+const TURN_CAP_MS = 2 * 3600 * 1000;
+const WRAPPER_RX = /^<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|bash-input|bash-stdout|bash-stderr|system-reminder|user-memory-input)>/;
+const SKIP_DIRS = new Set(['node_modules', '.git', 'plugins', 'shell-snapshots', 'statsig', 'todos', 'debug', 'file-history', 'session-env', 'backups', 'ide']);
+
+/* ---------- 集計 ---------- */
+function newStats(){
+  return {
+    files: 0, lines: 0, bad: 0,
+    prompts: 0, promptChars: 0, longestPrompt: 0, images: 0,
+    days: new Map(), hours: new Array(24).fill(0), heat: Array.from({ length: 7 }, () => new Array(24).fill(0)),
+    sessions: new Map(), projects: new Map(),
+    interrupts: 0, rejects: 0, compacts: 0, limitHits: 0, apiErrors: 0, polite: 0, sess: new Map(),
+    you: { chigau: 0, arigato: 0, tsuzukete: 0, naze: 0, modoshite: 0, ultrathink: 0, yoshinani: 0, error: 0, ugokanai: 0, onegai: 0 },
+    claude: { ossha: 0, shazai: 0, kanpeki: 0, shouchi: 0, texts: 0 },
+    tools: new Map(), bash: new Map(), exts: new Map(), slash: new Map(),
+    req: new Map(), seenUuid: new Set(),
+  };
+}
+const inc = (map, k, n = 1) => map.set(k, (map.get(k) || 0) + n);
+function sessOf(st, o, path){ const sid = typeof o.sessionId === 'string' ? o.sessionId : path; let b = st.sess.get(sid); if (!b) { b = { h: [], a: [] }; st.sess.set(sid, b); } return b; }
+const num = v => (typeof v === 'number' && isFinite(v) && v > 0) ? v : 0;
+const pad2 = n => String(n).padStart(2, '0');
+const dateKey = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+
+function handleLine(line, st, path){
+  st.lines++;
+  if (line.length < 30) return;
+  if (line.indexOf('"type":"assistant"') < 0 && line.indexOf('"type":"user"') < 0 &&
+      line.indexOf('"type": "assistant"') < 0 && line.indexOf('"type": "user"') < 0) return;
+  let o;
+  try { o = JSON.parse(line); } catch (e) { st.bad++; return; }
+  if (!o || typeof o !== 'object') return;
+  if (o.type !== 'user' && o.type !== 'assistant') return;
+  if (typeof o.uuid === 'string') { if (st.seenUuid.has(o.uuid)) return; st.seenUuid.add(o.uuid); }
+  const ts = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
+  if (o.type === 'assistant') onAssistant(o, st, ts, path); else onUser(o, st, ts, path);
+}
+
+function onAssistant(o, st, ts, path){
+  const m = o.message;
+  if (!m || typeof m !== 'object') return;
+  const model = typeof m.model === 'string' ? m.model : '';
+  const synthetic = model === '<synthetic>' || o.isApiErrorMessage === true;
+  if (Number.isFinite(ts) && !synthetic) sessOf(st, o, path).a.push(ts);
+  if (synthetic) {
+    const tx = Array.isArray(m.content) ? m.content.map(b => (b && typeof b.text === 'string') ? b.text : '').join(' ') : (typeof m.content === 'string' ? m.content : '');
+    if (RX.limit.test(tx)) st.limitHits++;
+    else if (o.isApiErrorMessage === true || RX.apiError.test(tx)) st.apiErrors++;
+  }
+  const u = m.usage;
+  if (u && typeof u === 'object' && model && model !== '<synthetic>') {
+    // 1つの応答がブロックごとに別の行へ分かれ、同じ usage が何度も書かれる。応答ID＋リクエストIDで1回に畳む。
+    const key = (m.id || '') + '|' + (o.requestId || '');
+    const cc = u.cache_creation && typeof u.cache_creation === 'object' ? u.cache_creation : null;
+    let cw5 = 0, cw1h = 0;
+    const cw = num(u.cache_creation_input_tokens);
+    if (cc && num(cc.ephemeral_5m_input_tokens) + num(cc.ephemeral_1h_input_tokens) > 0) { cw5 = num(cc.ephemeral_5m_input_tokens); cw1h = num(cc.ephemeral_1h_input_tokens); }
+    else cw5 = cw;
+    const rec = { model, in: num(u.input_tokens), cw5, cw1h, cr: num(u.cache_read_input_tokens), out: num(u.output_tokens) };
+    const k = key === '|' ? 'line:' + (o.uuid || st.lines) : key;
+    const prev = st.req.get(k);
+    if (!prev) st.req.set(k, rec);
+    else for (const f of ['in', 'cw5', 'cw1h', 'cr', 'out']) if (rec[f] > prev[f]) prev[f] = rec[f];
+  }
+  const c = m.content;
+  if (!Array.isArray(c)) return;
+  const side = o.isSidechain === true;
+  for (const b of c) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type === 'tool_use') countTool(st, b);
+    else if (b.type === 'text' && !side && typeof b.text === 'string') countClaudeText(st, b.text);
+  }
+}
+
+function countTool(st, b){
+  const name = typeof b.name === 'string' && b.name ? b.name : 'unknown';
+  inc(st.tools, name);
+  const inp = b.input && typeof b.input === 'object' ? b.input : {};
+  if (name === 'Bash' && typeof inp.command === 'string') countBash(st, inp.command);
+  if (name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'NotebookEdit') {
+    const p = inp.file_path || inp.notebook_path || inp.path;
+    if (typeof p === 'string') { const e = extOf(p); if (e) inc(st.exts, e); }
+  }
+}
+function countBash(st, cmd){
+  const first = cmd.split('\n')[0];
+  for (let s of first.split(/&&|\|\||;|\|/)) {
+    s = s.trim();
+    if (!s || s.startsWith('#')) continue;
+    const t = s.split(/\s+/);
+    let i = 0;
+    while (i < t.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t[i])) i++;
+    while (i < t.length && /^(sudo|time|nohup|env|command|exec)$/.test(t[i])) i++;
+    let w = t[i];
+    if (!w) continue;
+    w = w.replace(/^[("'`]+|[)"'`]+$/g, '');
+    if (w.includes('/')) w = w.split('/').pop();
+    if (!w || w.length > 24 || !/^[\w.+-]+$/.test(w)) continue;
+    inc(st.bash, w);
+  }
+}
+function extOf(p){
+  const base = p.split(/[\\/]/).pop() || '';
+  const m = /\.([A-Za-z0-9]{1,8})$/.exec(base);
+  if (m) return m[1].toLowerCase();
+  if (/^(Dockerfile|Makefile|Gemfile|Procfile)$/.test(base)) return base;
+  return '';
+}
+function countClaudeText(st, t){
+  const c = st.claude;
+  c.texts++;
+  if (RX.ossha.test(t)) c.ossha++;
+  if (RX.shazai.test(t)) c.shazai++;
+  if (RX.kanpeki.test(t)) c.kanpeki++;
+  if (RX.shouchi.test(t)) c.shouchi++;
+}
+function toolResultText(content){
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map(x => (x && typeof x.text === 'string') ? x.text : '').join('');
+  return '';
+}
+
+function onUser(o, st, ts, path){
+  const m = o.message;
+  if (!m || typeof m !== 'object') return;
+  const c = m.content;
+  let text = '', hasText = false, imgs = 0, hadResult = false;
+  if (typeof c === 'string') { text = c; hasText = true; }
+  else if (Array.isArray(c)) {
+    for (const b of c) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.type === 'tool_result') { hadResult = true; if (toolResultText(b.content).indexOf(REJECT_MARK) >= 0) st.rejects++; }
+      else if (b.type === 'text' && typeof b.text === 'string') { text += (hasText ? '\n' : '') + b.text; hasText = true; }
+      else if (b.type === 'image') imgs++;
+    }
+  }
+  if (hadResult && Number.isFinite(ts)) sessOf(st, o, path).a.push(ts);
+  if (!hasText && !imgs) return;
+  if (o.isSidechain !== true && (o.isCompactSummary === true || text.trimStart().startsWith(COMPACT_MARK))) { st.compacts++; return; }
+  if (o.isSidechain === true || o.isMeta === true || o.isCompactSummary === true) return;
+  if (typeof o.userType === 'string' && o.userType !== 'external') return;
+  const s = text.trimStart();
+  if (s.startsWith('[Request interrupted by user')) { st.interrupts++; return; }
+  if (WRAPPER_RX.test(s)) {
+    const cm = /<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/.exec(s);
+    if (cm) inc(st.slash, '/' + cm[1]);
+    return;
+  }
+  if (s.startsWith('Caveat: The messages below')) return;
+
+  st.prompts++;
+  st.images += imgs;
+  st.promptChars += text.length;
+  if (text.length > st.longestPrompt) st.longestPrompt = text.length;
+  const y = st.you, tt = text.trim();
+  if (RX.chigau.test(text)) y.chigau++;
+  if (RX.arigato.test(text)) y.arigato++;
+  if (RX.tsuzukete.test(tt)) y.tsuzukete++;
+  if (RX.naze.test(text)) y.naze++;
+  if (RX.modoshite.test(text)) y.modoshite++;
+  if (RX.ultrathink.test(text)) y.ultrathink++;
+  if (RX.yoshinani.test(text)) y.yoshinani++;
+  if (RX.error.test(text)) y.error++;
+  if (RX.ugokanai.test(text)) y.ugokanai++;
+  if (RX.onegai.test(text)) y.onegai++;
+  if (RX.polite.test(text)) st.polite++;
+
+  if (Number.isFinite(ts)) {
+    const d = new Date(ts);
+    const h = d.getHours(), wd = (d.getDay() + 6) % 7;
+    st.hours[h]++; st.heat[wd][h]++;
+    const key = dateKey(d);
+    let day = st.days.get(key);
+    if (!day) { day = { p: 0, night: 0 }; st.days.set(key, day); }
+    day.p++; if (h < 5) day.night++;
+    const sid = typeof o.sessionId === 'string' ? o.sessionId : path;
+    let ss = st.sessions.get(sid);
+    if (!ss) { ss = { start: ts, end: ts, prompts: 0 }; st.sessions.set(sid, ss); }
+    if (ts < ss.start) ss.start = ts;
+    if (ts > ss.end) ss.end = ts;
+    ss.prompts++;
+    sessOf(st, o, path).h.push(ts);
+  }
+  const proj = projectName(o.cwd, path);
+  if (proj) inc(st.projects, proj);
+}
+function projectName(cwd, path){
+  if (typeof cwd === 'string' && cwd) { const parts = cwd.split(/[\\/]/).filter(Boolean); return parts[parts.length - 1] || cwd; }
+  const segs = String(path || '').split('/');
+  return segs.length >= 2 ? segs[segs.length - 2] : '';
+}
+
+async function readFile(file, st, onChunk){
+  const path = file._path || file.webkitRelativePath || file.name;
+  if (file.stream && typeof TextDecoderStream !== 'undefined') {
+    const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+    let buf = '', seen = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += value.length;
+      buf += value;
+      const parts = buf.split('\n');
+      buf = parts.pop();
+      for (const line of parts) handleLine(line, st, path);
+      onChunk(Math.min(seen, file.size));
+    }
+    if (buf) handleLine(buf, st, path);
+  } else {
+    const text = await file.text();
+    for (const line of text.split('\n')) handleLine(line, st, path);
+  }
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+async function analyze(files, onProgress){
+  const st = newStats();
+  const total = files.reduce((a, f) => a + f.size, 0) || 1;
+  let doneBytes = 0, lastTick = performance.now();
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    await readFile(f, st, b => {
+      onProgress(i, files.length, (doneBytes + b) / total);
+    });
+    doneBytes += f.size; st.files++;
+    onProgress(i + 1, files.length, doneBytes / total);
+    if (performance.now() - lastTick > 60) { await tick(); lastTick = performance.now(); }
+  }
+  return finalize(st);
+}
+
+function daysBetween(a, b){
+  const [y1, m1, d1] = a.split('-').map(Number), [y2, m2, d2] = b.split('-').map(Number);
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+}
+function topN(map, n){ return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n); }
+
+function finalize(st){
+  const keys = [...st.days.keys()].sort();
+  const R = {
+    sample: false, files: st.files, lines: st.lines, bad: st.bad,
+    prompts: st.prompts, images: st.images, interrupts: st.interrupts, rejects: st.rejects,
+    avgPromptChars: st.prompts ? Math.round(st.promptChars / st.prompts) : 0,
+    longestPrompt: st.longestPrompt,
+    period: keys.length ? { start: keys[0], end: keys[keys.length - 1], days: daysBetween(keys[0], keys[keys.length - 1]) + 1 } : null,
+    activeDays: keys.length,
+    nightDays: [...st.days.values()].filter(d => d.night > 0).length,
+    streak: 0,
+    hours: st.hours, heat: st.heat,
+    sessions: st.sessions.size,
+    longestSessionMin: 0,
+    projectCount: st.projects.size,
+    projectsTop: topN(st.projects, 8),
+    you: { ...st.you }, claude: { ...st.claude },
+    toolsTop: topN(st.tools, 12), bashTop: topN(st.bash, 10), extsTop: topN(st.exts, 8), slashTop: topN(st.slash, 8),
+    toolTotal: [...st.tools.values()].reduce((a, b) => a + b, 0),
+    subjects: [], models: [], usd: 0, tokens: 0,
+  };
+  let run = 0, best = 0;
+  for (let i = 0; i < keys.length; i++) { run = (i > 0 && daysBetween(keys[i - 1], keys[i]) === 1) ? run + 1 : 1; if (run > best) best = run; }
+  R.streak = best;
+  for (const s of st.sessions.values()) { const mins = (s.end - s.start) / 60000; if (mins > R.longestSessionMin) R.longestSessionMin = mins; }
+  R.nightPrompts = st.hours.slice(0, 5).reduce((a, b) => a + b, 0);
+  R.nightRatio = st.prompts ? R.nightPrompts / st.prompts : 0;
+  R.compacts = st.compacts; R.limitHits = st.limitHits; R.apiErrors = st.apiErrors;
+  R.politeRatio = st.prompts ? st.polite / st.prompts : 0;
+  R.workMin = workMinutes(st.sess);
+  R.subjects = SUBJECTS.map(s => { let n = 0; for (const [name, c] of st.tools) if (s.match(name)) n += c; return { key: s.key, label: s.label, sub: s.sub, count: n, grade: grade(n) }; });
+  const byModel = new Map();
+  for (const r of st.req.values()) {
+    let b = byModel.get(r.model);
+    if (!b) { b = { model: r.model, calls: 0, in: 0, cw5: 0, cw1h: 0, cr: 0, out: 0 }; byModel.set(r.model, b); }
+    b.calls++; b.in += r.in; b.cw5 += r.cw5; b.cw1h += r.cw1h; b.cr += r.cr; b.out += r.out;
+  }
+  R.models = [...byModel.values()].map(priceModel).sort((a, b) => b.usd - a.usd);
+  R.usd = R.models.reduce((a, b) => a + b.usd, 0);
+  R.tokens = R.models.reduce((a, b) => a + b.in + b.cw5 + b.cw1h + b.cr + b.out, 0);
+  return R;
+}
+function workMinutes(sess){
+  // 発言してから、次の発言までの間で最後に Claude が動いた時刻まで＝1往復の作業時間（1往復は最大2時間で打ち切り）
+  let ms = 0;
+  for (const b of sess.values()) {
+    if (!b.h.length || !b.a.length) continue;
+    b.h.sort((x, y) => x - y); b.a.sort((x, y) => x - y);
+    for (let i = 0; i < b.h.length; i++) {
+      const start = b.h[i], end = i + 1 < b.h.length ? b.h[i + 1] : Infinity;
+      let lo = 0, hi = b.a.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (b.a[mid] < end) lo = mid + 1; else hi = mid; }
+      const j = lo - 1;
+      if (j >= 0 && b.a[j] > start) ms += Math.min(b.a[j] - start, TURN_CAP_MS);
+    }
+  }
+  return ms / 60000;
+}
+function hoursText(min){ if (min < 60) return Math.round(min) + '分'; const h = min / 60; return (h >= 10 ? Math.round(h) : h.toFixed(1)) + '時間'; }
+function priceModel(b){
+  const { p, estimated } = priceFor(b.model);
+  const cost = p ? (b.in * p[1] + b.cw5 * p[2] + b.cw1h * p[3] + b.cr * p[4] + b.out * p[5]) / 1e6 : 0;
+  return { ...b, label: modelLabel(b.model), usd: cost, estimated, unknown: !p };
+}
+
+/* ---------- 称号と所見 ---------- */
+function judge(R){
+  const p = Math.max(R.prompts, 1);
+  const per100 = n => n * 100 / p;
+  const subj = k => (R.subjects.find(s => s.key === k) || { count: 0 }).count;
+  const toolTotal = Math.max(R.toolTotal || R.subjects.reduce((a, s) => a + s.count, 0), 1);
+  const days = R.period ? R.period.days : 0;
+  const c = [
+    { t: '深夜の常連', s: R.nightRatio / 0.15, line: `深夜0〜5時のやりとりが${pct(R.nightRatio)}。早めに寝ましょう。` },
+    { t: '「おっしゃる通り」製造機', s: per100(R.claude.ossha) / 8, line: `「おっしゃる通りです」を${fmt(R.claude.ossha)}回言わせました。目が確かです。` },
+    { t: '謝らせ名人', s: per100(R.claude.shazai) / 5, line: `Claudeを${fmt(R.claude.shazai)}回謝らせました。遠慮なく言えています。` },
+    { t: 'Esc番長', s: per100(R.interrupts) / 10, line: `Escで${fmt(R.interrupts)}回止めました。見切りが早いです。` },
+    { t: '差し戻し職人', s: per100(R.you.chigau) / 6, line: `「違う」と${fmt(R.you.chigau)}回伝えました。あきらめない粘りがあります。` },
+    { t: '感謝の人', s: per100(R.you.arigato) / 4, line: `「ありがとう」を${fmt(R.you.arigato)}回伝えました。思いやりがあります。` },
+    { t: '「続けて」の人', s: per100(R.you.tsuzukete) / 5, line: `「続けて」だけの返事が${fmt(R.you.tsuzukete)}回。任せ上手です。` },
+    { t: 'よしなに使い', s: per100(R.you.yoshinani) / 1.2, line: `「いい感じに」の頼み方が${fmt(R.you.yoshinani)}回ありました。` },
+    { t: 'ultrathinker', s: per100(R.you.ultrathink) / 2, line: `ultrathinkを${fmt(R.you.ultrathink)}回唱えました。` },
+    { t: 'Bash職人', s: (subj('bash') / toolTotal) / 0.35, line: `実技（Bash）が${fmt(subj('bash'))}回。手を動かすのが得意です。` },
+    { t: '委任の達人', s: per100(subj('agent')) / 10, line: `サブエージェントに${fmt(subj('agent'))}回仕事を任せました。` },
+    { t: 'トークン長者', s: R.usd / 2000, line: `APIのトークン料金に直すと${usd(R.usd)}分でした。` },
+    { t: '皆勤賞', s: days >= 14 ? (R.activeDays / days) / 0.93 : 0, line: `${days}日のうち${R.activeDays}日、登校しました。` },
+    { t: '長話の人', s: per100(R.compacts || 0) / 3, line: `会話の要約（記憶の圧縮）が${fmt(R.compacts)}回。長い会話を続けました。` },
+    { t: '上限との戦い', s: (R.limitHits || 0) / 5, line: `使用上限に${fmt(R.limitHits)}回ぶつかりました。よく使い込んでいます。` },
+    { t: 'ていねいな人', s: R.prompts >= 20 ? (R.politeRatio || 0) / 0.6 : 0, line: `話しかけた${pct(R.politeRatio)}が敬語でした。ていねいです。` },
+    { t: 'タメ口派', s: R.prompts >= 50 ? Math.min(1.5, 0.05 / Math.max(R.politeRatio || 0, 0.01)) : 0, line: `敬語はほとんど使いません（${pct(R.politeRatio)}）。遠慮のない仲です。` },
+    { t: '働かせ上手', s: (R.workMin || 0) / 6000, line: `Claudeを${hoursText(R.workMin || 0)}働かせました。任せるのが上手です。` },
+  ].sort((a, b) => b.s - a.s);
+  let title;
+  if (R.prompts < 20) title = { t: '新入生', s: 1 };
+  else title = c[0].s >= 1 ? c[0] : { t: 'まじめな優等生', s: 1 };
+
+  const lines = [];
+  const d = R.period ? R.period.days : 0;
+  if (R.prompts > 0) lines.push(`${d}日間で${fmt(R.prompts)}回、話しかけました。`);
+  for (const x of c) { if (lines.length >= 3) break; if (x.s >= 0.6) lines.push(x.line); }
+  if (lines.length < 3) {
+    const bestSub = [...R.subjects].sort((a, b) => b.count - a.count)[0];
+    if (bestSub && bestSub.count > 0) lines.push(`得意科目は${bestSub.label}（${bestSub.sub}）です。`);
+  }
+  if (!lines.length) lines.push('これからの成長が楽しみです。');
+  return { title: title.t, comments: lines.slice(0, 3) };
+}
+
+/* ---------- 見本（架空のデータ） ---------- */
+function sampleResult(){
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const heat = Array.from({ length: 7 }, (_, wd) => Array.from({ length: 24 }, (_, h) => {
+    const weekend = wd >= 5;
+    let w = 0;
+    if (h >= 9 && h < 12) w = weekend ? 3 : 2;
+    else if (h >= 13 && h < 18) w = weekend ? 6 : 3;
+    else if (h >= 20 && h < 24) w = 9;
+    else if (h < 3) w = 3;
+    else if (h < 5) w = 1;
+    else if (h >= 18) w = 4;
+    return Math.round(w * (0.55 + rnd() * 0.9));
+  }));
+  const hours = Array.from({ length: 24 }, (_, h) => heat.reduce((a, row) => a + row[h], 0));
+  const sumH = hours.reduce((a, b) => a + b, 0);
+  const prompts = 1284;
+  const scale = prompts / sumH;
+  for (const row of heat) for (let h = 0; h < 24; h++) row[h] = Math.round(row[h] * scale);
+  for (let h = 0; h < 24; h++) hours[h] = heat.reduce((a, row) => a + row[h], 0);
+  const promptsExact = hours.reduce((a, b) => a + b, 0);
+  const tools = [['Read', 4210], ['Bash', 3377], ['Edit', 2904], ['Grep', 902], ['TodoWrite', 812], ['Glob', 604], ['Write', 388], ['mcp__github__create_pull_request', 211], ['mcp__playwright__browser_click', 191], ['WebSearch', 131], ['WebFetch', 83], ['Agent', 57]];
+  const toolMap = new Map(tools);
+  const models = [
+    { model: 'claude-opus-5-5', calls: 9812, in: 3.0e6, cw5: 0, cw1h: 62.0e6, cr: 2100e6, out: 14.0e6 },
+    { model: 'claude-sonnet-5-5', calls: 2104, in: 0.8e6, cw5: 12.0e6, cw1h: 0, cr: 180e6, out: 2.2e6 },
+    { model: 'claude-haiku-4-5', calls: 3011, in: 4.1e6, cw5: 1.2e6, cw1h: 0, cr: 20e6, out: 0.6e6 },
+  ].map(priceModel);
+  const R = {
+    sample: true, files: 214, lines: 186402, bad: 0,
+    prompts: promptsExact, images: 64, interrupts: 173, rejects: 41,
+    avgPromptChars: 86, longestPrompt: 4812,
+    period: { start: '2026-08-31', end: '2026-09-29', days: 30 },
+    activeDays: 26, nightDays: 9, streak: 12,
+    hours, heat, sessions: 96, longestSessionMin: 412,
+    projectCount: 5, projectsTop: [['my-app', 512], ['note-tools', 301], ['blog', 210], ['dotfiles', 88], ['sandbox', 73]],
+    you: { chigau: 97, arigato: 35, tsuzukete: 58, naze: 44, modoshite: 23, ultrathink: 6, yoshinani: 11, error: 131, ugokanai: 39, onegai: 402 },
+    compacts: 38, limitHits: 4, apiErrors: 12, politeRatio: 0.58, workMin: 7560,
+    claude: { ossha: 142, shazai: 61, kanpeki: 88, shouchi: 205, texts: 5200 },
+    toolsTop: tools, bashTop: [['git', 1204], ['npm', 688], ['ls', 402], ['cat', 311], ['python3', 244], ['grep', 198], ['cd', 176], ['npx', 150], ['curl', 97], ['rm', 61]],
+    extsTop: [['ts', 1204], ['tsx', 688], ['md', 402], ['py', 211], ['json', 190], ['css', 97]],
+    slashTop: [['/clear', 48], ['/compact', 21], ['/model', 9], ['/resume', 7]],
+    toolTotal: tools.reduce((a, t) => a + t[1], 0),
+    models, usd: models.reduce((a, b) => a + b.usd, 0),
+    tokens: models.reduce((a, b) => a + b.in + b.cw5 + b.cw1h + b.cr + b.out, 0),
+  };
+  R.subjects = SUBJECTS.map(s => { let n = 0; for (const [name, c] of toolMap) if (s.match(name)) n += c; return { key: s.key, label: s.label, sub: s.sub, count: n, grade: grade(n) }; });
+  R.nightPrompts = hours.slice(0, 5).reduce((a, b) => a + b, 0);
+  R.nightRatio = R.nightPrompts / R.prompts;
+  return R;
+}
+
+/* ---------- カード（Canvas） ---------- */
+const MINCHO = '"Hiragino Mincho ProN","Yu Mincho","YuMincho","Noto Serif JP","Noto Serif CJK JP","IPAexMincho","IPAMincho",serif';
+const GOTHIC = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",sans-serif';
+const P = { paper: '#F2F6EE', fill: '#E0EBE2', line: '#2E6A4E', hair: '#9DBCA9', ink: '#1C2925', sub: '#5A6B64', shu: '#C23A2E', onBand: '#F2F6EE' };
+
+function reiwa(dateStr){
+  const [y, m] = dateStr.split('-').map(Number);
+  const fy = m < 4 ? y - 1 : y;
+  return '令和' + (fy - 2018) + '年度';
+}
+function fitFont(x, text, weight, px, fam, maxW, minPx){
+  let size = px;
+  x.font = `${weight} ${size}px ${fam}`;
+  while (size > (minPx || 10) && x.measureText(text).width > maxW) { size -= 1; x.font = `${weight} ${size}px ${fam}`; }
+  return size;
+}
+function wrapJa(x, text, maxW){
+  const out = [];
+  let line = '';
+  const noStart = '、。，．・：；！？」』）】〕〉》ー々ぁぃぅぇぉっゃゅょァィゥェォッャュョ%';
+  for (const ch of text) {
+    const test = line + ch;
+    if (x.measureText(test).width > maxW && line) {
+      if (noStart.includes(ch)) { out.push(test); line = ''; continue; }
+      out.push(line); line = ch;
+    } else line = test;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+function drawCard(R, name, rate){
+  const W = 1080, H = 1350;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  const J = judge(R);
+
+  x.fillStyle = P.paper; x.fillRect(0, 0, W, H);
+  x.strokeStyle = P.line; x.lineWidth = 3; x.strokeRect(34, 34, W - 68, H - 68);
+  x.lineWidth = 1; x.strokeRect(44, 44, W - 88, H - 88);
+
+  const cellRect = (x0, y0, w, h, fill) => {
+    if (fill) { x.fillStyle = fill; x.fillRect(x0, y0, w, h); }
+    x.strokeStyle = P.hair; x.lineWidth = 1; x.strokeRect(x0 + .5, y0 + .5, w, h);
+  };
+  const text = (s, tx, ty, font, color, align = 'left', base = 'middle') => {
+    x.font = font; x.fillStyle = color; x.textAlign = align; x.textBaseline = base; x.fillText(s, tx, ty);
+  };
+  const band = (x0, y0, w, h, label) => {
+    x.fillStyle = P.line; x.fillRect(x0, y0, w, h);
+    x.font = `700 24px ${MINCHO}`; x.fillStyle = P.onBand; x.textAlign = 'left'; x.textBaseline = 'middle';
+    const spaced = label.split('').join(' ');
+    x.fillText(spaced, x0 + 16, y0 + h / 2 + 1);
+  };
+
+  // 見出し
+  const nendo = R.period ? reiwa(R.period.end) : '令和8年度';
+  text(nendo, 76, 100, `500 26px ${MINCHO}`, P.ink);
+  text('通　知　表', W / 2, 118, `700 76px ${MINCHO}`, P.ink, 'center', 'alphabetic');
+  text('Claude Code 学年', W / 2, 160, `500 22px ${GOTHIC}`, P.sub, 'center');
+
+  // 担任印
+  x.save();
+  x.translate(930, 104); x.rotate(-0.08);
+  x.strokeStyle = P.shu; x.lineWidth = 4; x.beginPath(); x.arc(0, 0, 44, 0, Math.PI * 2); x.stroke();
+  x.lineWidth = 1.5; x.beginPath(); x.arc(0, 0, 38, 0, Math.PI * 2); x.stroke();
+  text('担任', 0, -16, `700 17px ${MINCHO}`, P.shu, 'center');
+  text('AI', 0, 12, `700 30px ${MINCHO}`, P.shu, 'center');
+  x.restore();
+
+  // 氏名・期間
+  const rowY = 196, rowH = 60;
+  cellRect(60, rowY, 110, rowH, P.fill); text('氏　名', 115, rowY + rowH / 2, `600 22px ${MINCHO}`, P.ink, 'center');
+  cellRect(170, rowY, 300, rowH);
+  const nm = (name || '').trim() || 'あなた';
+  const nmSize = fitFont(x, nm, 700, 30, MINCHO, 270, 16);
+  text(nm, 186, rowY + rowH / 2 + 1, `700 ${nmSize}px ${MINCHO}`, P.ink);
+  cellRect(470, rowY, 110, rowH, P.fill); text('期　間', 525, rowY + rowH / 2, `600 22px ${MINCHO}`, P.ink, 'center');
+  cellRect(580, rowY, 440, rowH);
+  const per = R.period ? `${R.period.start.replace(/-/g, '.')} 〜 ${R.period.end.slice(5).replace('-', '.')}（${R.period.days}日）` : '記録なし';
+  const perSize = fitFont(x, per, 600, 24, GOTHIC, 410, 14);
+  text(per, 596, rowY + rowH / 2 + 1, `600 ${perSize}px ${GOTHIC}`, P.ink);
+
+  // 学習の記録
+  const top = 282, bandH = 44, colBottom = 874;
+  const L = { x: 60, w: 464 };
+  band(L.x, top, L.w, bandH, '学習の記録');
+  const hdrY = top + bandH, hdrH = 34;
+  const cA = 206, cB = 150, cC = L.w - cA - cB;
+  cellRect(L.x, hdrY, cA, hdrH, P.fill); cellRect(L.x + cA, hdrY, cB, hdrH, P.fill); cellRect(L.x + cA + cB, hdrY, cC, hdrH, P.fill);
+  text('教科', L.x + 16, hdrY + hdrH / 2 + 1, `600 17px ${GOTHIC}`, P.sub);
+  text('回数', L.x + cA + cB - 16, hdrY + hdrH / 2 + 1, `600 17px ${GOTHIC}`, P.sub, 'right');
+  text('評定', L.x + cA + cB + cC / 2, hdrY + hdrH / 2 + 1, `600 17px ${GOTHIC}`, P.sub, 'center');
+  const rowsTop = hdrY + hdrH, subjH = (colBottom - rowsTop) / R.subjects.length;
+  R.subjects.forEach((s, i) => {
+    const yy = rowsTop + i * subjH;
+    cellRect(L.x, yy, cA, subjH); cellRect(L.x + cA, yy, cB, subjH); cellRect(L.x + cA + cB, yy, cC, subjH);
+    x.font = `700 25px ${MINCHO}`;
+    const lw = x.measureText(s.label).width;
+    text(s.label, L.x + 16, yy + subjH / 2 + 1, `700 25px ${MINCHO}`, P.ink);
+    const subSize = fitFont(x, s.sub, 500, 14, GOTHIC, cA - 32 - lw - 10, 10);
+    text(s.sub, L.x + 16 + lw + 10, yy + subjH / 2 + 3, `500 ${subSize}px ${GOTHIC}`, P.sub);
+    text(fmt(s.count), L.x + cA + cB - 16, yy + subjH / 2 + 1, `600 24px ${GOTHIC}`, P.ink, 'right');
+    text(s.grade ? String(s.grade) : '—', L.x + cA + cB + cC / 2, yy + subjH / 2 + 2, `700 ${s.grade ? 36 : 26}px ${MINCHO}`, s.grade >= 5 ? P.shu : P.ink, 'center');
+  });
+
+  // 出欠の記録・行動の記録
+  const Rt = { x: 544, w: 476 };
+  const labW = 290, valW = Rt.w - labW;
+  const att = [
+    ['Claudeの作業時間', hoursText(R.workMin || 0)],
+    ['出席日数', R.activeDays + '日'],
+    ['深夜登校', R.nightDays + '日'],
+    ['最長連続出席', R.streak + '日'],
+    ['発言回数', fmt(R.prompts) + '回'],
+  ];
+  const beh = [
+    ['「おっしゃる通り」と言わせた', fmt(R.claude.ossha) + '回'],
+    ['Claudeを謝らせた', fmt(R.claude.shazai) + '回'],
+    ['「完璧です」と言われた', fmt(R.claude.kanpeki) + '回'],
+    ['Escで止めた', fmt(R.interrupts) + '回'],
+    ['ツールの実行を断った', fmt(R.rejects) + '回'],
+    ['記憶を要約された', fmt(R.compacts || 0) + '回'],
+    ['「違う」と言った', fmt(R.you.chigau) + '回'],
+    ['「ありがとう」と言った', fmt(R.you.arigato) + '回'],
+  ];
+  const gap = 12;
+  const rightRowH = (colBottom - top - bandH * 2 - gap) / (att.length + beh.length);
+  band(Rt.x, top, Rt.w, bandH, '出欠の記録');
+  let yy = top + bandH;
+  const kvRow = (k, v, y0) => {
+    cellRect(Rt.x, y0, labW, rightRowH, P.fill); cellRect(Rt.x + labW, y0, valW, rightRowH);
+    const ks = fitFont(x, k, 600, 19, GOTHIC, labW - 28, 12);
+    text(k, Rt.x + 14, y0 + rightRowH / 2 + 1, `600 ${ks}px ${GOTHIC}`, P.ink);
+    text(v, Rt.x + Rt.w - 14, y0 + rightRowH / 2 + 1, `600 22px ${GOTHIC}`, P.ink, 'right');
+  };
+  for (const [k, v] of att) { kvRow(k, v, yy); yy += rightRowH; }
+  yy += gap;
+  band(Rt.x, yy, Rt.w, bandH, '行動の記録');
+  yy += bandH;
+  for (const [k, v] of beh) { kvRow(k, v, yy); yy += rightRowH; }
+
+  // APIトークン料金換算
+  const mY = 894, mH = 140;
+  cellRect(60, mY, 960, mH);
+  cellRect(60, mY, 170, mH, P.fill);
+  text('APIトークン', 145, mY + 44, `700 22px ${MINCHO}`, P.ink, 'center');
+  text('料金換算', 145, mY + 76, `700 22px ${MINCHO}`, P.ink, 'center');
+  text('公開単価で計算', 145, mY + 108, `500 13px ${GOTHIC}`, P.sub, 'center');
+  const usdStr = usd(R.usd);
+  const usdSize = fitFont(x, usdStr, 700, 64, MINCHO, 340, 30);
+  text(usdStr, 254, mY + 50, `700 ${usdSize}px ${MINCHO}`, P.ink);
+  text(`${yen(R.usd * rate)} ・ 総トークン ${big(R.tokens)}`, 258, mY + 98, `600 21px ${GOTHIC}`, P.ink);
+  text('トークン料金だけ・定額プランの請求額とは別', 258, mY + 124, `500 15px ${GOTHIC}`, P.sub);
+
+  // 所見
+  const sY = 1052, sH = 204;
+  cellRect(60, sY, 960, sH);
+  cellRect(60, sY, 64, sH, P.fill);
+  x.font = `700 26px ${MINCHO}`; x.fillStyle = P.ink; x.textAlign = 'center'; x.textBaseline = 'middle';
+  ['所', '見'].forEach((ch, i) => x.fillText(ch, 92, sY + sH / 2 - 20 + i * 40));
+  const lineH = 44, textX = 148, textW = 1000 - textX - 24;
+  x.strokeStyle = P.hair; x.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) { const ly = sY + 8 + i * lineH; if (ly < sY + sH - 4) { x.beginPath(); x.moveTo(textX - 6, ly + .5); x.lineTo(1004, ly + .5); x.stroke(); } }
+  x.font = `500 25px ${MINCHO}`;
+  let lines = [];
+  for (const cmt of J.comments) lines = lines.concat(wrapJa(x, cmt, textW));
+  lines = lines.slice(0, 4);
+  lines.forEach((ln, i) => text(ln, textX, sY + 8 + i * lineH + lineH / 2 + 2, `500 25px ${MINCHO}`, P.ink));
+
+  // 称号（朱のはんこ）
+  x.font = `700 30px ${MINCHO}`;
+  const tw = Math.min(x.measureText(J.title).width, 290);
+  const stampW = Math.max(250, tw + 112), stampH = 90;
+  x.save();
+  x.translate(1002 - stampW / 2, mY + mH / 2 + 2); x.rotate(-0.06);
+  x.strokeStyle = P.shu; x.lineWidth = 4; x.strokeRect(-stampW / 2, -stampH / 2, stampW, stampH);
+  x.lineWidth = 1.5; x.strokeRect(-stampW / 2 + 6, -stampH / 2 + 6, stampW - 12, stampH - 12);
+  text('称号', -stampW / 2 + 34, 0, `700 20px ${MINCHO}`, P.shu, 'center');
+  x.beginPath(); x.moveTo(-stampW / 2 + 62, -stampH / 2 + 12); x.lineTo(-stampW / 2 + 62, stampH / 2 - 12); x.stroke();
+  const tSize = fitFont(x, J.title, 700, 30, MINCHO, stampW - 100, 16);
+  text(J.title, 28, 2, `700 ${tSize}px ${MINCHO}`, P.shu, 'center');
+  x.restore();
+
+  // 足元
+  text('Claude Code 通知表 ・ ログは端末の外に出ていません', 64, H - 64, `500 17px ${GOTHIC}`, P.sub);
+  text('#ClaudeCode通知表', W - 64, H - 64, `600 17px ${GOTHIC}`, P.line, 'right');
+
+  if (R.sample) {
+    x.save();
+    x.translate(W / 2, H / 2 + 40); x.rotate(-0.32);
+    x.globalAlpha = 0.14;
+    text('見本', 0, 0, `900 250px ${MINCHO}`, P.shu, 'center');
+    x.restore();
+    x.save();
+    x.translate(76, 138);
+    x.strokeStyle = P.shu; x.lineWidth = 2; x.strokeRect(0, -18, 188, 34);
+    text('見本（架空のデータ）', 94, 0, `700 17px ${GOTHIC}`, P.shu, 'center');
+    x.restore();
+  }
+  return { canvas: cv, title: J.title, comments: J.comments };
+}
+
+/* ---------- 内訳（HTML） ---------- */
+const LANG = { ts: 'TypeScript', tsx: 'TSX', js: 'JavaScript', jsx: 'JSX', mjs: 'JavaScript', cjs: 'JavaScript', py: 'Python', rb: 'Ruby', go: 'Go', rs: 'Rust', swift: 'Swift', kt: 'Kotlin', java: 'Java', php: 'PHP', cs: 'C#', c: 'C', h: 'C/C++ ヘッダ', cpp: 'C++', md: 'Markdown', mdx: 'MDX', json: 'JSON', yml: 'YAML', yaml: 'YAML', toml: 'TOML', css: 'CSS', scss: 'SCSS', html: 'HTML', vue: 'Vue', svelte: 'Svelte', sh: 'シェル', sql: 'SQL', txt: 'テキスト', dart: 'Dart', lua: 'Lua', ex: 'Elixir', gd: 'GDScript' };
+const langOf = e => LANG[e] || ('.' + e);
+const sec = (kicker, title, body, aside) => `<section class="sec"><header><span class="kicker">${kicker}</span><h2>${title}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</header>${body}</section>`;
+function bars(list, code){
+  if (!list || !list.length) return '<p class="fine">まだ記録がありません。</p>';
+  const max = Math.max(...list.map(r => r[1]), 1);
+  return '<ul class="bars">' + list.map(([k, v]) => `<li><span class="name" title="${esc(k)}">${code ? `<code>${esc(k)}</code>` : esc(k)}</span><span class="track"><span class="fill" style="width:${Math.max(2, v / max * 100).toFixed(1)}%"></span></span><span class="n">${fmt(v)}</span></li>`).join('') + '</ul>';
+}
+function toolName(n){ if (n.startsWith('mcp__')) { const parts = n.split('__'); return 'MCP: ' + (parts[1] || '') + (parts[2] ? ' / ' + parts.slice(2).join('__') : ''); } return n; }
+function moneyHTML(R, rate){
+  const rows = R.models.map(m => `<tr><td>${esc(m.label)}${m.estimated ? '<span class="est">推定単価</span>' : ''}</td><td>${fmt(m.calls)}</td><td>${big(m.in)}</td><td>${big(m.cw5 + m.cw1h)}</td><td>${big(m.cr)}</td><td>${big(m.out)}</td><td>${m.unknown ? '—' : usd(m.usd)}</td></tr>`).join('');
+  const t = R.models.reduce((a, m) => { a.calls += m.calls; a.in += m.in; a.cw += m.cw5 + m.cw1h; a.cr += m.cr; a.out += m.out; return a; }, { calls: 0, in: 0, cw: 0, cr: 0, out: 0 });
+  return `<div class="big-line"><span class="usd">${usd(R.usd)}</span><span class="jpy">${yen(R.usd * rate)}</span></div>
+  <div class="table-wrap"><table><thead><tr><th>モデル</th><th>応答</th><th>入力</th><th>書込</th><th>読込</th><th>出力</th><th>金額</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="7">記録がありません</td></tr>'}</tbody>
+  <tfoot><tr><td>合計</td><td>${fmt(t.calls)}</td><td>${big(t.in)}</td><td>${big(t.cw)}</td><td>${big(t.cr)}</td><td>${big(t.out)}</td><td>${usd(R.usd)}</td></tr></tfoot></table></div>
+  <p class="fine">トークンの料金だけを数えています（Web検索などのツール料金は含みません）。書込はキャッシュの作成、読込はキャッシュの読み込み。1ドル＝${rate}円で換算。料金表に無いモデルは、同じ系列の最新モデルの単価で計算し「推定単価」と付けています。バッチ割引や地域指定の上乗せは入れていません。</p>`;
+}
+function heatHTML(R){
+  const days = ['月', '火', '水', '木', '金', '土', '日'];
+  let max = 0, bestV = 0, bestD = 0, bestH = 0;
+  R.heat.forEach((row, d) => row.forEach((v, h) => { if (v > max) max = v; if (v > bestV) { bestV = v; bestD = d; bestH = h; } }));
+  let cells = '';
+  R.heat.forEach((row, d) => {
+    cells += `<span class="d">${days[d]}</span>`;
+    row.forEach((v, h) => { const lv = v === 0 ? 0 : Math.min(4, Math.ceil(v / (max || 1) * 4)); cells += `<span class="c${lv ? ' l' + lv : ''}" title="${days[d]}曜 ${h}時台：${v}回"></span>`; });
+  });
+  cells += '<span></span>' + Array.from({ length: 24 }, (_, h) => `<span class="h">${h % 6 === 0 ? h : ''}</span>`).join('');
+  const summary = R.prompts ? `いちばん多いのは${days[bestD]}曜の${bestH}時台（${fmt(bestV)}回）。深夜0〜5時は全体の${pct(R.nightRatio)}です。` : 'まだ記録がありません。';
+  return `<div class="heat"><div class="heat-grid" role="img" aria-label="曜日と時間帯ごとの発言回数。${esc(summary)}">${cells}</div><p class="fine">${summary}</p></div>`;
+}
+function wordsHTML(R){
+  const li = (k, v, note) => `<li><span>${k}${note ? ` <small>${note}</small>` : ''}</span><b>${fmt(v)}</b></li>`;
+  return `<div class="words">
+    <div><h3>Claude に言われた</h3><ul class="rows">
+      ${li('おっしゃる通り・ご指摘の通り', R.claude.ossha)}
+      ${li('申し訳ありません・すみません', R.claude.shazai)}
+      ${li('完璧です', R.claude.kanpeki)}
+      ${li('承知しました・了解しました', R.claude.shouchi)}
+    </ul><h3 style="margin-top:18px">止まった・忘れた</h3><ul class="rows">
+      ${li('記憶を要約された（会話の圧縮）', R.compacts || 0)}
+      ${li('使用上限に当たった', R.limitHits || 0, '推定')}
+      ${li('APIエラーで止まった', R.apiErrors || 0, '推定')}
+    </ul></div>
+    <div><h3>あなたが言った・した</h3><ul class="rows">
+      ${li('違う・そうじゃない', R.you.chigau)}
+      ${li('なんで・どうして', R.you.naze)}
+      ${li('戻して・やり直し', R.you.modoshite)}
+      ${li('動かない・直らない', R.you.ugokanai)}
+      ${li('エラーを貼った', R.you.error, '推定')}
+      ${li('「続けて」だけ', R.you.tsuzukete)}
+      ${li('いい感じに・よしなに', R.you.yoshinani)}
+      ${li('ありがとう・助かった', R.you.arigato)}
+      ${li('お願いします・ください', R.you.onegai)}
+      ${li('ultrathink', R.you.ultrathink)}
+      <li><span>敬語で話しかけた割合</span><b>${pct(R.politeRatio)}</b></li>
+      ${li('Escで止めた', R.interrupts)}
+      ${li('ツールの実行を断った', R.rejects)}
+    </ul></div>
+  </div><p class="fine">回数は、その言葉を含む発言（Claude 側は文章のまとまり）の数です。</p>`;
+}
+function recordHTML(R){
+  const li = (k, v) => `<li><span>${k}</span><b>${v}</b></li>`;
+  const hrs = R.longestSessionMin >= 60 ? `${Math.floor(R.longestSessionMin / 60)}時間${Math.round(R.longestSessionMin % 60)}分` : `${Math.round(R.longestSessionMin)}分`;
+  return `<div class="words"><div><ul class="rows">
+    ${li('読み込んだファイル', fmt(R.files))}
+    ${li('読んだ行', fmt(R.lines) + (R.bad ? `（読めなかった行 ${fmt(R.bad)}）` : ''))}
+    ${li('会話の数', fmt(R.sessions))}
+    ${li('いちばん長い会話', hrs)}
+    ${li('Claudeの作業時間', hoursText(R.workMin || 0))}
+    ${li('プロジェクト', fmt(R.projectCount))}
+  </ul></div><div><ul class="rows">
+    ${li('発言', fmt(R.prompts) + '回')}
+    ${li('1回の平均', fmt(R.avgPromptChars) + '文字')}
+    ${li('いちばん長い発言', fmt(R.longestPrompt) + '文字')}
+    ${li('貼った画像', fmt(R.images) + '枚')}
+  </ul></div></div>`;
+}
+function renderDetails(R, rate){
+  const html = [
+    sec('お金', 'APIトークン料金換算の内訳', moneyHTML(R, rate)),
+    sec('教科', 'よく使った道具', bars(R.toolsTop.map(([k, v]) => [toolName(k), v]))),
+    sec('時間割', 'いつ話しかけたか', heatHTML(R)),
+    sec('口ぐせ', '言われた回数、言った回数', wordsHTML(R)),
+    sec('実技', 'よく打ったコマンド', bars(R.bashTop, true)),
+    sec('得意分野', '書き換えたファイルの種類', bars(R.extsTop.map(([e, v]) => [langOf(e), v]))),
+    sec('記録', '読み込んだもの', recordHTML(R)),
+    sec('ひみつ', 'プロジェクトとスラッシュコマンド', `<div class="words"><div><h3>よく話しかけたプロジェクト</h3>${bars(R.projectsTop)}</div><div><h3>スラッシュコマンド</h3>${bars(R.slashTop, true)}</div></div><p class="fine">この欄はカードの画像には載りません。</p>`),
+  ].join('');
+  $('#details').innerHTML = html;
+}
+
+/* ---------- 共有 ---------- */
+function shareText(R, title, rate){
+  const lines = [
+    'Claude Code の通知表が出ました',
+    `・「おっしゃる通りです」と言わせた：${fmt(R.claude.ossha)}回`,
+    `・謝らせた：${fmt(R.claude.shazai)}回`,
+    `・Escで止めた：${fmt(R.interrupts)}回`,
+    `・Claudeが働いた時間：${hoursText(R.workMin || 0)}`,
+    `・APIトークン料金換算：${usd(R.usd)}（${yen(R.usd * rate)}）`,
+    `称号は「${title}」でした`,
+    '#ClaudeCode通知表',
+  ];
+  if (TOOL_URL) lines.push(TOOL_URL);
+  return lines.join('\n');
+}
+
+/* ---------- 画面 ---------- */
+let current = sampleResult();
+let lastCanvas = null;
+const nameInput = $('#nameInput'), rateInput = $('#rateInput');
+const rate = () => { const v = parseFloat(rateInput.value); return isFinite(v) && v > 0 ? v : 158; };
+
+function renderCard(){
+  const out = drawCard(current, nameInput.value, rate());
+  lastCanvas = out.canvas;
+  const img = $('#cardImg');
+  img.src = out.canvas.toDataURL('image/png');
+  img.alt = `通知表：称号「${out.title}」。「おっしゃる通り」${fmt(current.claude.ossha)}回、謝らせた${fmt(current.claude.shazai)}回、APIトークン料金換算${usd(current.usd)}。` + (current.sample ? '（見本・架空のデータ）' : '');
+  const txt = shareText(current, out.title, rate());
+  $('#shareText').value = txt;
+  $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent(txt);
+}
+function renderAll(){
+  renderCard();
+  renderDetails(current, rate());
+  const pill = $('#statusPill'), st = $('#statusText');
+  if (current.sample) {
+    pill.textContent = '見本'; pill.className = 'pill';
+    st.textContent = '架空のデータで表示しています。ログを入れると、あなたの通知表に変わります。';
+    $('#resetBtn').hidden = true;
+  } else {
+    pill.textContent = 'あなたのログ'; pill.className = 'pill mine';
+    st.textContent = `${fmt(current.files)}個のファイル、${fmt(current.prompts)}回の発言から作りました。`;
+    $('#resetBtn').hidden = false;
+  }
+}
+function setError(msg){
+  const pill = $('#statusPill');
+  pill.textContent = '読めませんでした'; pill.className = 'pill err';
+  $('#statusText').textContent = msg;
+}
+function showProgress(i, n, ratio){
+  const box = $('#progress');
+  box.hidden = false;
+  $('#progressBar').style.width = Math.round(Math.min(1, ratio) * 100) + '%';
+  $('#progressText').textContent = `読み込み中　${fmt(i)} / ${fmt(n)} ファイル（${Math.round(Math.min(1, ratio) * 100)}%）`;
+}
+
+let busy = false;
+async function handleFiles(list){
+  if (busy) return;
+  const files = [...list].filter(f => /\.jsonl$/i.test(f.name) && !(f.webkitRelativePath || '').split('/').some(seg => SKIP_DIRS.has(seg)));
+  if (!files.length) { setError('JSONL ファイルが見つかりませんでした。~/.claude/projects フォルダか、その中身を選んでください。'); return; }
+  busy = true;
+  showProgress(0, files.length, 0);
+  try {
+    const R = await analyze(files, showProgress);
+    if (!R.prompts && !R.models.length) { setError(`${fmt(files.length)}個のファイルを読みましたが、Claude Code の会話が見つかりませんでした。`); }
+    else { current = R; renderAll(); }
+  } catch (e) {
+    setError('読み込みの途中で止まりました：' + (e && e.message ? e.message : String(e)));
+  } finally {
+    busy = false;
+    $('#progress').hidden = true;
+  }
+}
+
+async function collectEntries(entries){
+  const out = [];
+  const walk = async (entry, path) => {
+    if (entry.isFile) {
+      if (!/\.jsonl$/i.test(entry.name)) return;
+      const f = await new Promise((res, rej) => entry.file(res, rej));
+      try { Object.defineProperty(f, '_path', { value: path + entry.name }); } catch (e) {}
+      out.push(f);
+    } else if (entry.isDirectory) {
+      if (SKIP_DIRS.has(entry.name)) return;
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e, path + entry.name + '/');
+      }
+    }
+  };
+  for (const e of entries) await walk(e, '');
+  return out;
+}
+
+const dz = $('#dropZone');
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { dragDepth++; dz.classList.add('over'); } });
+document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dz.classList.remove('over'); });
+document.addEventListener('dragover', e => { e.preventDefault(); });
+document.addEventListener('drop', async e => {
+  e.preventDefault();
+  dragDepth = 0; dz.classList.remove('over');
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  let files = [];
+  const items = dt.items ? [...dt.items] : [];
+  const entries = items.map(it => (it.kind === 'file' && it.webkitGetAsEntry) ? it.webkitGetAsEntry() : null).filter(Boolean);
+  if (entries.length) {
+    try { files = await collectEntries(entries); } catch (err) { files = [...dt.files]; }
+  } else files = [...dt.files];
+  handleFiles(files);
+});
+$('#dirInput').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+$('#fileInput').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+
+let t1 = 0;
+nameInput.addEventListener('input', () => { clearTimeout(t1); t1 = setTimeout(renderCard, 150); });
+rateInput.addEventListener('input', () => { clearTimeout(t1); t1 = setTimeout(() => { renderCard(); renderDetails(current, rate()); }, 200); });
+$('#resetBtn').addEventListener('click', () => { current = sampleResult(); renderAll(); });
+
+async function copyText(text, btn){
+  const done = () => { const o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(() => { btn.textContent = o; }, 1600); };
+  try { await navigator.clipboard.writeText(text); done(); }
+  catch (e) {
+    const ta = $('#shareText');
+    if (btn.id === 'copyText') { ta.focus(); ta.select(); btn.textContent = '選択しました。コピーしてください'; setTimeout(() => { btn.textContent = '投稿文をコピー'; }, 2400); }
+  }
+}
+$('#copyText').addEventListener('click', e => copyText($('#shareText').value, e.currentTarget));
+$('#shareText').addEventListener('input', () => { $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent($('#shareText').value); });
+document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+  const src = document.getElementById(b.dataset.copy);
+  navigator.clipboard.writeText(src.textContent).then(() => { b.textContent = 'コピー済み'; setTimeout(() => { b.textContent = 'コピー'; }, 1500); })
+    .catch(() => { const r = document.createRange(); r.selectNodeContents(src); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+}));
+
+if (STANDALONE) {
+  const btn = $('#saveImg');
+  btn.hidden = false;
+  $('#saveHint').textContent = '画像を保存して、Xの投稿に添えてください。スマホは画像の長押しでも保存できます。';
+  btn.addEventListener('click', () => {
+    if (!lastCanvas) return;
+    lastCanvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'claude-code-tsuchihyo.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  });
+}
+
+window.__tsuchihyo = { analyze, finalize, newStats, handleLine, judge, priceFor, get current(){ return current; } };
+renderAll();
+})();
+</script>

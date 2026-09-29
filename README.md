@@ -4,7 +4,7 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
 
 | 道具 | 中身 | ソース |
 |---|---|---|
-| Claude Code 通知表 | `~/.claude/projects` のログを集計し、口ぐせ・謝られた回数・作業時間・APIトークン料金の換算・称号を通知表の画像にする | `cc-tsuchihyo/app.html` |
+| Claude Code 通知表 | `~/.claude/projects` のログを集計し、推定作業時間・使った日数・よく使ったツール・APIトークン料金の換算を通知表の画像にする（「ありがとう」などの回数と称号はおまけ） | `cc-tsuchihyo/app.html` |
 | Firebase 公開前チェック | [fbcheck](https://github.com/yuita-Genecraft/fbcheck)（Node版）と同じ判定をブラウザで。フォルダをドロップするだけ | `fbcheck-web/app.html` |
 
 ## 仕組み
@@ -12,7 +12,7 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
 - `*/app.html` は claude.ai の Artifact 用（doctype などの骨格なし）
 - `build_standalone.py` で doctype・CSP・OGP を付けた単体の HTML にする
 - `build_site.py <公開先URL>` で GitHub Pages 用の `docs/` を作る
-- X などのカード画像は `docs/og/*.png`。`og/*.html` を `render_og.py` で撮って作る（通知表のカードは、アプリの見本をその場で描いて使う）
+- X などのカード画像は `docs/og/*.png`。`og/*.html` を `render_og.py` で撮って作る。通知表のカードは `--card` で渡した画像を使う（公開中の画像は作者の実際の通知表）。渡さない時は、アプリの見本をその場で描いて使う
 - CSP は `default-src 'none'; connect-src 'none'` ほか。fetch / XHR / WebSocket はブラウザが止める
 
 ## テスト

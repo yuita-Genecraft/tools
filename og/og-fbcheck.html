@@ -1,0 +1,12 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
+body{margin:0;width:1200px;height:630px;background:#F1F3F6;font-family:"Noto Sans CJK JP",sans-serif;color:#141820;display:flex;flex-direction:column;justify-content:center;gap:26px;padding:0 80px;box-sizing:border-box}
+.e{font-size:24px;font-weight:700;color:#D9480F;letter-spacing:.06em}
+h1{margin:0;font-size:80px;line-height:1.1;font-weight:900}
+.code{background:#EAEEF3;border-radius:14px;padding:22px 28px;font-family:"Noto Sans Mono CJK JP",monospace;font-size:27px;color:#18202E;display:grid;gap:8px}
+.code .loc{color:#667085;margin-right:22px}
+mark{background:#FFE08A;border-radius:4px;padding:0 4px}
+.chip{display:inline-block;font-size:20px;font-weight:800;color:#C42B2B;background:#FBEAEA;padding:3px 12px;border-radius:6px;margin-right:12px;font-family:"Noto Sans CJK JP",sans-serif}
+p{margin:0;font-size:28px;color:#586071}
+</style></head><body><div class="e">AIで作ったアプリを、公開する前に</div><h1>Firebase 公開前チェック</h1>
+<div class="code"><div><span class="chip">直すもの</span>ログインすれば、すべての文書を読み書きできます</div><div><span class="loc">firestore.rules:5</span>allow read, write: if <mark>request.auth != null</mark>;</div></div>
+<p>フォルダを落とすだけ。ファイルはブラウザの外に出ません。</p></body></html>

@@ -8,7 +8,7 @@ BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://yuita-genecraft.github.io
 DOCS = HERE / "docs"
 TOOLS = [("cc-tsuchihyo", "cc-tsuchihyo/app.html"), ("fbcheck", "fbcheck-web/app.html")]
 DOCS.mkdir(exist_ok=True)
-(DOCS / ".nojekyll").write_text("")
+(DOCS / ".nojekyll").write_text("\n")  # 中身は何でもよい（GitHub は有無だけを見る）。空だと一部の送り方で弾かれるので改行1つ
 shutil.copy(HERE / "site-src" / "index.html", DOCS / "index.html")
 for slug, src in TOOLS:
     shutil.rmtree(DOCS / slug, ignore_errors=True)

@@ -24,6 +24,23 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
   - `test/gitcheck.mjs`：自前の .gitignore 読み取り（補助）を本物の `git check-ignore` と突き合わせる。範囲は「直下の .gitignore × 未追跡のファイル」だけ。追跡済みのファイルや下の階層の .gitignore はこの範囲の外なので、CLI は git 自身で確かめ、ブラウザ版は「未確認」と出す
 - 動かし方：`node test/unit_engine.mjs`・`node test/gitcheck.mjs`・`python3 test/e2e_fb.py`・`python3 test/e2e.py`（e2e は Playwright の Chromium を使う。CLI は `test/out/` に毎回作る）
 
+### 通知表の自動E2E
+
+`main` 向けのPR（Draftを含む）の作成・更新・再オープン時に、GitHub Actions の `Notification report E2E` が通常の集計比較と重複時間テストを実行します。Python 3.12 / Playwright 1.58.0 / Chromiumを使用し、入力はテストが生成する合成ログだけです。集計の不一致やテスト例外はジョブ失敗になります。通常の比較が失敗しても、ブラウザの準備が完了していれば重複時間テストも実行します。
+
+実行結果はPRのChecksまたはActionsの各ステップのログで確認できます。画面・CSP関連には既存の表示のみの診断もあり、全項目を自動判定するものではありません。Firebase公開前チェックのテストはこのワークフローの対象外です。
+
+公開リポジトリの標準Ubuntuランナーでのみ実行し、非公開リポジトリではジョブをスキップします。追加の保存容量課金を避けるため、artifactアップロードとActionsキャッシュは使いません。スクリーンショットは実行中に生成されますが、ジョブ終了後には保存されません。ログはGitHubの保持設定に従います。このワークフローはdeploy・`docs/`更新・自動mergeを行いません。
+
+ローカルで同じテストを実行する場合：
+
+```sh
+python -m pip install -r test/requirements-e2e.txt
+python -m playwright install --with-deps chromium
+python -u test/e2e.py
+python -u test/test_overlap.py
+```
+
 ## 集計で気をつけたこと（通知表）
 
 - Claude Code のログは、1つの応答をブロックごとに別の行へ書き、同じ `usage` を行ごとに繰り返す。`message.id` + `requestId` で1回に畳まないと、トークン料金の換算が数倍に膨らむ

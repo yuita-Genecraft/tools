@@ -592,6 +592,7 @@ function finalize(st){
   R.compacts = st.compacts; R.limitHits = st.limitHits; R.apiErrors = st.apiErrors;
   R.politeRatio = st.prompts ? st.polite / st.prompts : 0;
   R.workMin = workMinutes(st.sess);
+  R.workMinUnion = workMinutesUnion(st.sess);
   R.subjects = SUBJECTS.map(s => { let n = 0; for (const [name, c] of st.tools) if (s.match(name)) n += c; return { key: s.key, label: s.label, sub: s.sub, count: n, grade: grade(n) }; });
   const byModel = new Map();
   for (const r of st.req.values()) {
@@ -618,6 +619,39 @@ function workMinutes(sess){
       if (j >= 0 && b.a[j] > start) ms += Math.min(b.a[j] - start, TURN_CAP_MS);
     }
   }
+  return ms / 60000;
+}
+function workMinutesUnion(sess){
+  const intervals = [];
+  for (const b of sess.values()) {
+    if (!b.h.length || !b.a.length) continue;
+    b.h.sort((x, y) => x - y); b.a.sort((x, y) => x - y);
+    for (let i = 0; i < b.h.length; i++) {
+      const start = b.h[i], end = i + 1 < b.h.length ? b.h[i + 1] : Infinity;
+      let lo = 0, hi = b.a.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (b.a[mid] < end) lo = mid + 1; else hi = mid; }
+      const j = lo - 1;
+      if (j >= 0 && b.a[j] > start) {
+        intervals.push([start, Math.min(b.a[j], start + TURN_CAP_MS)]);
+      }
+    }
+  }
+  if (!intervals.length) return 0;
+  intervals.sort((a, b) => a[0] - b[0]);
+  let ms = 0;
+  let currentStart = intervals[0][0];
+  let currentEnd = intervals[0][1];
+  for (let i = 1; i < intervals.length; i++) {
+    const [start, end] = intervals[i];
+    if (start <= currentEnd) {
+      if (end > currentEnd) currentEnd = end;
+    } else {
+      ms += (currentEnd - currentStart);
+      currentStart = start;
+      currentEnd = end;
+    }
+  }
+  ms += (currentEnd - currentStart);
   return ms / 60000;
 }
 function hoursText(min){ if (min < 60) return Math.round(min) + '分'; const h = min / 60; return (h >= 10 ? Math.round(h) : h.toFixed(1)) + '時間'; }
@@ -708,7 +742,7 @@ function sampleResult(){
     hours, heat, sessions: 96, longestSessionMin: 412,
     projectCount: 5, projectsTop: [['my-app', 512], ['note-tools', 301], ['blog', 210], ['dotfiles', 88], ['sandbox', 73]],
     you: { chigau: 97, arigato: 35, tsuzukete: 58, naze: 44, modoshite: 23, ultrathink: 6, yoshinani: 11, error: 131, ugokanai: 39, onegai: 402 },
-    compacts: 38, limitHits: 4, apiErrors: 12, politeRatio: 0.58, workMin: 7560,
+    compacts: 38, limitHits: 4, apiErrors: 12, politeRatio: 0.58, workMin: 7560, workMinUnion: 7000,
     claude: { ossha: 142, shazai: 61, kanpeki: 88, shouchi: 205, texts: 5200 },
     toolsTop: tools, bashTop: [['git', 1204], ['npm', 688], ['ls', 402], ['cat', 311], ['python3', 244], ['grep', 198], ['cd', 176], ['npx', 150], ['curl', 97], ['rm', 61]],
     extsTop: [['ts', 1204], ['tsx', 688], ['md', 402], ['py', 211], ['json', 190], ['css', 97]],
@@ -998,6 +1032,7 @@ function recordHTML(R){
     ${li('会話の数', fmt(R.sessions))}
     ${li('いちばん長い会話', hrs)}
     ${li('Claudeの作業時間', hoursText(R.workMin || 0))}
+    ${li('重複を除いた推定作業時間', hoursText(R.workMinUnion || 0))}
     ${li('プロジェクト', fmt(R.projectCount))}
   </ul></div><div><ul class="rows">
     ${li('発言', fmt(R.prompts) + '回')}

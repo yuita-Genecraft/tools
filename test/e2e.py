@@ -18,9 +18,13 @@ proj = HERE / "logs" / "projects"
 files = sorted(str(p) for p in proj.rglob("*.jsonl"))
 expect = ref.run([pathlib.Path(f) for f in files])
 extra = [str(p) for p in sys.argv[1:]]
+failures = 0
 
 def check(name, got, want, tol=1e-9):
+    global failures
     ok = abs(got - want) <= tol if isinstance(want, float) else got == want
+    if not ok:
+        failures += 1
     print(("OK  " if ok else "NG  ") + f"{name}: got={got} want={want}")
     return ok
 
@@ -105,3 +109,6 @@ with sync_playwright() as p:
     print("[csp] non-data requests:", [r for r in reqs if not r.startswith("data:")])
     ctx.close()
     b.close()
+
+print(f"CHECK FAILURES: {failures}")
+sys.exit(1 if failures else 0)

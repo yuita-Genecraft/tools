@@ -50,6 +50,7 @@ with sync_playwright() as p:
                 ok &= check(k, cur[k], expect[k])
             ok &= check("usd", round(cur["usd"], 9), round(expect["usd"], 9))
             ok &= check("workMin", round(cur["workMin"], 6), round(expect["workMin"], 6))
+            ok &= check("workMinUnion", round(cur["workMinUnion"], 6), round(expect["workMinUnion"], 6))
             ok &= check("politeRatio", round(cur["politeRatio"], 9), round(expect["politeRatio"], 9))
             for k, v in expect["you"].items():
                 ok &= check("you." + k, cur["you"][k], v)

@@ -196,6 +196,7 @@ def run(paths):
         usd += cost
         tokens += b["i"] + b["c5"] + b["c1"] + b["cr"] + b["o"]
     work = 0.0
+    intervals = []
     for b in sess.values():
         if not b["h"] or not b["a"]:
             continue
@@ -205,6 +206,22 @@ def run(paths):
             cand = [x for x in A_ if x < end]
             if cand and cand[-1] > st_:
                 work += min(cand[-1] - st_, 2 * 3600 * 1000)
+                intervals.append((st_, min(cand[-1], st_ + 2 * 3600 * 1000)))
+
+    workUnion = 0.0
+    if intervals:
+        intervals.sort(key=lambda x: x[0])
+        current_start, current_end = intervals[0]
+        for st_, end_ in intervals[1:]:
+            if st_ <= current_end:
+                if end_ > current_end:
+                    current_end = end_
+            else:
+                workUnion += (current_end - current_start)
+                current_start = st_
+                current_end = end_
+        workUnion += (current_end - current_start)
+
     keys = sorted(days)
     streak = run_ = 0
     prev = None
@@ -213,7 +230,7 @@ def run(paths):
         run_ = run_ + 1 if prev and (dk - prev).days == 1 else 1
         streak = max(streak, run_)
         prev = dk
-    return dict(S, workMin=work / 60000, politeRatio=(S["polite"] / S["prompts"]) if S["prompts"] else 0, you=dict(you), claude=dict(cl), tools=dict(tools), usd=usd, tokens=tokens, models=per,
+    return dict(S, workMin=work / 60000, workMinUnion=workUnion / 60000, politeRatio=(S["polite"] / S["prompts"]) if S["prompts"] else 0, you=dict(you), claude=dict(cl), tools=dict(tools), usd=usd, tokens=tokens, models=per,
                 activeDays=len(keys), nightDays=sum(1 for v in days.values() if v[1] > 0), streak=streak,
                 nightPrompts=sum(hours[:5]), period=(keys[0], keys[-1]) if keys else None)
 

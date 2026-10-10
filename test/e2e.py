@@ -28,6 +28,10 @@ def check(name, got, want, tol=1e-9):
     print(("OK  " if ok else "NG  ") + f"{name}: got={got} want={want}")
     return ok
 
+def external_requests(reqs):
+    # Local HTML, generated images, and in-memory blobs are expected.
+    return [r for r in reqs if not r.startswith(("file:", "data:", "blob:"))]
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     results = []
@@ -43,6 +47,7 @@ with sync_playwright() as p:
         page.screenshot(path=str(SHOTS / f"sample-{label}.png"), full_page=True)
         overflow = page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth")
         print(f"[{label}] horizontal overflow: {overflow}")
+        check(f"{label} horizontal overflow", overflow, False)
         if label == "desktop-light":
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "card-sample.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
@@ -92,6 +97,8 @@ with sync_playwright() as p:
                 print("real tools", cur3["toolsTop"][:8])
         print(f"[{label}] errors: {errs}")
         print(f"[{label}] requests: {[r for r in reqs if not r.startswith('data:')]}")
+        check(f"{label} browser errors/warnings", errs, [])
+        check(f"{label} external requests", external_requests(reqs), [])
         ctx.close()
     # CSP を効かせたまま：エラーなし・画像が出る・ファイルが読める・外部通信なし
     ctx = b.new_context(viewport={"width": 1280, "height": 900}, timezone_id="Asia/Tokyo", locale="ja-JP")
@@ -101,12 +108,18 @@ with sync_playwright() as p:
     page.on("request", lambda r: reqs.append(r.url))
     page.goto(URL)
     page.locator("#statusPill", has_text="見本").wait_for()
+    page.wait_for_function("""() => {
+        const img = document.getElementById('cardImg');
+        return img.src.startsWith('data:image/png') && img.complete && img.naturalWidth > 0;
+    }""")
     print("[csp] img src data:", (page.get_attribute("#cardImg", "src") or "")[:22])
     page.set_input_files("#fileInput", files)
     page.locator("#statusPill", has_text="あなたのログ").wait_for(timeout=20000)
     print("[csp] status:", page.locator("#statusText").text_content())
     print("[csp] errors:", errs)
     print("[csp] non-data requests:", [r for r in reqs if not r.startswith("data:")])
+    check("csp browser errors", errs, [])
+    check("csp external requests", external_requests(reqs), [])
     ctx.close()
     b.close()
 

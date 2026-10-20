@@ -481,21 +481,21 @@ function analyzeParsed(acc, project, projectName, strict){
     const rel = p.slice(prefix.length);
     seenRel.add(rel);
     const text = project.get(rel);
-    const curKeys = text === undefined ? [] : lineKeys(text, strict);
-    const curSet = new Set(curKeys);
-    const row = { file: rel, exists: text !== undefined, lines: curKeys.length, written: m.size, alive: 0, rewritten: 0, human: 0, ai: 0 };
+    // 行は「種類」で数える（同じ内容の行は1つ）。Claude の行も今の行も同じ数え方＝AI率の分子は「残った」と同じ数
+    const curSet = text === undefined ? new Set() : new Set(lineKeys(text, strict));
+    const row = { file: rel, exists: text !== undefined, lines: curSet.size, written: m.size, alive: 0, rewritten: 0, human: 0, ai: 0 };
     for (const [k, rec] of m) {
       if (curSet.has(k)) { row.alive++; aliveC.push({ key: k, file: rel }); }
       else if (rec.removed) row.rewritten++;
       else { row.human++; humanC.push({ key: k, file: rel }); }
     }
-    if (text !== undefined) for (const k of curKeys) if (m.has(k)) row.ai++;
+    row.ai = row.alive;
     R.written += row.written; R.alive += row.alive; R.rewritten += row.rewritten; R.human += row.human; R.aiLines += row.ai;
     if (text === undefined) R.missingFiles.push({ file: rel, exists: false, written: row.written, rewritten: row.rewritten, human: row.human });
     else R.files.push(row);
   }
   for (const [rel, text] of project) {
-    const n = lineKeys(text, strict).length;
+    const n = new Set(lineKeys(text, strict)).size;
     R.projectLines += n;
     if (!seenRel.has(rel)) R.files.push({ file: rel, exists: true, lines: n, written: 0, alive: 0, rewritten: 0, human: 0, ai: 0 });
   }
@@ -772,7 +772,7 @@ function filesHTML(R, hide){
   const tr = rows.map(f => `<tr><td title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : f.file)}</td><td>${fmt(f.lines)}</td><td>${fmt(f.written)}</td><td>${fmt(f.alive)}</td><td>${fmt(f.rewritten)}</td><td>${fmt(f.human)}</td><td><span class="mini"><span style="width:${(rate(f.ai, f.lines) * 100).toFixed(1)}%"></span></span>${f.lines ? pct(rate(f.ai, f.lines)) : '—'}</td></tr>`).join('');
   const miss = R.missingFiles.length ? `<h3 style="margin:14px 0 6px;font-size:13.5px;color:var(--muted)">ファイルごと消えた・名前が変わった</h3><ul class="rows">${R.missingFiles.slice(0, 12).map(f => `<li><span><code>${esc(hide ? f.alias : f.file)}</code></span><b>${fmt(f.written)}行</b></li>`).join('')}</ul><p class="fine">これらの行は、Claude が後で消した印があるものを除いて「人が消した」に数えています。名前を変えただけのファイルも、ここに入ります。</p>` : '';
   return `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>今の行数</th><th>Claude が書いた</th><th>残った</th><th>書き直し</th><th>人が消した</th><th>AI率</th></tr></thead><tbody>${tr || '<tr><td colspan="7">Claude が書いた行があるファイルはありません</td></tr>'}</tbody></table></div>
-  <p class="fine">Claude が書いた行が多い順に、${rows.length < R.files.filter(f => f.written > 0).length ? '上位40件' : '全部'}。行数は4文字未満や記号だけの行を除いた数です。</p>${miss}`;
+  <p class="fine">Claude が書いた行が多い順に、${rows.length < R.files.filter(f => f.written > 0).length ? '上位40件' : '全部'}。行数は、4文字未満や記号だけの行を除き、同じ内容の行を1つに数えた数です。</p>${miss}`;
 }
 function topHTML(R, hide){
   if (!R.top.length) return '<p class="fine">人が消した行はありません。</p>';
@@ -802,7 +802,7 @@ function howHTML(R){
   <ul class="ul">
     <li>行の比べ方：${R.strict ? '<b>厳密モード</b>＝行末の改行コードだけ除いて、そのまま比べます。' : '前後の空白を落とし、タブと連続する空白を1つの空白にそろえて比べます（厳密モードで切り替え）。'}</li>
     <li>数えない行：前後の空白を除いて4文字未満の行、文字と数字を1つも含まない行（<code>}</code> や <code>);</code> など）、記号と予約語1つだけの行（<code>} else {</code>・<code>break;</code>・<code>return;</code> など）、閉じタグだけの行（<code>&lt;/div&gt;</code> など）。</li>
-    <li>同じ内容の行は区別しません。人が少し直した行は「残った」に入りません＝生存率も AI率も<b>下限</b>です。</li>
+    <li>行は「種類」で数えます＝同じ内容の行はファイルの中で1つに数え、Claude が書いた行も今の行も同じ数え方です（AI率の分子は「残った」と同じ数）。人が少し直した行は「残った」に入りません＝生存率も AI率も<b>下限</b>です。</li>
     <li>拾わないもの：Bash のコマンドで書いたファイル（ヒアドキュメントなど）、NotebookEdit、ログの期間より前に書かれた行、結果がエラーになった Edit、結果の記録が無い Edit／Write。</li>
     <li>Write で既存のファイルを丸ごと書き直した場合、それより前に Read していない行は Claude の行として数えます（過大になることがあります）。</li>
     <li>ログは初期設定で30日より古いものが消えます。カードの期間は、手元に残っているログの範囲です。</li>

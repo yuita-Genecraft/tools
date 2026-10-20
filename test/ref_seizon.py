@@ -312,9 +312,9 @@ def analyze(acc, project, project_name, strict):
         rel = p[len(prefix):]
         seen_rel.add(rel)
         text = project.get(rel)
-        cur_keys = [] if text is None else line_keys(text, strict)
-        cur_set = set(cur_keys)
-        row = {"file": rel, "exists": text is not None, "lines": len(cur_keys), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
+        # 行は「種類」で数える（同じ内容の行は1つ）＝app.html と同じ
+        cur_set = set() if text is None else set(line_keys(text, strict))
+        row = {"file": rel, "exists": text is not None, "lines": len(cur_set), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
         for k, rec in m.items():
             if k in cur_set:
                 row["alive"] += 1; alive_c.append({"key": k, "file": rel})
@@ -322,10 +322,7 @@ def analyze(acc, project, project_name, strict):
                 row["rewritten"] += 1
             else:
                 row["human"] += 1; human_c.append({"key": k, "file": rel})
-        if text is not None:
-            for k in cur_keys:
-                if k in m:
-                    row["ai"] += 1
+        row["ai"] = row["alive"]
         for k in ("written", "alive", "rewritten", "human"):
             R[k] += row[k]
         R["aiLines"] += row["ai"]
@@ -334,7 +331,7 @@ def analyze(acc, project, project_name, strict):
         else:
             R["files"].append(row)
     for rel, text in project.items():
-        n = len(line_keys(text, strict))
+        n = len(set(line_keys(text, strict)))
         R["projectLines"] += n
         if rel not in seen_rel:
             R["files"].append({"file": rel, "exists": True, "lines": n, "written": 0, "alive": 0, "rewritten": 0, "human": 0, "ai": 0})

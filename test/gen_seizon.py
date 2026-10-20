@@ -67,7 +67,7 @@ NEVER = "export const NEVER = 'written by human actually';\nexport const N2 = 2;
 WS_V1 = "const x = 1;\nconst y = 2;\n}\nab\n----\n} else {\n  break;\n</div>\nreturn;\n"
 WS_NOW = "const  x  = 1;\nconst y = 2;\n}\n} else {\n"
 WIN_V1 = "export const WIN = 1;\nexport const WIN2 = 2;\n"
-WIN_NOW = "export const WIN = 1;\r\nexport const WIN2 = 2;\r\n"
+WIN_NOW = "export const WIN = 1;\r\nexport const WIN2 = 2;\r\nexport const WIN = 1;\r\n"   # 同じ行が2回＝1つに数える
 SEC_V1 = 'export const API_KEY = "sk-abcdefghijklmnop12345678";\nexport const endpointForNotesServiceV2 = "https://example.com/api/v2/notes";\n'
 D_V0 = "const d1 = 1;\nconst d2 = 2;"
 D_V1 = "const d1 = 1;\nconst d2 = 2;\nconst d3 = 3;\n"

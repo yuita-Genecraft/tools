@@ -276,6 +276,121 @@ def assign_aliases(R):
     for f in R["missingFiles"]:
         m = RX_EXT.search(f["file"]); f["alias"] = "ファイル" + alias_of(i) + (("." + m.group(1)) if m else ""); i += 1
 
+# ---------- 直し癖（app.html の analyzeHabits と同じ規則） ----------
+RX_TOK = re.compile(r"[A-Za-z_$][\w$]*|\d+(?:\.\d+)?|'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"|`(?:[^`\\]|\\.)*`")
+RX_DEBUG = re.compile(r"\b(console\.(log|debug|info|warn|error|trace)|print\s*\(|println!?\s*\(|System\.out\.print|fmt\.Print|dbg!|var_dump\s*\(|debugger;?$)")
+RX_CJK = re.compile(r"[぀-ヿ㐀-鿿]")
+HASH_COMMENT_EXT = {"py", "rb", "sh", "bash", "zsh", "yml", "yaml", "toml", "pl", "r", "ps1", "cfg", "ini", "conf", "env", "mk", "make", "dockerfile"}
+RX_IMPORT = re.compile(r"^(import\s|from\s\S+\simport\s|export\s.+\sfrom\s|(const|let|var)\s.+=\s*require\s*\()")
+RX_IDENT = re.compile(r"^[A-Za-z_$][\w$]*$"); RX_NUMTOK = re.compile(r"^\d+(?:\.\d+)?$"); RX_STRTOK = re.compile(r"^['\"`]")
+RX_COMMENT_START = re.compile(r"^(//|/\*|\*\s|\*$|<!--|--\s)")
+HABIT_LABELS = {"debug": "デバッグ出力の削除", "comment": "コメントの削除", "delete": "行の削除（置き換え無し）", "quote": "引用符の統一", "semi": "セミコロンの有無",
+                "const": "const 化", "any": "any の型付け", "commentLang": "コメントの言語", "import": "import の書き方", "rename": "名前の変更",
+                "string": "文字列（文言）の変更", "number": "数値の変更", "other": "その他の書き換え"}
+HABIT_GENERIC = {"delete", "other"}
+
+def tokens_of(key):
+    return RX_TOK.findall(key)
+
+def is_comment_line(key, ext):
+    if RX_COMMENT_START.search(key):
+        return True
+    return key.startswith("#") and not key.startswith("#!") and ext in HASH_COMMENT_EXT
+
+def habit_rule(hid, d):
+    return {
+        "debug": lambda: "デバッグ用の出力（console.log など）は残さない。",
+        "comment": lambda: "説明のコメントは足さない。コードで分かることはコメントに書かない。",
+        "quote": lambda: "文字列の引用符は " + ('"（ダブル）' if d == '"' else "'（シングル）") + " で統一する。",
+        "semi": lambda: "文末のセミコロンを付ける。" if d == ";" else "文末のセミコロンは付けない。",
+        "const": lambda: "再代入しない変数は const で宣言する。",
+        "any": lambda: "any を使わない。型が決まらなければ unknown か具体的な型を書く。",
+        "commentLang": lambda: "コメントは日本語で書く。" if d == "ja" else "コメントは英語で書く。",
+        "import": lambda: "import は既存ファイルの書き方（順序・パス・拡張子・引用符）に合わせる。",
+        "rename": lambda: "命名は既存のコードに合わせる" + (f"（例：{d}）" if d else "") + "。",
+        "string": lambda: "表示する文言は既存の言い回しに合わせる。文言を勝手に作らない。",
+        "number": lambda: "数値（上限・待ち時間など）は既存の設定値や定数を使う。",
+    }[hid]()
+
+def classify_pair(before, after, ext):
+    if after is None:
+        if RX_DEBUG.search(before):
+            return "debug", ""
+        if is_comment_line(before, ext):
+            return "comment", ""
+        return "delete", ""
+    if before.replace('"', "'") == after.replace('"', "'"):
+        return "quote", ('"' if '"' in after else "'")
+    if re.sub(r";\s*$", "", before) == re.sub(r";\s*$", "", after):
+        return "semi", (";" if re.search(r";\s*$", after) else "")
+    if re.match(r"^(var|let)\s", before) and re.match(r"^const\s", after) and re.sub(r"^(var|let)\s", "", before) == re.sub(r"^const\s", "", after):
+        return "const", ""
+    tb, ta = tokens_of(before), tokens_of(after)
+    if "any" in tb and "any" not in ta:
+        return "any", ""
+    if is_comment_line(before, ext) and is_comment_line(after, ext) and bool(RX_CJK.search(before)) != bool(RX_CJK.search(after)):
+        return "commentLang", ("ja" if RX_CJK.search(after) else "en")
+    if RX_IMPORT.search(before):
+        return "import", ""
+    if tb and len(tb) == len(ta):
+        diff = [i for i in range(len(tb)) if tb[i] != ta[i]]
+        if len(diff) == 1 and RX_IDENT.match(tb[diff[0]]) and RX_IDENT.match(ta[diff[0]]):
+            return "rename", f"{tb[diff[0]]} → {ta[diff[0]]}"
+        if diff and all(RX_STRTOK.match(tb[i]) and RX_STRTOK.match(ta[i]) for i in diff):
+            return "string", ""
+        if diff and all(RX_NUMTOK.match(tb[i]) and RX_NUMTOK.match(ta[i]) for i in diff):
+            return "number", ""
+    return "other", ""
+
+def best_match(key, cands):
+    t = set(tokens_of(key))
+    if not t:
+        return None
+    best, bs = None, 0.0
+    for ckey, cset in cands:
+        if not cset:
+            continue
+        inter = len(t & cset)
+        s = 2 * inter / (len(t) + len(cset))
+        if s > bs or (s == bs and best is not None and ckey < best):
+            bs, best = s, ckey
+    return best if bs >= 0.5 else None
+
+def analyze_habits(habit_in):
+    H = {"lines": 0, "matched": 0, "items": []}
+    agg = {}
+    for f in habit_in:
+        m = RX_EXT.search(f["file"]); ext = (m.group(1) if m else "").lower()
+        cands = [(k, set(tokens_of(k))) for k in f["cur"]]
+        for h in sorted(f["human"], key=lambda h: h["key"]):
+            after = best_match(h["key"], cands)
+            hid, d = classify_pair(h["key"], after, ext)
+            H["lines"] += 1
+            if after is not None:
+                H["matched"] += 1
+            it = agg.setdefault(hid, {"id": hid, "count": 0, "sessions": set(), "files": set(), "examples": [], "dirs": {}})
+            it["count"] += 1; it["sessions"].add(h["sid"] or ""); it["files"].add(f["file"])
+            if d:
+                it["dirs"][d] = it["dirs"].get(d, 0) + 1
+            if len(it["examples"]) < 8 and not RX_SECRET.search(h["key"]) and not (after and RX_SECRET.search(after)):
+                it["examples"].append({"before": h["key"], "after": after, "file": f["file"]})
+    for it in agg.values():
+        d = (sorted(it["dirs"].items(), key=lambda e: (-e[1], e[0])) or [("", 0)])[0][0]
+        generic = it["id"] in HABIT_GENERIC
+        candidate = (not generic) and it["count"] >= 3 and len(it["sessions"]) >= 2
+        ex = []
+        for e in it["examples"]:
+            if len(ex) == 0 or (len(ex) == 1 and e["file"] != ex[0]["file"]):
+                ex.append(e)
+            if len(ex) == 2:
+                break
+        if len(ex) == 1 and len(it["examples"]) > 1:
+            ex.append(it["examples"][1])
+        H["items"].append({"id": it["id"], "label": HABIT_LABELS[it["id"]], "count": it["count"], "sessions": len(it["sessions"]), "files": len(it["files"]),
+                           "generic": generic, "candidate": candidate, "dir": d, "rule": None if generic else habit_rule(it["id"], d), "examples": ex})
+    H["items"].sort(key=lambda a: (-int(a["candidate"]), int(a["generic"]), -a["count"], -a["sessions"], a["id"]))
+    return H
+
 def analyze(acc, project, project_name, strict):
     evs = build_events(acc)
     claude, applied = apply_events(evs, acc, strict)
@@ -289,7 +404,8 @@ def analyze(acc, project, project_name, strict):
          "logFiles": acc["files"], "logLines": acc["lines"], "logBad": acc["bad"], "uses": len(acc["uses"]), "edits": 0, "sessions": 0,
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
          "written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "droppedWritten": 0, "aiLines": 0,
-         "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched}
+         "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched,
+         "habits": {"lines": 0, "matched": 0, "items": []}}
     if not root:
         return R
     prefix = root + "/"
@@ -305,6 +421,7 @@ def analyze(acc, project, project_name, strict):
         s, e = date_key(tmin), date_key(tmax)
         R["period"] = {"start": s, "end": e, "days": days_between(s, e) + 1}
     alive_c, human_c = [], []
+    habit_in = []   # 直し癖の材料（app.html の habitIn と同じ）
     seen_rel = set()
     for p, m in claude.items():
         if not p.startswith(prefix):
@@ -316,6 +433,7 @@ def analyze(acc, project, project_name, strict):
         # 行は「種類」で数える（同じ内容の行は1つ）＝app.html と同じ
         cur_set = set() if text is None else set(line_keys(text, strict))
         row = {"file": rel, "exists": text is not None, "lines": len(cur_set), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
+        human_keys = []
         for k, rec in m.items():
             if k in cur_set:
                 row["alive"] += 1; alive_c.append({"key": k, "file": rel})
@@ -324,7 +442,9 @@ def analyze(acc, project, project_name, strict):
             else:
                 row["human"] += 1
                 if text is not None:   # 典型的な「人が消した行」は、今もあるファイルから
-                    human_c.append({"key": k, "file": rel})
+                    human_c.append({"key": k, "file": rel}); human_keys.append({"key": k, "sid": rec.get("sid", "")})
+        if human_keys:
+            habit_in.append({"file": rel, "human": human_keys, "cur": [k for k in line_keys(text, strict) if k not in m]})
         row["ai"] = row["alive"]
         for k in ("written", "alive", "rewritten", "human"):
             R[k] += row[k]
@@ -348,6 +468,7 @@ def analyze(acc, project, project_name, strict):
     top.sort(key=lambda f: (-f["human"], -f["written"], f["file"]))
     R["top"] = [{"file": f["file"], "alias": f["alias"], "human": f["human"], "written": f["written"], "exists": True} for f in top[:3]]
     R["examples"] = {"alive": pick_example(alive_c), "human": pick_example(human_c)}
+    R["habits"] = analyze_habits(habit_in)
     return R
 
 # ---------- プロジェクトのフォルダ（app.html と同じ除外） ----------

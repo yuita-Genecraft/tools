@@ -6,7 +6,7 @@ import json, pathlib, shutil
 HERE = pathlib.Path(__file__).parent / "seizon"
 LOGS = HERE / "logs" / "projects"
 PROJ = HERE / "proj" / "alpha"
-for d in (HERE / "logs", HERE / "proj"):
+for d in (HERE / "logs", HERE / "logs2", HERE / "proj"):
     if d.exists():
         shutil.rmtree(d)
 
@@ -173,6 +173,59 @@ put("dist/bundle.js", "console.log('built');\n")
 put("package-lock.json", "{\n  \"name\": \"alpha\"\n}\n")
 put("logo.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 put("src/blob.ts", "export const z = 1;\x00\x00binary\n")
+
+# ---------- 直し癖（habits）：別のログ置き場 logs2 と別プロジェクト proj/habits（alpha の手計算を動かさない） ----------
+# 手で数えた期待値（e2e_seizon.py の HAND_HABITS）：
+#   h1 で Claude が app.ts を Write（9行＝import／export function／console／コメント／let／const label／for／console／return）
+#   h2 で Claude が util.ts を Write（4行＝export function fmt／console／return String／export const UNUSED）
+#   人が直した今の中身：
+#     app.ts  import の引用符 "→'（quote）、input: any→number[]（any）、console 2行削除（debug）、コメント削除（comment）、
+#             total→sum の改名 3行（rename・let／for／return）、"Total count"→"合計"（string）
+#     util.ts n: any→number（any）、console 削除（debug）、UNUSED 削除＝近い行が無い（delete）
+#   → lines=12・matched=7（quote1＋any2＋rename3＋string1）・削除5
+#   → debug 3回・2セッション・2ファイル＝候補 ／ rename 3回・1セッション＝参考 ／ any 2回・2セッション＝参考 ／ quote・comment・string 各1 ／ delete 1（型にならない）
+#   → written 13・alive 1（util.ts の return String(n);）・human 12・rewritten 0・dropped 0
+HAB = "/Users/t/dev/habits"
+LOGS2 = HERE / "logs2" / "projects"
+PROJ2 = HERE / "proj" / "habits"
+APP_V1 = ('import { api } from "./api";\n'
+          'export function run(input: any) {\n'
+          '  console.log("run start");\n'
+          '  // call the api\n'
+          '  let total = 0;\n'
+          '  const label = "Total count";\n'
+          '  for (const x of input) total += x;\n'
+          '  console.log("run end", total);\n'
+          '  return total;\n'
+          '}\n')
+APP_NOW = ("import { api } from './api';\n"
+           'export function run(input: number[]) {\n'
+           '  let sum = 0;\n'
+           '  const label = "合計";\n'
+           '  for (const x of input) sum += x;\n'
+           '  return sum;\n'
+           '}\n')
+UTIL_V1 = ('export function fmt(n: any) {\n'
+           '  console.log("fmt", n);\n'
+           '  return String(n);\n'
+           '}\n'
+           'export const UNUSED = 1;\n')
+UTIL_NOW = ('export function fmt(n: number) {\n'
+            '  return String(n);\n'
+            '}\n')
+H1 = [asst(use("Write", "hw_app", {"file_path": f"{HAB}/src/app.ts", "content": APP_V1}), "2026-09-10T10:00:00.000Z", sid="h1", cwd=HAB, mid="hm1"),
+      result("hw_app", "2026-09-10T10:00:05.000Z", "File created successfully", {"type": "create", "filePath": f"{HAB}/src/app.ts", "content": APP_V1}, sid="h1", cwd=HAB)]
+H2 = [asst(use("Write", "hw_util", {"file_path": f"{HAB}/src/util.ts", "content": UTIL_V1}), "2026-09-12T10:00:00.000Z", sid="h2", cwd=HAB, mid="hm2"),
+      result("hw_util", "2026-09-12T10:00:05.000Z", "File created successfully", {"type": "create", "filePath": f"{HAB}/src/util.ts", "content": UTIL_V1}, sid="h2", cwd=HAB)]
+write_log(LOGS2 / "-Users-t-dev-habits" / "h1.jsonl", H1)
+write_log(LOGS2 / "-Users-t-dev-habits" / "h2.jsonl", H2)
+def put2(rel, data):
+    p = PROJ2 / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data.encode("utf-8"))
+put2("src/app.ts", APP_NOW)
+put2("src/util.ts", UTIL_NOW)
+put2("README.md", "# habits\n")
 put("big.log", "x" * (1600 * 1024))
 
 print("ok", sorted(str(p.relative_to(HERE)) for p in HERE.rglob("*") if p.is_file()))

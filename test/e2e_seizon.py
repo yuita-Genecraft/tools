@@ -31,11 +31,11 @@ HAND = {
     True: dict(written=26, alive=16, rewritten=3, human=7, dropped=4, droppedWritten=5, aiLines=16, projectLines=35),
 }
 # 直し癖の手計算（gen_seizon.py の habits の節と対応）：(id, 回数, セッション数, ファイル数, 候補か, 型にならないか)
-# 候補＝3回以上かつ2セッション以上。rename は3回でも1セッション＝参考。any は2セッションでも2回＝参考
+# 候補＝3回以上かつ2セッション以上。rename は3回でも1セッション＝参考。old.ts の丸ごと書き直し5行は block（癖ではない）
 LOGS2 = HERE / "seizon" / "logs2"
 PROJ2 = HERE / "seizon" / "proj" / "habits"
-HAND_HABITS = [("debug", 3, 2, 2, True, False), ("rename", 3, 1, 1, False, False), ("any", 2, 2, 2, False, False),
-               ("comment", 1, 1, 1, False, False), ("quote", 1, 1, 1, False, False), ("string", 1, 1, 1, False, False), ("delete", 1, 1, 1, False, True)]
+HAND_HABITS = [("debug", 3, 2, 2, True, False), ("rename", 3, 1, 1, False, False), ("any", 1, 1, 1, False, False), ("comment", 1, 1, 1, False, False),
+               ("quote", 1, 1, 1, False, False), ("string", 1, 1, 1, False, False), ("block", 5, 1, 1, False, True), ("delete", 1, 1, 1, False, True)]
 failures = 0
 
 def check(name, got, want):
@@ -172,15 +172,15 @@ with sync_playwright() as p:
             ok &= check("logs-as-project keeps result", page.evaluate("window.__seizon.current.written"), expect[False]["written"])
             # 8) 直し癖：別のログ（logs2）とプロジェクト（habits）＝手計算 HAND_HABITS ＝ Python ＝ Chromium
             page.set_input_files("#logInput", str(LOGS2))
-            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('2ファイル')", timeout=20000)
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('3ファイル')", timeout=20000)
             page.set_input_files("#projInput", str(PROJ2))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'habits'", timeout=20000)
             cur_h = page.evaluate(CURRENT)
             exp_h = ref_seizon.run(sorted(LOGS2.rglob("*.jsonl")), PROJ2, strict=False)
-            ok &= check("habits written/alive/human", (cur_h["written"], cur_h["alive"], cur_h["human"], cur_h["dropped"]), (13, 1, 12, 0))
+            ok &= check("habits written/alive/human", (cur_h["written"], cur_h["alive"], cur_h["human"], cur_h["dropped"]), (22, 6, 16, 0))
             ok &= check("habits js=py", cur_h["habits"], exp_h["habits"])
             ok &= check("habits hand", [(it["id"], it["count"], it["sessions"], it["files"], it["candidate"], it["generic"]) for it in cur_h["habits"]["items"]], HAND_HABITS)
-            ok &= check("habits lines/matched", (cur_h["habits"]["lines"], cur_h["habits"]["matched"]), (12, 7))
+            ok &= check("habits lines/matched", (cur_h["habits"]["lines"], cur_h["habits"]["matched"]), (16, 6))
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])
             ok &= check("habits cards rendered", page.evaluate("document.querySelectorAll('#details .habit').length"), 1)
@@ -188,7 +188,7 @@ with sync_playwright() as p:
             page.screenshot(path=str(SHOTS / "seizon-habits.png"), full_page=True)
             # 9) 結果の保存（JSON）と前回との比較：数だけ・行の中身は入らない／減った型が緑
             snap = page.evaluate("window.__seizon.snapshotOf(window.__seizon.current)")
-            ok &= check("snapshot keys", (snap["tool"], snap["projectName"], snap["written"], len(snap["habits"]), "examples" in json.dumps(snap), "console.log" in json.dumps(snap)), ("cc-seizon", "habits", 13, 7, False, False))
+            ok &= check("snapshot keys", (snap["tool"], snap["projectName"], snap["written"], len(snap["habits"]), "examples" in json.dumps(snap), "console.log" in json.dumps(snap)), ("cc-seizon", "habits", 22, 8, False, False))
             prev = json.loads(json.dumps(snap)); prev["savedAt"] = "2026-09-01"
             for h in prev["habits"]:
                 if h["id"] == "debug": h["count"] = 5

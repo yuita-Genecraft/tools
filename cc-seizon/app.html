@@ -578,7 +578,7 @@ const HABITS = {
 function importModule(s){
   const m = /^from\s+(\S+)\s+import\s/.exec(s);
   if (m) return m[1];
-  return s.replace(/^import\s+/, '').replace(/\s+as\s+\S+/g, '').replace(/\s+/g, '');
+  return s.replace(/^import\s+/, '').replace(/\s+as\s+[A-Za-z_]\w*/g, '').replace(/\s+/g, '');   // 別名は識別子だけ外す（「, 」は残す＝import foo as f, bar と import foobar を混同しない）
 }
 /* 1組（before → after）を型に分ける。after が null＝置き換え先が見つからない＝削除 */
 function classifyPair(before, after, ext){

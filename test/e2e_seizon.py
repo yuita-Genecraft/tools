@@ -185,6 +185,14 @@ with sync_playwright() as p:
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])
             ok &= check("habits cards rendered", page.evaluate("document.querySelectorAll('#details .habit').length"), 1)
+            # import の型の境界（Codex の指摘 #15・#16）：引用符の無い import・別名つきの一覧
+            PAIRS = [("import foo as f, bar", "import foobar", "import"), ("import foo as f, bar", "import foo, bar", "other"), ("import os", "import os, sys", "import"),
+                     ("from oldpkg.utils import foo", "from newpkg.utils import foo", "import"), ("from pkg import a", "from pkg import a, b", "other"),
+                     ('import { a } from "./x";', 'import { a, b } from "./x";', "other"), ('import { a } from "./x";', "import { a } from './x';", "quote"), ('import { a } from "./x";', 'import { a } from "./x.js";', "import")]
+            js_ids = page.evaluate("ps => ps.map(([b, a]) => window.__seizon.classifyPair(b, a, 'py').id)", [[b, a] for b, a, _ in PAIRS])
+            py_ids = [ref_seizon.classify_pair(b, a, "py")[0] for b, a, _ in PAIRS]
+            ok &= check("classifyPair import boundary js", js_ids, [w for _, _, w in PAIRS])
+            ok &= check("classifyPair import boundary py", py_ids, [w for _, _, w in PAIRS])
             ok &= check("habits weak listed", page.evaluate("document.getElementById('details').textContent.includes('回数が足りない型')"), True)
             page.screenshot(path=str(SHOTS / "seizon-habits.png"), full_page=True)
             # 9) 結果の保存（JSON）と前回との比較：数だけ・行の中身は入らない／減った型が緑

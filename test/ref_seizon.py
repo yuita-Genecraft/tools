@@ -325,7 +325,7 @@ def import_module(s):
     m = re.match(r"^from\s+(\S+)\s+import\s", s)
     if m:
         return m.group(1)
-    return re.sub(r"\s+", "", re.sub(r"\s+as\s+\S+", "", re.sub(r"^import\s+", "", s)))
+    return re.sub(r"\s+", "", re.sub(r"\s+as\s+[A-Za-z_]\w*", "", re.sub(r"^import\s+", "", s)))   # 別名は識別子だけ外す（「, 」は残す）
 
 def classify_pair(before, after, ext):
     if after is None:

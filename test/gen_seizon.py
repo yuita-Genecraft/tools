@@ -19,13 +19,19 @@ def U():
 ALPHA = "/Users/t/dev/alpha"
 BETA = "/Users/t/dev/beta"
 
-def asst(block, ts, sid="s1", cwd=ALPHA, mid="msg", **kw):
+def asst(block, ts, sid="s1", cwd=ALPHA, mid="msg", out=100, **kw):
     o = {"parentUuid": None, "isSidechain": False, "userType": "external", "cwd": cwd, "sessionId": sid, "version": "2.1.0", "type": "assistant", "requestId": "req_" + mid,
          "message": {"id": mid, "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [block], "stop_reason": None,
-                     "usage": {"input_tokens": 10, "output_tokens": 100}},
+                     "usage": {"input_tokens": 10, "output_tokens": out, "cache_read_input_tokens": 1000}},
          "uuid": U(), "timestamp": ts}
     o.update(kw)
     return o
+
+def user_text(text, ts, sid="s1", cwd=ALPHA, as_list=False):
+    """最初の指示（頼み方の節で使う）。content は文字列か text ブロックの配列"""
+    content = [{"type": "text", "text": text}] if as_list else text
+    return {"parentUuid": None, "isSidechain": False, "userType": "external", "cwd": cwd, "sessionId": sid, "version": "2.1.0", "type": "user",
+            "message": {"role": "user", "content": content}, "uuid": U(), "timestamp": ts}
 
 def result(tool_id, ts, text, tur=None, is_error=False, sid="s1", cwd=ALPHA):
     block = {"type": "tool_result", "tool_use_id": tool_id, "content": text}
@@ -74,6 +80,8 @@ D_V1 = "const d1 = 1;\nconst d2 = 2;\nconst d3 = 3;\n"
 
 # ---------- ログ s1（alpha・2026-09-01 JST 23:00〜） ----------
 S1 = []
+# 最初の指示（s1）。s1 の assistant は 12 通・出力 100 ずつ＝1,200 トークン
+S1.append(user_text("a.ts に listNotes を足して、並びは updatedAt にして", "2026-09-01T13:59:00.000Z"))
 S1.append(asst(use("Write", "w_a", {"file_path": f"{ALPHA}/src/a.ts", "content": A_V1}), "2026-09-01T14:00:00.000Z", mid="m1"))
 S1.append(result("w_a", "2026-09-01T14:00:10.000Z", f"File created successfully at: {ALPHA}/src/a.ts", {"type": "create", "filePath": f"{ALPHA}/src/a.ts", "content": A_V1, "structuredPatch": []}))
 S1.append(asst(use("Edit", "e_a1", {"file_path": f"{ALPHA}/src/a.ts", "old_string": A_OLD, "new_string": A_NEW}), "2026-09-01T14:01:00.000Z", mid="m2"))
@@ -113,27 +121,30 @@ S1.append({"type": "summary", "summary": "x", "leafUuid": "x"})
 S1.append("")
 
 # ---------- ログ s2（alpha・再開で s1 の先頭3行が写っている） ----------
-S2 = S1[:3]
+S2 = S1[1:4]   # 再開で s1 の先頭3行（w_a とその結果・e_a1）が写っている＝tool_use の id で重複を除く
 S2 = list(S2)
-S2.append(asst(use("Write", "w_win", {"file_path": f"{ALPHA}/src/win.ts", "content": WIN_V1}), "2026-09-03T01:00:00.000Z", sid="s2", mid="m13"))
+# 最初の指示（s2・<pasted_content> の中身＝タグを外して読む）。s2 の assistant は 6 通・出力 300 ずつ＝1,800 トークン（うち1通は別の場所 alpha-copy・1通は NotebookEdit）
+S2.append(user_text('<pasted_content id="7e4d">引き継ぎ：win.ts・sec.ts・d.ts を足す。範囲外は触らない</pasted_content>', "2026-09-03T00:59:00.000Z", sid="s2", as_list=True))
+S2.append(asst(use("Write", "w_win", {"file_path": f"{ALPHA}/src/win.ts", "content": WIN_V1}), "2026-09-03T01:00:00.000Z", sid="s2", mid="m13", out=300))
 S2.append(result("w_win", "2026-09-03T01:00:05.000Z", "File created successfully", {"type": "create", "filePath": f"{ALPHA}/src/win.ts", "content": WIN_V1}, sid="s2"))
-S2.append(asst(use("Write", "w_sec", {"file_path": f"{ALPHA}/src/sec.ts", "content": SEC_V1}), "2026-09-03T01:01:00.000Z", sid="s2", mid="m14"))
+S2.append(asst(use("Write", "w_sec", {"file_path": f"{ALPHA}/src/sec.ts", "content": SEC_V1}), "2026-09-03T01:01:00.000Z", sid="s2", mid="m14", out=300))
 S2.append(result("w_sec", "2026-09-03T01:01:05.000Z", "File created successfully", {"type": "create", "filePath": f"{ALPHA}/src/sec.ts", "content": SEC_V1}, sid="s2"))
 # d.ts：Read の結果が番号つきの本文だけ（toolUseResult 無し）→ Write（toolUseResult 無し）
-S2.append(asst(use("Read", "r_d", {"file_path": f"{ALPHA}/src/d.ts"}), "2026-09-03T01:02:00.000Z", sid="s2", mid="m15"))
+S2.append(asst(use("Read", "r_d", {"file_path": f"{ALPHA}/src/d.ts"}), "2026-09-03T01:02:00.000Z", sid="s2", mid="m15", out=300))
 S2.append(result("r_d", "2026-09-03T01:02:05.000Z", numbered(D_V0), sid="s2"))
-S2.append(asst(use("Write", "w_d", {"file_path": f"{ALPHA}/src/d.ts", "content": D_V1}), "2026-09-04T16:30:00.000Z", sid="s2", mid="m16"))
+S2.append(asst(use("Write", "w_d", {"file_path": f"{ALPHA}/src/d.ts", "content": D_V1}), "2026-09-04T16:30:00.000Z", sid="s2", mid="m16", out=300))
 S2.append(result("w_d", "2026-09-04T16:30:05.000Z", "The file has been updated.", sid="s2"))
 # 別の場所にある同名プロジェクト（root の多数決で負ける）
-S2.append(asst(use("Edit", "e_decoy", {"file_path": "/Users/t/other/alpha-copy/src/a.ts", "old_string": "", "new_string": "export const DECOY = 1;"}), "2026-09-04T16:40:00.000Z", sid="s2", mid="m17"))
+S2.append(asst(use("Edit", "e_decoy", {"file_path": "/Users/t/other/alpha-copy/src/a.ts", "old_string": "", "new_string": "export const DECOY = 1;"}), "2026-09-04T16:40:00.000Z", sid="s2", mid="m17", out=300))
 S2.append(result("e_decoy", "2026-09-04T16:40:05.000Z", "The file has been updated.", sid="s2"))
 # NotebookEdit は拾わない
-S2.append(asst(use("NotebookEdit", "nb", {"notebook_path": f"{ALPHA}/nb.ipynb", "new_source": "print(1)"}), "2026-09-04T16:41:00.000Z", sid="s2", mid="m18"))
+S2.append(asst(use("NotebookEdit", "nb", {"notebook_path": f"{ALPHA}/nb.ipynb", "new_source": "print(1)"}), "2026-09-04T16:41:00.000Z", sid="s2", mid="m18", out=300))
 S2.append(result("nb", "2026-09-04T16:41:05.000Z", "ok", sid="s2"))
 
 # ---------- ログ s3（beta＝別プロジェクト） ----------
 S3 = []
-S3.append(asst(use("Write", "w_beta", {"file_path": f"{BETA}/src/x.ts", "content": "export const beta = 1;\nexport const gamma = 2;\n"}), "2026-09-02T00:00:00.000Z", sid="s3", cwd=BETA, mid="m19"))
+S3.append(user_text("beta の x.ts を作って", "2026-09-01T23:59:00.000Z", sid="s3", cwd=BETA))
+S3.append(asst(use("Write", "w_beta", {"file_path": f"{BETA}/src/x.ts", "content": "export const beta = 1;\nexport const gamma = 2;\n"}), "2026-09-02T00:00:00.000Z", sid="s3", cwd=BETA, mid="m19", out=50))
 S3.append(result("w_beta", "2026-09-02T00:00:05.000Z", "File created successfully", {"type": "create", "filePath": f"{BETA}/src/x.ts", "content": "export const beta = 1;\nexport const gamma = 2;\n"}, sid="s3", cwd=BETA))
 
 def write_log(path, rows):
@@ -251,9 +262,9 @@ OLD_NOW = ('export function makeCache() {\n'
 def hw(tid, path, content, ts, sid, mid):
     return [asst(use("Write", tid, {"file_path": path, "content": content}), ts, sid=sid, cwd=HAB, mid=mid),
             result(tid, ts[:-8] + "05.000Z", "File created successfully", {"type": "create", "filePath": path, "content": content}, sid=sid, cwd=HAB)]
-write_log(LOGS2 / "-Users-t-dev-habits" / "h1.jsonl", hw("hw_app", f"{HAB}/src/app.ts", APP_V1, "2026-09-10T10:00:00.000Z", "h1", "hm1"))
-write_log(LOGS2 / "-Users-t-dev-habits" / "h2.jsonl", hw("hw_util", f"{HAB}/src/util.ts", UTIL_V1, "2026-09-12T10:00:00.000Z", "h2", "hm2"))
-write_log(LOGS2 / "-Users-t-dev-habits" / "h3.jsonl", hw("hw_old", f"{HAB}/src/old.ts", OLD_V1, "2026-09-13T10:00:00.000Z", "h3", "hm3"))
+write_log(LOGS2 / "-Users-t-dev-habits" / "h1.jsonl", [user_text("app.ts を書いて", "2026-09-10T09:59:00.000Z", sid="h1", cwd=HAB)] + hw("hw_app", f"{HAB}/src/app.ts", APP_V1, "2026-09-10T10:00:00.000Z", "h1", "hm1"))
+write_log(LOGS2 / "-Users-t-dev-habits" / "h2.jsonl", [user_text("util.ts を書いて", "2026-09-12T09:59:00.000Z", sid="h2", cwd=HAB)] + hw("hw_util", f"{HAB}/src/util.ts", UTIL_V1, "2026-09-12T10:00:00.000Z", "h2", "hm2"))
+write_log(LOGS2 / "-Users-t-dev-habits" / "h3.jsonl", [user_text("キャッシュをとりあえず作って", "2026-09-13T09:59:00.000Z", sid="h3", cwd=HAB)] + hw("hw_old", f"{HAB}/src/old.ts", OLD_V1, "2026-09-13T10:00:00.000Z", "h3", "hm3"))
 #   h4：Claude が tool.py を Write（4行）。Python の import は引用符のパスが無い（Codex の指摘・PR #15）
 #     1 from oldpkg.utils import foo   → from newpkg.utils import foo（モジュールが変わった＝import）。hunk（前なし・次=2）
 #     2 VALUE = 1                       残った
@@ -261,7 +272,15 @@ write_log(LOGS2 / "-Users-t-dev-habits" / "h3.jsonl", hw("hw_old", f"{HAB}/src/o
 #     4 print(VALUE)                    残った
 TOOL_V1 = "from oldpkg.utils import foo\nVALUE = 1\nfrom pkg import a\nprint(VALUE)\n"
 TOOL_NOW = "from newpkg.utils import foo\nVALUE = 1\nfrom pkg import a, b\nprint(VALUE)\n"
-write_log(LOGS2 / "-Users-t-dev-habits" / "h4.jsonl", hw("hw_tool", f"{HAB}/src/tool.py", TOOL_V1, "2026-09-14T10:00:00.000Z", "h4", "hm4"))
+H4 = [user_text("tool.py を作って", "2026-09-14T09:59:00.000Z", sid="h4", cwd=HAB)] + hw("hw_tool", f"{HAB}/src/tool.py", TOOL_V1, "2026-09-14T10:00:00.000Z", "h4", "hm4")
+write_log(LOGS2 / "-Users-t-dev-habits" / "h4.jsonl", H4)
+#   h5：h4 を --resume した会話。本物のログと同じく、h4 の message が同じ uuid・新しい sessionId（h5）で写っている → 同じ会話にまとめ、写った分は1回だけ数える
+#     その後 extra.py を Write（1行・残存）。→ 会話 h4＋h5＝書いた 5（tool 4＋extra 1）・残った 3・出力 100＋100＝200・再開 1 回
+H5 = []
+for o in H4:
+    c = dict(o); c["sessionId"] = "h5"; H5.append(c)   # uuid はそのまま
+H5 += hw("hw_extra", f"{HAB}/src/extra.py", "EXTRA = True\n", "2026-09-14T11:00:00.000Z", "h5", "hm5")
+write_log(LOGS2 / "-Users-t-dev-habits" / "h5.jsonl", H5)
 def put2(rel, data):
     p = PROJ2 / rel
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -270,4 +289,5 @@ put2("src/app.ts", APP_NOW)
 put2("src/util.ts", UTIL_NOW)
 put2("src/old.ts", OLD_NOW)
 put2("src/tool.py", TOOL_NOW)
+put2("src/extra.py", "EXTRA = True\n")
 put2("README.md", "# habits\n")

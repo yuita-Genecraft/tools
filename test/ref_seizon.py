@@ -2,7 +2,7 @@
 """生存率（cc-seizon/app.html）の別実装。ブラウザ版と同じ規則で、同じ数字が出るかを突き合わせるためのもの。
 規則の正本は app.html のコメント。ここは写し（違いが出たらどちらかが間違い）。
 使い方: run(log_paths, project_dir, strict=False) -> dict"""
-import json, os, pathlib, re
+import json, math, os, pathlib, re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -61,13 +61,59 @@ def parse_ts(s):
         return None
 
 def new_acc():
-    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0}
+    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "sessLink": []}
+
+def resolve_sessions(acc):
+    """app.html の resolveSessions と同じ：同じ uuid が別の sessionId で出たセッションを1つの会話にまとめる。代表＝いちばん早く始まった方（同時なら sid の文字列順）"""
+    parent = {}
+    def find(x):
+        while x in parent and parent[x] != x:
+            x = parent[x]
+        return x
+    for a, b in acc["sessLink"]:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    groups = {}
+    for sid in acc["sess"]:
+        groups.setdefault(find(sid), []).append(sid)
+    rep_of, merged = {}, {}
+    for sids in groups.values():
+        sids.sort(key=lambda a: ((acc["sess"][a]["start"] if acc["sess"][a]["start"] is not None else float("inf")), a))
+        rep = sids[0]
+        m = {"out": 0, "inp": 0, "cache": 0, "msgs": 0, "first": "", "firstTs": None, "start": None, "end": None, "bash": 0, "cwd": "", "members": len(sids)}
+        for sid in sids:
+            v = acc["sess"][sid]; rep_of[sid] = rep
+            m["out"] += v["out"]; m["inp"] += v["inp"]; m["cache"] += v["cache"]; m["msgs"] += v["msgs"]; m["bash"] += v["bash"]
+            if v["firstTs"] is not None and (m["firstTs"] is None or v["firstTs"] < m["firstTs"]):
+                m["firstTs"] = v["firstTs"]; m["first"] = v["first"]
+            if v["start"] is not None and (m["start"] is None or v["start"] < m["start"]):
+                m["start"] = v["start"]
+            if v["end"] is not None and (m["end"] is None or v["end"] > m["end"]):
+                m["end"] = v["end"]
+            if not m["cwd"]:
+                m["cwd"] = v["cwd"]
+        merged[rep] = m
+    return rep_of, merged
+
+RX_TAG = re.compile(r"<[^<>]{1,80}>")
+
+def prompt_head(text):
+    t = re.sub(r"\s+", " ", RX_TAG.sub(" ", str(text))).strip()
+    return t[:100] + "…" if len(t) > 100 else t
+
+def sess_of(acc, sid):
+    s = acc["sess"].get(sid)
+    if s is None:
+        s = {"out": 0, "inp": 0, "cache": 0, "msgs": 0, "first": "", "firstTs": None, "start": None, "end": None, "bash": 0, "cwd": ""}
+        acc["sess"][sid] = s
+    return s
 
 def handle_line(line, acc):
     acc["lines"] += 1
     if utf16len(line) < 40:
         return
-    if "tool_use" not in line and "tool_result" not in line:
+    if '"message"' not in line:
         return
     try:
         o = json.loads(line)
@@ -76,11 +122,48 @@ def handle_line(line, acc):
         return
     if not isinstance(o, dict) or not isinstance(o.get("message"), dict):
         return
+    sid = o["sessionId"] if isinstance(o.get("sessionId"), str) else ""
+    ts_raw = parse_ts(o.get("timestamp"))
+    if sid and ts_raw is not None:
+        sv = sess_of(acc, sid)
+        if sv["start"] is None or ts_raw < sv["start"]:
+            sv["start"] = ts_raw
+        if sv["end"] is None or ts_raw > sv["end"]:
+            sv["end"] = ts_raw
+        if not sv["cwd"] and isinstance(o.get("cwd"), str):
+            sv["cwd"] = norm_path(o["cwd"])
     c = o["message"].get("content")
+    if o.get("type") == "user" and sid and not o.get("isSidechain"):
+        sv = sess_of(acc, sid)
+        txt = ""
+        if isinstance(c, str):
+            txt = c
+        elif isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str):
+                    txt = b["text"]; break
+        if txt and ts_raw is not None and (sv["firstTs"] is None or ts_raw < sv["firstTs"]):
+            h = prompt_head(txt)
+            if h:
+                sv["first"] = h; sv["firstTs"] = ts_raw
     if not isinstance(c, list):
         return
     if o.get("type") == "assistant":
-        ts = parse_ts(o.get("timestamp"))
+        ts = ts_raw
+        mid = o["uuid"] if isinstance(o.get("uuid"), str) else ("m:" + o["message"]["id"] if isinstance(o["message"].get("id"), str) else "")
+        seen_sid = acc["msgSid"].get(mid) if mid else None
+        if sid and mid and seen_sid is not None and seen_sid != sid:
+            acc["sessLink"].append((seen_sid, sid))
+        if sid and mid and seen_sid is None:
+            acc["msgSid"][mid] = sid
+            u = o["message"].get("usage"); sv = sess_of(acc, sid)
+            if isinstance(u, dict):
+                sv["out"] += u.get("output_tokens") or 0; sv["inp"] += u.get("input_tokens") or 0
+                sv["cache"] += (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
+            sv["msgs"] += 1
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash":
+                    sv["bash"] += 1
         for b in c:
             if not isinstance(b, dict) or b.get("type") != "tool_use" or b.get("name") not in USE_NAMES or not isinstance(b.get("id"), str):
                 continue
@@ -492,6 +575,33 @@ def analyze_habits(habit_in):
     H["items"].sort(key=lambda a: (-int(a["candidate"]), int(a["generic"]), -a["count"], -a["sessions"], a["id"]))
     return H
 
+def jround(x):
+    return int(math.floor(x + 0.5))   # JS の Math.round と同じ（Python の round は偶数丸め）
+
+def session_stats(per_sess, sess):
+    """app.html の sessionStats と同じ：セッション全体の出力トークンを、このリポジトリの行の割合で按分"""
+    rows = []
+    out_total = 0; out_gone = 0
+    for sid, ps in per_sess.items():
+        if not ps["written"]:
+            continue
+        sv = sess.get(sid) or {"out": 0, "inp": 0, "cache": 0, "msgs": 0, "first": "", "start": None, "end": None, "bash": 0}
+        share = ps["written"] / ps["writtenAll"] if ps["writtenAll"] else 0
+        out_repo = jround(sv["out"] * share)
+        gone = ps["written"] - ps["alive"]
+        out_gone_repo = jround(out_repo * gone / ps["written"])
+        out_total += out_repo; out_gone += out_gone_repo
+        rows.append({"sid": sid, "first": sv["first"] or "", "start": date_key(sv["start"]) if sv["start"] is not None else "", "end": date_key(sv["end"]) if sv["end"] is not None else "",
+                     "out": sv["out"], "outRepo": out_repo, "share": share, "msgs": sv["msgs"], "bash": sv["bash"], "members": sv.get("members", 1), "edits": ps["edits"],
+                     "written": ps["written"], "alive": ps["alive"], "rewritten": ps["rewritten"], "human": ps["human"], "dropped": ps["dropped"],
+                     "perAlive": jround(out_repo / ps["alive"]) if ps["alive"] else None})
+    rows.sort(key=lambda r: (-r["outRepo"], -r["written"], r["sid"]))
+    big = [r for r in rows if r["written"] >= 20 and r["outRepo"] > 0]
+    costly = sorted([r for r in big if r["perAlive"] is None or r["alive"] / r["written"] < 0.7], key=lambda r: (0 if r["perAlive"] is None else 1, -(r["outRepo"] if r["perAlive"] is None else r["perAlive"]), r["sid"]))[:3]
+    cheap = sorted([r for r in big if r["perAlive"] is not None and r["alive"] / r["written"] >= 0.7], key=lambda r: (r["perAlive"], r["sid"]))[:3]
+    return {"outTotal": out_total, "outGone": out_gone, "goneShare": (out_gone / out_total) if out_total else 0, "rows": rows,
+            "costly": [r["sid"] for r in costly], "cheap": [r["sid"] for r in cheap]}
+
 def analyze(acc, project, project_name, strict):
     evs = build_events(acc)
     claude, applied = apply_events(evs, acc, strict)
@@ -506,15 +616,26 @@ def analyze(acc, project, project_name, strict):
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
          "written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "droppedWritten": 0, "aiLines": 0,
          "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched,
-         "habits": {"lines": 0, "matched": 0, "items": []}}
+         "habits": {"lines": 0, "matched": 0, "items": []},
+         "sessionStats": {"outTotal": 0, "outGone": 0, "goneShare": 0, "rows": [], "costly": [], "cheap": []}}
     if not root:
         return R
     prefix = root + "/"
     sids = set(); tmin = None; tmax = None
+    per_sess = {}
+    rep_of, sess_merged = resolve_sessions(acc)
+    def rep_sid(sid):
+        return rep_of.get(sid, sid)
+    def ps_of(sid):
+        sid = rep_sid(sid)
+        v = per_sess.get(sid)
+        if v is None:
+            v = {"written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "edits": 0, "writtenAll": 0}; per_sess[sid] = v
+        return v
     for a in applied:
         if not a["path"].startswith(prefix):
             continue
-        R["edits"] += 1; sids.add(a["sid"])
+        R["edits"] += 1; sids.add(rep_sid(a["sid"])); ps_of(a["sid"])["edits"] += 1
         tmin = a["ts"] if tmin is None or a["ts"] < tmin else tmin
         tmax = a["ts"] if tmax is None or a["ts"] > tmax else tmax
     R["sessions"] = len(sids)
@@ -536,17 +657,20 @@ def analyze(acc, project, project_name, strict):
         row = {"file": rel, "exists": text is not None, "lines": len(cur_set), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
         human_n = 0
         for k, rec in m.items():
+            ps = ps_of(rec.get("sid", "")); ps["written"] += 1
             if k in cur_set:
-                row["alive"] += 1; alive_c.append({"key": k, "file": rel})
+                row["alive"] += 1; alive_c.append({"key": k, "file": rel}); ps["alive"] += 1
             elif rec["removed"]:
-                row["rewritten"] += 1
+                row["rewritten"] += 1; ps["rewritten"] += 1
             else:
                 row["human"] += 1
                 if text is not None:   # 典型的な「人が消した行」は、今もあるファイルから
-                    human_c.append({"key": k, "file": rel}); human_n += 1
+                    human_c.append({"key": k, "file": rel}); human_n += 1; ps["human"] += 1
+                else:
+                    ps["dropped"] += 1
         if human_n:
             habit_in.append({"file": rel, "claudeKeys": m,
-                             "order": [{"key": k, "seq": rec["seq"], "sid": rec.get("sid", ""), "alive": k in cur_set, "human": (k not in cur_set) and not rec["removed"]} for k, rec in m.items()],
+                             "order": [{"key": k, "seq": rec["seq"], "sid": rep_sid(rec.get("sid", "")), "alive": k in cur_set, "human": (k not in cur_set) and not rec["removed"]} for k, rec in m.items()],
                              "cur": line_keys(text, strict)})
         row["ai"] = row["alive"]
         for k in ("written", "alive", "rewritten", "human"):
@@ -572,6 +696,12 @@ def analyze(acc, project, project_name, strict):
     R["top"] = [{"file": f["file"], "alias": f["alias"], "human": f["human"], "written": f["written"], "exists": True} for f in top[:3]]
     R["examples"] = {"alive": pick_example(alive_c), "human": pick_example(human_c)}
     R["habits"] = analyze_habits(habit_in)
+    for m in claude.values():
+        for rec in m.values():
+            ps = per_sess.get(rep_sid(rec.get("sid", "")))
+            if ps:
+                ps["writtenAll"] += 1
+    R["sessionStats"] = session_stats(per_sess, sess_merged)
     return R
 
 # ---------- プロジェクトのフォルダ（app.html と同じ除外） ----------

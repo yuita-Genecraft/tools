@@ -7,13 +7,13 @@
 <meta name="referrer" content="no-referrer">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Claude Code 生存率">
-<meta property="og:description" content="Claude Code が書いた行のうち、今も残っている行はどれだけか。ログと手元のフォルダをブラウザの中だけで突き合わせ、人が直した行から CLAUDE.md に足す1行も出します。ファイルは外に送信されません。">
+<meta property="og:description" content="Claude Code が書いた行のうち、今も残っている行はどれだけか。ログと手元のフォルダをブラウザの中だけで突き合わせ、会話ごとの「残った1行あたりの出力トークン」で、どの頼み方が高くついて消えたかも出します。ファイルは外に送信されません。">
 <meta property="og:url" content="https://yuita-genecraft.github.io/tools/cc-seizon/">
 <meta property="og:image" content="https://yuita-genecraft.github.io/tools/og/cc-seizon.png">
 <meta name="twitter:card" content="summary_large_image">
 <script>window.__STANDALONE__=true;window.__TOOL_URL__="https://yuita-genecraft.github.io/tools/cc-seizon/";</script>
 <title>Claude Code 生存率</title>
-<meta name="description" content="Claude Code が書いた行のうち、今も残っている行はどれだけか。ログと手元のフォルダをブラウザの中だけで突き合わせ、人が直した行から CLAUDE.md に足す1行も出します。ファイルは外に送信されません。">
+<meta name="description" content="Claude Code が書いた行のうち、今も残っている行はどれだけか。ログと手元のフォルダをブラウザの中だけで突き合わせ、会話ごとの「残った1行あたりの出力トークン」で、どの頼み方が高くついて消えたかも出します。ファイルは外に送信されません。">
 <style>
 /* Layout: 暗い机の上に、光る1枚のカード。となりに検査結果の綴り。
    カードは画像なのでどちらのテーマでも同じ色。机と綴りだけがテーマで変わる。 */
@@ -189,6 +189,18 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 .delta{margin-left:8px;font-size:12px;font-weight:600;color:var(--muted)}
 .delta.good{color:var(--alive)} .delta.bad{color:var(--human)}
 .snap{align-items:center}
+/* 頼み方 */
+.sesscols{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:14px;margin-top:14px}
+.sesscol{display:grid;gap:8px;align-content:start;padding:12px 14px;border:1px solid var(--rule);border-radius:12px;background:var(--sheet)}
+.sesscol .sub{margin:0 0 2px}
+.sesscol.costly .sub{color:var(--human)} .sesscol.cheap .sub{color:var(--alive)}
+.sessrow{display:grid;gap:4px;padding:8px 0;border-top:1px dotted var(--rule)}
+.sessrow q,.table-wrap td.q q{quotes:"「" "」";font-size:13px;line-height:1.5;word-break:break-all}
+.sessrow .nums{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sessrow .per{font-size:13px;font-variant-numeric:tabular-nums}
+.sessrow .per b.bad{color:var(--human)}
+.table-wrap td.q{max-width:22rem;min-width:14rem;white-space:normal;text-align:left}
+.big-line .l b{color:var(--ink)}
 .snap .hint{flex:1 1 16rem;margin:0}
 @media (max-width:640px){.pairs li{grid-template-columns:1fr}.pairs .arrow{justify-self:start}}
 
@@ -204,7 +216,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
   <header class="masthead">
     <p class="eyebrow">ブラウザの中だけで突き合わせ ・ 通信ゼロ ・ 無料</p>
     <h1>Claude Code <em>生存率</em></h1>
-    <p class="lead">Claude が書いたコードのうち、今も残っている行はどれだけか。Claude Code のログと、手元のプロジェクトのフォルダを、このページに落とすだけ。「残った」「Claude が自分で書き直した」「人が消した」「ファイルごと消えた」に分けて、1枚の画像にします。人が直した行からは、あなたの直し癖と、CLAUDE.md に足す1行の案を出します。</p>
+    <p class="lead">Claude が書いたコードのうち、今も残っている行はどれだけか。Claude Code のログと、手元のプロジェクトのフォルダを、このページに落とすだけ。「残った」「Claude が自分で書き直した」「人が消した」「ファイルごと消えた」に分けて、1枚の画像にします。会話ごとに、最初の指示と「残った1行あたりの出力トークン」を並べて、どの頼み方が高くついて消えたかも出します。</p>
   </header>
 
   <main class="layout">
@@ -262,6 +274,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
         <label><input type="checkbox" id="optHideFiles">ファイル名を隠す</label>
         <label><input type="checkbox" id="optHideProject">プロジェクト名を隠す</label>
         <label><input type="checkbox" id="optExamples">典型的な行を1つずつ載せる</label>
+        <label><input type="checkbox" id="optHidePrompts">指示の冒頭を隠す</label>
       </div>
       <div class="share">
         <a class="btn primary" id="xLink" href="https://x.com/intent/tweet" target="_blank" rel="noopener">Xに投稿する</a>
@@ -298,6 +311,7 @@ const TOOL_URL = typeof window.__TOOL_URL__ === 'string' ? window.__TOOL_URL__ :
 
 /* ---------- 表示の小道具 ---------- */
 const fmt = n => Math.round(n || 0).toLocaleString('ja-JP');
+const fmtTok = n => { n = Math.round(n || 0); return n >= 1e8 ? (n / 1e8).toFixed(2) + '億' : n >= 1e4 ? (n / 1e4).toFixed(n >= 1e6 ? 0 : 1) + '万' : fmt(n); };   // トークン数：1万以上は「万」
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pct = r => Math.round((r || 0) * 100) + '%';
 const pct1 = r => { const v = (r || 0) * 100; return (v >= 10 || v === 0 ? Math.round(v) : v.toFixed(1)) + '%'; };
@@ -337,7 +351,44 @@ const normPath = p => String(p).replace(/\\/g, '/');
 const USE_NAMES = new Set(['Edit', 'MultiEdit', 'Write', 'Read']);
 const RX_NUMBERED = /^\s*\d+(?:→|\t)/;
 const LOG_SKIP_DIRS = new Set(['node_modules', '.git', 'plugins', 'shell-snapshots', 'statsig', 'todos', 'debug', 'file-history', 'session-env', 'backups', 'ide']);
-function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0 }; }
+function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), sessLink: [] }; }
+/* 再開したセッション（--resume）のログは、前のセッションの message を同じ uuid・新しい sessionId で写している。
+   同じ uuid が別の sessionId で出たら「同じ会話」として後でまとめる（sessLink）。使用量は最初に見た方に足し、まとめる時に移す */
+function resolveSessions(acc){
+  const parent = new Map();
+  const find = x => { while (parent.has(x) && parent.get(x) !== x) x = parent.get(x); return x; };
+  for (const [a, b] of acc.sessLink) { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); }
+  const groups = new Map();   // 代表（仮）→ sid の配列
+  for (const sid of acc.sess.keys()) { const r = find(sid); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(sid); }
+  const repOf = new Map(), merged = new Map();
+  for (const sids of groups.values()) {
+    // 代表＝いちばん早く始まったセッション（同時なら sid の文字列順）
+    sids.sort((a, b) => (acc.sess.get(a).start - acc.sess.get(b).start) || cmpStr(a, b));
+    const rep = sids[0];
+    const m = { out: 0, inp: 0, cache: 0, msgs: 0, first: '', firstTs: Infinity, start: Infinity, end: -Infinity, bash: 0, cwd: '', members: sids.length };
+    for (const sid of sids) {
+      const v = acc.sess.get(sid); repOf.set(sid, rep);
+      m.out += v.out; m.inp += v.inp; m.cache += v.cache; m.msgs += v.msgs; m.bash += v.bash;
+      if (v.firstTs < m.firstTs) { m.firstTs = v.firstTs; m.first = v.first; }
+      if (v.start < m.start) m.start = v.start; if (v.end > m.end) m.end = v.end;
+      if (!m.cwd) m.cwd = v.cwd;
+    }
+    merged.set(rep, m);
+  }
+  return { repOf, sess: merged };
+}
+/* セッションごとの記録：使用トークン（assistant の usage）・最初の指示の冒頭・期間・Bash の回数。頼み方の節で使う */
+function sessOf(acc, sid){
+  let s = acc.sess.get(sid);
+  if (!s) { s = { out: 0, inp: 0, cache: 0, msgs: 0, first: '', firstTs: Infinity, start: Infinity, end: -Infinity, bash: 0, cwd: '' }; acc.sess.set(sid, s); }
+  return s;
+}
+const RX_TAG = /<[^<>]{1,80}>/g;
+/* 指示の冒頭：タグ（<pasted_content …> など）を外し、空白をそろえて 100 字。空なら無し */
+function promptHead(text){
+  const t = String(text).replace(RX_TAG, ' ').replace(/\s+/g, ' ').trim();
+  return t.length > 100 ? t.slice(0, 100) + '…' : t;
+}
 function toolResultText(content){
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map(x => (x && typeof x.text === 'string') ? x.text : '').join('');
@@ -346,14 +397,37 @@ function toolResultText(content){
 function handleLogLine(line, acc){
   acc.lines++;
   if (line.length < 40) return;
-  if (line.indexOf('tool_use') < 0 && line.indexOf('tool_result') < 0) return;
+  // 読むのは user／assistant の message だけ（tool_use・tool_result・usage・最初の指示）。それ以外の行（summary・progress 等）は飛ばす
+  if (line.indexOf('"message"') < 0) return;
   let o;
   try { o = JSON.parse(line); } catch (e) { acc.bad++; return; }
   if (!o || typeof o !== 'object' || !o.message || typeof o.message !== 'object') return;
+  const sid = typeof o.sessionId === 'string' ? o.sessionId : '';
+  const tsRaw = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
+  if (sid && Number.isFinite(tsRaw)) { const sv = sessOf(acc, sid); if (tsRaw < sv.start) sv.start = tsRaw; if (tsRaw > sv.end) sv.end = tsRaw; if (!sv.cwd && typeof o.cwd === 'string') sv.cwd = normPath(o.cwd); }
   const c = o.message.content;
+  if (o.type === 'user' && sid && !o.isSidechain) {
+    // 最初の指示の冒頭（文字列の content か、text ブロック。tool_result だけの message は飛ばす）
+    const sv = sessOf(acc, sid);
+    let txt = '';
+    if (typeof c === 'string') txt = c;
+    else if (Array.isArray(c)) for (const b of c) { if (b && b.type === 'text' && typeof b.text === 'string') { txt = b.text; break; } }
+    if (txt && Number.isFinite(tsRaw) && tsRaw < sv.firstTs) { const h = promptHead(txt); if (h) { sv.first = h; sv.firstTs = tsRaw; } }
+  }
   if (!Array.isArray(c)) return;
   if (o.type === 'assistant') {
-    const ts = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
+    const ts = tsRaw;
+    // 再開したセッションのログには前の message が写っているので、uuid（無ければ message.id）で1回だけ数える。別の sessionId で写っていれば同じ会話として後でまとめる
+    const mid = typeof o.uuid === 'string' ? o.uuid : (typeof o.message.id === 'string' ? 'm:' + o.message.id : '');
+    const seenSid = mid ? acc.msgSid.get(mid) : undefined;
+    if (sid && mid && seenSid !== undefined && seenSid !== sid) acc.sessLink.push([seenSid, sid]);
+    if (sid && mid && seenSid === undefined) {
+      acc.msgSid.set(mid, sid);
+      const u = o.message.usage, sv = sessOf(acc, sid);
+      if (u && typeof u === 'object') { sv.out += u.output_tokens || 0; sv.inp += u.input_tokens || 0; sv.cache += (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); }
+      sv.msgs++;
+      for (const b of c) if (b && b.type === 'tool_use' && b.name === 'Bash') sv.bash++;
+    }
     for (const b of c) {
       if (!b || b.type !== 'tool_use' || !USE_NAMES.has(b.name) || typeof b.id !== 'string') continue;
       if (acc.uses.has(b.id)) continue;
@@ -505,12 +579,17 @@ function analyzeParsed(acc, project, projectName, strict){
     written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, droppedWritten: 0, aiLines: 0,
     period: null, files: [], top: [], examples: { alive: null, human: null }, rootCandidates: candidates, rootMatched: matched,
     habits: { lines: 0, matched: 0, items: [] },
+    sessionStats: { outTotal: 0, outGone: 0, goneShare: 0, rows: [], costly: [], cheap: [] },
   };
   if (!root) return R;
   const prefix = root + '/';
   const sids = new Set();
+  const perSess = new Map();   // 会話（再開でつながったセッションをまとめたもの）ごと：このリポジトリに書いた行の内訳と編集回数（頼み方の節）
+  const { repOf, sess: sessMerged } = resolveSessions(acc);
+  const repSid = sid => repOf.get(sid) || sid;
+  const psOf = sid => { sid = repSid(sid); let v = perSess.get(sid); if (!v) { v = { written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, edits: 0, writtenAll: 0 }; perSess.set(sid, v); } return v; };
   let tmin = Infinity, tmax = -Infinity;
-  for (const a of applied) { if (!a.path.startsWith(prefix)) continue; R.edits++; sids.add(a.sid); if (a.ts < tmin) tmin = a.ts; if (a.ts > tmax) tmax = a.ts; }
+  for (const a of applied) { if (!a.path.startsWith(prefix)) continue; R.edits++; sids.add(repSid(a.sid)); psOf(a.sid).edits++; if (a.ts < tmin) tmin = a.ts; if (a.ts > tmax) tmax = a.ts; }
   R.sessions = sids.size;
   if (R.edits) R.period = { start: dateKey(new Date(tmin)), end: dateKey(new Date(tmax)), days: daysBetween(dateKey(new Date(tmin)), dateKey(new Date(tmax))) + 1 };
   const aliveC = [], humanC = [];
@@ -526,13 +605,14 @@ function analyzeParsed(acc, project, projectName, strict){
     const row = { file: rel, exists: text !== undefined, lines: curSet.size, written: m.size, alive: 0, rewritten: 0, human: 0, ai: 0 };
     let humanN = 0;
     for (const [k, rec] of m) {
-      if (curSet.has(k)) { row.alive++; aliveC.push({ key: k, file: rel }); }
-      else if (rec.removed) row.rewritten++;
-      else { row.human++; if (text !== undefined) { humanC.push({ key: k, file: rel }); humanN++; } }   // 典型的な「人が消した行」は、今もあるファイルから選ぶ
+      const ps = psOf(rec.sid); ps.written++;
+      if (curSet.has(k)) { row.alive++; aliveC.push({ key: k, file: rel }); ps.alive++; }
+      else if (rec.removed) { row.rewritten++; ps.rewritten++; }
+      else { row.human++; if (text !== undefined) { humanC.push({ key: k, file: rel }); humanN++; ps.human++; } else ps.dropped++; }   // 典型的な「人が消した行」は、今もあるファイルから選ぶ
     }
     if (humanN) habitIn.push({   // 直し癖の材料：Claude の行の並び（残った／人が消した の印つき）と、今の行の並び
       file: rel, claudeKeys: m,
-      order: [...m.entries()].map(([k, rec]) => ({ key: k, seq: rec.seq, sid: rec.sid, alive: curSet.has(k), human: !curSet.has(k) && !rec.removed })),
+      order: [...m.entries()].map(([k, rec]) => ({ key: k, seq: rec.seq, sid: repSid(rec.sid), alive: curSet.has(k), human: !curSet.has(k) && !rec.removed })),
       cur: lineKeys(text, strict),
     });
     row.ai = row.alive;
@@ -555,7 +635,32 @@ function analyzeParsed(acc, project, projectName, strict){
   R.top = R.files.filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written || cmpStr(a.file, b.file)).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: true }));
   R.examples = { alive: pickExample(aliveC), human: pickExample(humanC) };
   R.habits = analyzeHabits(habitIn);
+  // 頼み方：セッション全体の出力トークンを「そのセッションで Claude が書いた行のうち、このリポジトリの行の割合」で按分し、今は無い行の分を見積もる
+  for (const m of claude.values()) for (const rec of m.values()) { const ps = perSess.get(repSid(rec.sid)); if (ps) ps.writtenAll++; }
+  R.sessionStats = sessionStats(perSess, sessMerged);
   return R;
+}
+function sessionStats(perSess, sess){
+  const rows = [];
+  let outTotal = 0, outGone = 0;
+  for (const [sid, ps] of perSess) {
+    if (!ps.written) continue;
+    const sv = sess.get(sid) || { out: 0, inp: 0, cache: 0, msgs: 0, first: '', start: Infinity, end: -Infinity, bash: 0 };
+    const share = ps.writtenAll ? ps.written / ps.writtenAll : 0;
+    const outRepo = Math.round(sv.out * share);
+    const gone = ps.written - ps.alive;
+    const outGoneRepo = Math.round(outRepo * gone / ps.written);
+    outTotal += outRepo; outGone += outGoneRepo;
+    rows.push({ sid, first: sv.first || '', start: Number.isFinite(sv.start) ? dateKey(new Date(sv.start)) : '', end: Number.isFinite(sv.end) ? dateKey(new Date(sv.end)) : '',
+      out: sv.out, outRepo, share, msgs: sv.msgs, bash: sv.bash, members: sv.members || 1, edits: ps.edits, written: ps.written, alive: ps.alive, rewritten: ps.rewritten, human: ps.human, dropped: ps.dropped,
+      perAlive: ps.alive ? Math.round(outRepo / ps.alive) : null });
+  }
+  rows.sort((a, b) => b.outRepo - a.outRepo || b.written - a.written || cmpStr(a.sid, b.sid));
+  const big = rows.filter(r => r.written >= 20 && r.outRepo > 0);
+  // 高くて消えた＝7割以上は残らなかった会話のうち、残った行が無い（∞）を先に、次に残った1行あたりの多い順。安くて残った＝7割以上残って、残った1行あたりの少ない順
+  const costly = big.filter(r => r.perAlive === null || r.alive / r.written < 0.7).sort((a, b) => (a.perAlive === null) !== (b.perAlive === null) ? (a.perAlive === null ? -1 : 1) : (a.perAlive === null ? b.outRepo - a.outRepo : b.perAlive - a.perAlive) || cmpStr(a.sid, b.sid)).slice(0, 3);
+  const cheap = big.filter(r => r.perAlive !== null && r.alive / r.written >= 0.7).sort((a, b) => a.perAlive - b.perAlive || cmpStr(a.sid, b.sid)).slice(0, 3);
+  return { outTotal, outGone, goneShare: outTotal ? outGone / outTotal : 0, rows, costly: costly.map(r => r.sid), cheap: cheap.map(r => r.sid) };
 }
 
 /* ---------- 直し癖（人が直した Claude の行 → 今の行 → 直しの型 → CLAUDE.md の1行） ----------
@@ -784,6 +889,19 @@ function sampleResult(){
   R.files.sort((a, b) => b.written - a.written || b.lines - a.lines);
   assignAliases(R);
   const hx = (id, count, sessions, files, candidate, examples, dir = '') => ({ id, label: HABITS[id].label, kind: HABITS[id].kind || 'generic', count, sessions, files, generic: !!HABITS[id].generic, candidate, dir, rule: HABITS[id].generic ? null : HABITS[id].rule({ dir, count }), examples });
+  const sr = (sid, first, start, end, outRepo, written, alive, rewritten, human, dropped, edits) => ({ sid, first, start, end, out: outRepo, outRepo, share: 1, msgs: Math.round(outRepo / 900), bash: Math.round(outRepo / 6000), edits, written, alive, rewritten, human, dropped, perAlive: alive ? Math.round(outRepo / alive) : null });
+  const srows = [
+    sr('s1', 'メモアプリの同期機能を一通り作って。設計は任せる', '2026-09-21', '2026-09-22', 1180000, 1120, 180, 410, 70, 460, 310),
+    sr('s2', 'git checkout -b fix/search-paging。src/lib/search.ts の listNotes に offset/limit を足し、テストも', '2026-10-02', '2026-10-02', 142000, 326, 301, 18, 7, 0, 41),
+    sr('s3', 'このアプリは Next.js のメモアプリです。まずコードを読んで、改善点を直して', '2026-09-27', '2026-09-28', 610000, 540, 96, 110, 54, 280, 188),
+    sr('s4', '引き継ぎ：Editor.tsx の自動保存。仕様は docs/autosave.md。範囲外は触らない', '2026-10-09', '2026-10-09', 236000, 412, 388, 24, 0, 0, 57),
+    sr('s5', 'auth.ts のセッション期限のバグ。再現手順：…', '2026-10-15', '2026-10-15', 98000, 143, 121, 10, 12, 0, 22),
+    sr('s6', 'README を整えて', '2026-10-18', '2026-10-18', 21000, 70, 52, 12, 6, 0, 9),
+  ];
+  // 本物と同じ関数で集計する（順位の規則を見本だけ別にしない）
+  R.sessionStats = sessionStats(
+    new Map(srows.map(r => [r.sid, { written: r.written, alive: r.alive, rewritten: r.rewritten, human: r.human, dropped: r.dropped, edits: r.edits, writtenAll: r.written }])),
+    new Map(srows.map(r => [r.sid, { out: r.outRepo, inp: 0, cache: 0, msgs: r.msgs, first: r.first, start: Date.parse(r.start + 'T10:00:00+09:00'), end: Date.parse(r.end + 'T18:00:00+09:00'), bash: r.bash, members: 1 }])));
   R.habits = { lines: 287, matched: 103, items: [   // 合計＝人が直した 287 行（書き換え 103・削除 184）
     hx('debug', 41, 9, 7, true, [{ before: "console.log('notes', notes.length);", after: null, file: 'src/app/api/notes/route.ts' }, { before: "console.log('render', props);", after: null, file: 'src/components/Editor.tsx' }]),
     hx('comment', 23, 6, 8, true, [{ before: '// Fetch all notes for the current user', after: null, file: 'src/lib/db.ts' }, { before: '// Handle the submit event', after: null, file: 'src/components/Editor.tsx' }]),
@@ -897,18 +1015,22 @@ function drawCard(R, opts){
   });
 
   // 2つのタイル
-  const tY = 678, tH = 150, tW = (CW - 20) / 2;
-  const tile = (x0, title, big, unit, sub1) => {
+  // 3つのタイル：AI率／今は無いコードに使った出力トークン／ログの記録
+  const tY = 678, tH = 150, tW = (CW - 40) / 3;
+  const tile = (x0, title, big, unit, sub1, bigColor) => {
     x.fillStyle = P.panel; rrect(x, x0, tY, tW, tH, 18); x.fill();
-    text(title, x0 + 24, tY + 34, `600 19px ${GOTHIC}`, P.sub);
-    text(big, x0 + 22, tY + 104, `800 58px ${NUM}`, P.ink, 'left', 'alphabetic');
-    if (unit) { x.font = `800 58px ${NUM}`; const bw = x.measureText(big).width; text(unit, x0 + 22 + bw + 8, tY + 104, `600 24px ${GOTHIC}`, P.sub, 'left', 'alphabetic'); }
-    const s1 = fitFont(x, sub1, 500, 17, GOTHIC, tW - 48, 12);
+    const t1 = fitFont(x, title, 600, 19, GOTHIC, tW - 48, 14);
+    text(title, x0 + 24, tY + 34, `600 ${t1}px ${GOTHIC}`, P.sub);
+    text(big, x0 + 22, tY + 104, `800 52px ${NUM}`, bigColor || P.ink, 'left', 'alphabetic');
+    if (unit) { x.font = `800 52px ${NUM}`; const bw = x.measureText(big).width; text(unit, x0 + 22 + bw + 8, tY + 104, `600 22px ${GOTHIC}`, P.sub, 'left', 'alphabetic'); }
+    const s1 = fitFont(x, sub1, 500, 16, GOTHIC, tW - 48, 11);
     text(sub1, x0 + 24, tY + 130, `500 ${s1}px ${GOTHIC}`, P.sub);
   };
   const touched = R.files.filter(f => f.written > 0).length + R.missingFiles.length;
-  tile(L, 'AI率（この期間に Claude が書いた分）', R.projectLines ? pct(ai) : '—', '', `今のコード ${fmt(R.projectLines)} 行のうち ${fmt(R.aiLines)} 行`);
-  tile(L + tW + 20, 'ログの記録', fmt(R.edits), '回の編集', `${fmt(R.sessions)} セッション ・ ${fmt(touched)} ファイル ・ ${R.period ? R.period.days + '日' : '—'}`);
+  const S = R.sessionStats || { outTotal: 0, outGone: 0, goneShare: 0 };
+  tile(L, 'AI率（この期間に Claude が書いた分）', R.projectLines ? pct(ai) : '—', '', `${fmt(R.projectLines)} 行中 ${fmt(R.aiLines)} 行が Claude の行`);
+  tile(L + tW + 20, '今は無いコードに使った出力トークン', S.outTotal ? pct(S.goneShare) : '—', '', S.outTotal ? `${fmtTok(S.outGone)} ／ ${fmtTok(S.outTotal)} トークン（按分）` : 'ログに usage の記録なし', S.outTotal ? P.human : P.ink);
+  tile(L + 2 * (tW + 20), 'ログの記録', fmt(R.edits), '回の編集', `${fmt(R.sessions)} セッション ・ ${fmt(touched)} ファイル ・ ${R.period ? R.period.days + '日' : '—'}`);
 
   // ファイルの地層（今の行数に比例した幅・AI率で明るさ）
   const sY = 852, sH = 18;
@@ -1085,6 +1207,7 @@ function snapshotOf(R){
   return { tool: 'cc-seizon', v: 1, savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
     written: R.written, alive: R.alive, rewritten: R.rewritten, human: R.human, dropped: R.dropped, droppedWritten: R.droppedWritten,
     aiLines: R.aiLines, projectLines: R.projectLines, edits: R.edits, sessions: R.sessions,
+    outTotal: R.sessionStats ? R.sessionStats.outTotal : 0, outGone: R.sessionStats ? R.sessionStats.outGone : 0,
     habits: (R.habits ? R.habits.items : []).map(it => ({ id: it.id, label: it.label, count: it.count, sessions: it.sessions, files: it.files, candidate: it.candidate })) };
 }
 function isSnapshot(o){ return !!(o && typeof o === 'object' && o.tool === 'cc-seizon' && typeof o.written === 'number' && Array.isArray(o.habits)); }
@@ -1107,6 +1230,7 @@ function compareHTML(R){
     li('人が消した・直した（行単位）', num(r(p.human - (p.dropped || 0), p.written), r(R.human - R.dropped, R.written), pctN, true)),
     li('ファイルごと消えた', num(r(p.dropped || 0, p.written), r(R.dropped, R.written), pctN, true)),
     li('AI率（下限）', num(r(p.aiLines, p.projectLines), r(R.aiLines, R.projectLines), pctN)),
+    li('今は無いコードに使った出力トークン', num(r(p.outGone || 0, p.outTotal || 0), r(R.sessionStats.outGone, R.sessionStats.outTotal), pctN, true)),
   ];
   const ids = new Map();
   for (const h of p.habits) ids.set(h.id, { id: h.id, label: h.label, a: h.count, b: 0 });
@@ -1118,9 +1242,30 @@ function compareHTML(R){
   return sec('前回', '前回と比べる', `${warn}${strictWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
   <p class="fine">前回＝${esc(p.savedAt || '—')} に保存した JSON（${esc(p.projectName || '—')}）。ログは30日で消えるので、期間は重ならないことがあります。「人が消した・直した」と「直しの型」は減った方が良い＝緑。</p>`, `<button type="button" class="btn small ghost" id="clearPrev">前回を外す</button>`);
 }
+/* 頼み方 × 残った1行あたりの出力トークン：どの頼み方が高くついて消えたか、安くて残ったか */
+function sessionsHTML(R, hidePrompts){
+  const S = R.sessionStats || { outTotal: 0, outGone: 0, goneShare: 0, rows: [], costly: [], cheap: [] };
+  if (!R.written) return '<p class="fine">この期間に Claude が書いた行が無いので、頼み方は出せません。</p>';
+  if (!S.rows.length) return '<p class="fine">セッションの記録がありません。</p>';
+  const q = r => hidePrompts ? '<i class="dim">（指示の冒頭を隠しています）</i>' : (r.first ? `<q title="${esc(r.first)}">${esc(r.first.length > 72 ? r.first.slice(0, 72) + '…' : r.first)}</q>` : '<i class="dim">（最初の指示が記録にない）</i>');
+  const per = r => r.perAlive === null ? '<b class="bad">残った行なし</b>' : `<b>${fmtTok(r.perAlive)}</b> トークン／行`;
+  const byId = new Map(S.rows.map(r => [r.sid, r]));
+  const top = S.rows[0];
+  const head = S.outTotal
+    ? `<div class="big-line"><span class="n">${pct(S.goneShare)}</span><span class="l">今は無いコードに使った出力トークン ＝ <b>${fmtTok(S.outGone)}</b> ／ ${fmtTok(S.outTotal)}（${fmt(S.rows.length)} セッション・按分）</span></div>`
+    : '<p class="fine"><b>ログに使用トークン（usage）の記録がありません</b>。古い形式のログか、別の経路の記録です。行の数だけで並べます。</p>';
+  const worst = S.costly.length ? byId.get(S.costly[0]) : null;
+  const lead = worst && S.outTotal ? `<p class="def">いちばん高くついたのは ${q(worst)} で始めたセッション＝出力 <b>${fmtTok(worst.outRepo)}</b> トークンで ${fmt(worst.written)} 行書いて、残った行は <b>${fmt(worst.alive)}</b>${worst.dropped ? `（${fmt(worst.dropped)} 行はファイルごと消えた）` : ''}。</p>` : '';
+  const card = (title, ids, cls) => `<div class="sesscol ${cls}"><h3 class="sub">${title}</h3>${ids.length ? ids.map(id => { const r = byId.get(id); return `<article class="sessrow">${q(r)}<div class="nums"><span>${esc(r.start)}</span><span>出力 <b>${fmtTok(r.outRepo)}</b></span><span>書いた ${fmt(r.written)} → 残った <b>${fmt(r.alive)}</b></span>${r.dropped ? `<span>ファイルごと消えた ${fmt(r.dropped)}</span>` : ''}${r.rewritten ? `<span>自分で書き直し ${fmt(r.rewritten)}</span>` : ''}${r.members > 1 ? `<span>再開 ${fmt(r.members - 1)} 回を含む</span>` : ''}</div><div class="per">${per(r)}</div></article>`; }).join('') : '<p class="fine">該当なし（20行以上書いたセッションが対象）</p>'}</div>`;
+  const cols = S.outTotal ? `<div class="sesscols">${card('高くて消えた', S.costly, 'costly')}${card('安くて残った', S.cheap, 'cheap')}</div>` : '';
+  const tr = S.rows.map(r => `<tr><td>${esc(r.start)}${r.members > 1 ? `<br><small class="dim">再開 ${fmt(r.members - 1)} 回を含む</small>` : ''}</td><td class="q">${q(r)}</td><td>${S.outTotal ? fmtTok(r.outRepo) : '—'}</td><td>${fmt(r.written)}</td><td>${fmt(r.alive)}</td><td>${fmt(r.rewritten)}</td><td>${fmt(r.human)}</td><td>${fmt(r.dropped)}</td><td>${S.outTotal ? (r.perAlive === null ? '—' : fmtTok(r.perAlive)) : '—'}</td><td>${fmt(r.edits)}</td></tr>`).join('');
+  const table = `<div class="table-wrap"><table><thead><tr><th>開始</th><th>最初の指示（冒頭）</th><th>出力トークン（按分）</th><th>書いた</th><th>残った</th><th>自分で書き直し</th><th>人が直した</th><th>ファイルごと消えた</th><th>残った1行あたり</th><th>編集</th></tr></thead><tbody>${tr}</tbody></table></div>`;
+  return head + lead + cols + table + `<p class="fine">1行＝1つの会話。--resume で再開したセッションは、前の記録が写っているので同じ会話にまとめ、写った分は1回だけ数えます。出力トークンは assistant の usage（output_tokens）を会話ごとに足し、そのセッションで Claude が書いた行のうち、このリポジトリの行の割合で按分しています（別のリポジトリにも触ったセッションの分は、その割合だけ）。「今は無いコードに使った」は、按分した出力トークン × 残っていない行の割合。入力トークン（キャッシュ読みを含む）は数えていません＝費用そのものではなく、Claude が書いた量の目安です。試作を捨てるのは悪いことではありません。この表は「どの頼み方が高くついたか」を自分のログで見るためのものです。指示の冒頭は端末の外に出ません（カード・共有文にも載りません）。</p>`;
+}
 function renderDetails(R, opts){
   const html = [
-    sec('一手', '直し癖 → CLAUDE.md に足す1行', habitsHTML(R, opts.hideFiles)),
+    sec('一手', '頼み方と、残った1行あたりの出力トークン', sessionsHTML(R, opts.hidePrompts)),
+    sec('癖', '直し癖 → CLAUDE.md に足す1行', habitsHTML(R, opts.hideFiles)),
     compareHTML(R),
     sec('生存率', '残った・書き直した・消した', stackHTML(R)),
     sec('AI率', '今のコードのうち Claude の行', aiHTML(R)),
@@ -1144,7 +1289,9 @@ function shareText(R){
     `・自分が消した・直した：${pct(rate(R.human - R.dropped, w))}`,
   ];
   if (R.dropped) lines.push(`・ファイルごと消えた：${pct(rate(R.dropped, w))}`);
-  lines.push(`・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`, '#ClaudeCode生存率');
+  lines.push(`・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`);
+  if (R.sessionStats && R.sessionStats.outTotal) lines.push(`・今は無いコードに使った出力トークン：${pct(R.sessionStats.goneShare)}（${fmtTok(R.sessionStats.outGone)}／${fmtTok(R.sessionStats.outTotal)}）`);
+  lines.push('#ClaudeCode生存率');
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');
 }
@@ -1153,7 +1300,7 @@ function shareText(R){
 let current = sampleResult();
 let lastCanvas = null;
 let inputs = { acc: null, project: null, projectName: '' };   // 読み込み済みの生データ（厳密モードの切り替えで再計算する）
-const opts = () => ({ strict: $('#optStrict').checked, hideFiles: $('#optHideFiles').checked, hideProject: $('#optHideProject').checked, examples: $('#optExamples').checked });
+const opts = () => ({ strict: $('#optStrict').checked, hideFiles: $('#optHideFiles').checked, hideProject: $('#optHideProject').checked, examples: $('#optExamples').checked, hidePrompts: $('#optHidePrompts').checked });
 
 function renderCard(){
   const o = opts();
@@ -1408,7 +1555,7 @@ $('#optStrict').addEventListener('change', async () => {
   if (current.sample) { current.strict = $('#optStrict').checked; renderAll(); return; }
   if (inputs.acc && inputs.project) await maybeAnalyze();
 });
-for (const id of ['#optHideFiles', '#optHideProject', '#optExamples']) $(id).addEventListener('change', () => { renderCard(); renderDetails(current, opts()); });
+for (const id of ['#optHideFiles', '#optHideProject', '#optExamples', '#optHidePrompts']) $(id).addEventListener('change', () => { renderCard(); renderDetails(current, opts()); });
 $('#resetBtn').addEventListener('click', () => { current = sampleResult(); renderAll(); });
 
 async function copyText(text, btn){

@@ -204,13 +204,14 @@ def apply_events(evs, acc, strict):
             known[p] = set(cur)
         else:
             continue
-        applied.append({"path": p, "ts": ev["ts"], "sid": ev["sid"], "name": ev["name"]})
+        applied.append({"path": p, "ts": ev["ts"], "sid": ev["sid"], "name": ev["name"], "cwd": ev["cwd"]})
     return claude, applied
 
 def base_name(p):
     return p.split("/")[-1] or p
 
-def find_root(claude, project):
+def find_root(claude, project, cwds, project_name):
+    # 一致したファイルの数 → cwd そのもの → cwd の上 → 短い方 → 文字列順（app.html と同じ）
     by_base = {}
     for rel in project:
         by_base.setdefault(base_name(rel), []).append(rel)
@@ -220,11 +221,23 @@ def find_root(claude, project):
             if len(p) > len(rel) and p.endswith("/" + rel):
                 root = p[: len(p) - len(rel) - 1]
                 votes[root] = votes.get(root, 0) + 1
-    best, best_n = None, 0
+    def rank(root):
+        if root in cwds:
+            return 2
+        return 1 if any(c.startswith(root + "/") for c in cwds) else 0
+    best, best_n, best_rank = None, 0, -1
     for root, n in votes.items():
-        if n > best_n or (n == best_n and best is not None and (len(root) > len(best) or (len(root) == len(best) and root < best))):
-            best, best_n = root, n
-    return best, best_n, len(votes)
+        r = rank(root)
+        if best is None or n > best_n or (n == best_n and (r > best_rank or (r == best_rank and (len(root) < len(best) or (len(root) == len(best) and root < best))))):
+            best, best_n, best_rank = root, n, r
+    ambiguous = any(root != best and n == best_n and rank(root) == best_rank for root, n in votes.items())
+    src = "files" if best else ""
+    if not best:
+        for c, _ in sorted(cwds.items(), key=lambda e: (-e[1], e[0])):
+            if project_name and base_name(c) == project_name:
+                best, src = c, "cwd"
+                break
+    return best, best_n, len(votes), ambiguous, src
 
 RX_SECRET = re.compile(r"(sk|pk|ghp|gho|ghs|xox[abp]|AKIA|AIza)[-_A-Za-z0-9]{8,}|-----BEGIN|api[_-]?key|secret|token|passw|Bearer\s|[A-Za-z0-9+/=]{32,}|[0-9a-f]{32,}", re.I)
 
@@ -265,8 +278,13 @@ def assign_aliases(R):
 def analyze(acc, project, project_name, strict):
     evs = build_events(acc)
     claude, applied = apply_events(evs, acc, strict)
-    root, matched, candidates = find_root(claude, project)
-    R = {"sample": False, "strict": bool(strict), "projectName": project_name or "", "root": root or "",
+    cwds = {}
+    for a in applied:
+        if a["cwd"]:
+            cwds[a["cwd"]] = cwds.get(a["cwd"], 0) + 1
+    cwd_top = (sorted(cwds.items(), key=lambda e: (-e[1], e[0])) or [("", 0)])[0][0]
+    root, matched, candidates, ambiguous, src = find_root(claude, project, cwds, project_name)
+    R = {"sample": False, "strict": bool(strict), "projectName": project_name or "", "root": root or "", "rootFrom": src, "rootAmbiguous": ambiguous, "cwdTop": cwd_top,
          "logFiles": acc["files"], "logLines": acc["lines"], "logBad": acc["bad"], "uses": len(acc["uses"]), "edits": 0, "sessions": 0,
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
          "written": 0, "alive": 0, "rewritten": 0, "human": 0, "aiLines": 0,
@@ -362,6 +380,22 @@ def load_project(project_dir):
             continue
         project[rel] = text
     return project
+
+def run_texts(log_texts, project, project_name, strict=False):
+    """文字列から同じ計算（app.html の analyzeTexts と対）。log_texts: [str]、project: {rel: text}"""
+    acc = new_acc()
+    for text in log_texts:
+        parts = text.split("\n")
+        if parts and parts[-1] == "":
+            parts.pop()
+        for line in parts:
+            handle_line(line, acc)
+        acc["files"] += 1
+    pm = {}
+    for rel, text in project.items():
+        if project_filter(rel, utf16len(text)) and "\x00" not in text[:4096]:
+            pm[norm_path(rel)] = text
+    return analyze(acc, pm, project_name or "", strict)
 
 def run(log_paths, project_dir, strict=False):
     acc = new_acc()

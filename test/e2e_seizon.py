@@ -47,7 +47,7 @@ ROW_KEYS = ("file", "exists", "lines", "written", "alive", "rewritten", "human",
 def compare(label, cur, exp):
     ok = True
     for k in ("written", "alive", "rewritten", "human", "aiLines", "projectLines", "projectFiles", "otherProjectFiles", "edits", "sessions",
-              "rootCandidates", "rootMatched", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples"):
+              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples"):
         ok &= check(f"{label} {k}", cur[k], exp[k])
     ok &= check(f"{label} files", [[r[k] for k in ROW_KEYS] for r in cur["files"]], [[r[k] for k in ROW_KEYS] for r in exp["files"]])
     ok &= check(f"{label} missingFiles", cur["missingFiles"], exp["missingFiles"])
@@ -66,6 +66,37 @@ def compare_hand(label, cur, strict):
     return ok
 
 CURRENT = "JSON.parse(JSON.stringify(window.__seizon.current))"
+
+# ---------- 文字列だけの小さな場面（root の決め方）＝ Codex レビュー 2026-10-20 の2件 ----------
+def mk_write(path, content, ts, cwd, tid):
+    use = {"type": "assistant", "cwd": cwd, "sessionId": "sx", "timestamp": ts, "uuid": "u-" + tid,
+           "message": {"role": "assistant", "content": [{"type": "tool_use", "id": tid, "name": "Write", "input": {"file_path": path, "content": content}}]}}
+    if cwd is None:
+        del use["cwd"]
+    res = {"type": "user", "cwd": cwd or "", "sessionId": "sx", "timestamp": ts, "uuid": "r-" + tid,
+           "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "content": "File created successfully"}]},
+           "toolUseResult": {"type": "create", "filePath": path, "content": content}}
+    return json.dumps(use) + "\n" + json.dumps(res) + "\n"
+
+IDX = "export const idx = 1;\nexport const idy = 2;\n"
+SCENES = {
+    # 同数の候補（/repo と /repo/src）＝cwd と同じ /repo を選ぶ
+    "tie-cwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t1")],
+                    project={"index.ts": "export const root = 1;\n", "src/index.ts": IDX, "README.md": "# r\n"}, name="repo",
+                    want=dict(root="/repo", rootFrom="files", rootAmbiguous=False, written=2, alive=2, human=0)),
+    # 同数で cwd も無い＝浅い方を選び、決めきれなかった印を立てる
+    "tie-nocwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", None, "t2")],
+                      project={"index.ts": "export const root = 1;\n", "src/index.ts": IDX, "README.md": "# r\n"}, name="repo",
+                      want=dict(root="/repo", rootFrom="files", rootAmbiguous=True, written=2, alive=2, human=0)),
+    # 触ったファイルが全部消えた＝フォルダ名が cwd の末尾と同じなら cwd を root にして「消えた」に数える
+    "all-gone": dict(logs=[mk_write("/repo/gone.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t3")],
+                     project={"README.md": "# r\n"}, name="repo",
+                     want=dict(root="/repo", rootFrom="cwd", rootAmbiguous=False, written=2, alive=0, human=2)),
+    # 全部消えていて、フォルダ名も合わない＝root 無し（読めませんでした）
+    "all-gone-wrong-folder": dict(logs=[mk_write("/repo/gone.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t4")],
+                                  project={"README.md": "# r\n"}, name="other",
+                                  want=dict(root="", rootFrom="", rootAmbiguous=False, written=0, alive=0, human=0)),
+}
 
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -118,7 +149,14 @@ with sync_playwright() as p:
             cur3 = page.evaluate("([l, p]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'alpha', false)))", [logs_js, proj_js])
             ok &= check("analyzeTexts written/alive/human", (cur3["written"], cur3["alive"], cur3["human"], cur3["aiLines"], cur3["projectFiles"]),
                         (expect[False]["written"], expect[False]["alive"], expect[False]["human"], expect[False]["aiLines"], expect[False]["projectFiles"]))
-            # 6) 見本に戻す
+            # 6) 文字列だけの小さな場面（root の決め方）＝JS・Python・手の3つが一致
+            for name, sc in SCENES.items():
+                js = page.evaluate("([l, p, n]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, n, false)))",
+                                   [[{"path": "x.jsonl", "text": t} for t in sc["logs"]], [{"rel": k, "text": v} for k, v in sc["project"].items()], sc["name"]])
+                py = ref_seizon.run_texts(sc["logs"], sc["project"], sc["name"])
+                for k, v in sc["want"].items():
+                    ok &= check(f"scene {name} {k}", (js[k], py[k]), (v, v))
+            # 7) 見本に戻す
             page.click("#resetBtn")
             page.wait_for_function("document.getElementById('statusPill').textContent === '見本'")
             print("ALL MATCH" if ok else "MISMATCH")

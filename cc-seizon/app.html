@@ -391,12 +391,16 @@ function applyEvents(evs, acc, strict){
       if (m) for (const [k, rec] of m) if (!cur.has(k)) rec.removed = true;
       known.set(p, new Set(cur));
     } else continue;
-    applied.push({ path: p, ts: ev.ts, sid: ev.sid, name: ev.name });
+    applied.push({ path: p, ts: ev.ts, sid: ev.sid, name: ev.name, cwd: ev.cwd });
   }
   return { claude, applied };
 }
-function findRoot(claude, project){
-  // project: Map(rel → text)。ベース名で候補を絞ってから末尾一致を確かめる
+const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/* ログの絶対パスと、落としたフォルダの相対パスを末尾で照合して root を決める。
+   候補が複数ある時の順＝一致したファイルの数 → ログの作業フォルダ（cwd）そのもの → cwd の上にある場所 → 短い方 → 文字列順。
+   （同数の時に深い方を選ぶと、index.ts と src/index.ts の両方がある時に src 側を root にしてしまう）
+   触ったファイルが今のフォルダに1つも無い時（全部消えた・名前が変わった）は、フォルダ名が cwd の末尾と同じ時だけ cwd を root にする。 */
+function findRoot(claude, project, cwds, projectName){
   const byBase = new Map();
   for (const rel of project.keys()) { const b = baseName(rel); let a = byBase.get(b); if (!a) { a = []; byBase.set(b, a); } a.push(rel); }
   const votes = new Map();
@@ -406,11 +410,21 @@ function findRoot(claude, project){
       if (p.length > rel.length && p.endsWith('/' + rel)) { const root = p.slice(0, p.length - rel.length - 1); votes.set(root, (votes.get(root) || 0) + 1); }
     }
   }
-  let best = null, bestN = 0;
+  const cwdList = [...cwds.keys()];
+  const rank = root => cwds.has(root) ? 2 : (cwdList.some(c => c.startsWith(root + '/')) ? 1 : 0);
+  let best = null, bestN = 0, bestRank = -1;
   for (const [root, n] of votes) {
-    if (n > bestN || (n === bestN && best !== null && (root.length > best.length || (root.length === best.length && root < best)))) { best = root; bestN = n; }
+    const r = rank(root);
+    if (best === null || n > bestN || (n === bestN && (r > bestRank || (r === bestRank && (root.length < best.length || (root.length === best.length && root < best)))))) { best = root; bestN = n; bestRank = r; }
   }
-  return { root: best, matched: bestN, candidates: votes.size };
+  let ambiguous = false;
+  for (const [root, n] of votes) if (root !== best && n === bestN && rank(root) === bestRank) ambiguous = true;
+  let from = best ? 'files' : '';
+  if (!best) {
+    const sorted = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0]));
+    for (const [c] of sorted) if (projectName && baseName(c) === projectName) { best = c; from = 'cwd'; break; }
+  }
+  return { root: best, matched: bestN, candidates: votes.size, ambiguous, from };
 }
 
 const RX_SECRET = /(sk|pk|ghp|gho|ghs|xox[abp]|AKIA|AIza)[-_A-Za-z0-9]{8,}|-----BEGIN|api[_-]?key|secret|token|passw|Bearer\s|[A-Za-z0-9+/=]{32,}|[0-9a-f]{32,}/i;
@@ -425,9 +439,12 @@ function pickExample(cands){
 function analyzeParsed(acc, project, projectName, strict){
   const evs = buildEvents(acc);
   const { claude, applied } = applyEvents(evs, acc, strict);
-  const { root, matched, candidates } = findRoot(claude, project);
+  const cwds = new Map();
+  for (const a of applied) if (a.cwd) cwds.set(a.cwd, (cwds.get(a.cwd) || 0) + 1);
+  const cwdTop = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).map(e => e[0])[0] || '';
+  const { root, matched, candidates, ambiguous, from } = findRoot(claude, project, cwds, projectName);
   const R = {
-    sample: false, strict: !!strict, projectName: projectName || '', root: root || '',
+    sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous, cwdTop,
     logFiles: acc.files, logLines: acc.lines, logBad: acc.bad, uses: acc.uses.size, edits: 0, sessions: 0,
     projectFiles: project.size, projectLines: 0, otherProjectFiles: 0, missingFiles: [],
     written: 0, alive: 0, rewritten: 0, human: 0, aiLines: 0,
@@ -465,7 +482,6 @@ function analyzeParsed(acc, project, projectName, strict){
     R.projectLines += n;
     if (!seenRel.has(rel)) R.files.push({ file: rel, exists: true, lines: n, written: 0, alive: 0, rewritten: 0, human: 0, ai: 0 });
   }
-  const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   R.files.sort((a, b) => b.written - a.written || b.lines - a.lines || cmpStr(a.file, b.file));
   R.missingFiles.sort((a, b) => b.written - a.written || cmpStr(a.file, b.file));
   assignAliases(R);
@@ -515,7 +531,7 @@ function sampleResult(){
   ].map(([file, lines, written, alive, rewritten, human]) => ({ file, exists: true, lines, written, alive, rewritten, human, ai: alive }));
   const sum = k => files.reduce((a, f) => a + f[k], 0);
   const R = {
-    sample: true, strict: false, projectName: 'note-app', root: '/Users/you/dev/note-app',
+    sample: true, strict: false, projectName: 'note-app', root: '/Users/you/dev/note-app', rootFrom: 'files', rootAmbiguous: false, cwdTop: '/Users/you/dev/note-app',
     logFiles: 48, logLines: 92140, logBad: 0, uses: 1860, edits: 1204, sessions: 42,
     projectFiles: 86, projectLines: 9860, otherProjectFiles: 12, missingFiles: [{ file: 'src/lib/old-sync.ts', exists: false, written: 140, rewritten: 0, human: 140 }],
     written: sum('written') + 140, alive: sum('alive'), rewritten: sum('rewritten'), human: sum('human') + 140, aiLines: sum('ai'),
@@ -762,7 +778,7 @@ function recordHTML(R){
     ${li('他のプロジェクトのファイル（除外）', fmt(R.otherProjectFiles))}
     ${li('照合に使ったファイル', fmt(R.rootMatched))}
   </ul></div></div>
-  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方を選びます）` : ''}。</p>`;
+  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方 → ログの作業フォルダ（cwd）と同じ方 → 浅い方、の順に選びます）` : ''}。${R.rootAmbiguous ? '<b>候補が同数で決めきれなかった</b>ので、上の順で選びました。違う場合は、リポジトリの一番上のフォルダを選び直してください。' : ''}${R.rootFrom === 'cwd' ? '<b>Claude が触ったファイルが今のフォルダに1つも無い</b>ので、ログの作業フォルダ（cwd）の名前がフォルダ名と同じことを根拠に場所を決めました。書いた行は全部「消えた」側に入ります。' : ''}</p>`;
 }
 function howHTML(R){
   return `<p class="def"><b>測り方</b>：Claude Code の Edit／Write で<b>新しく入った行</b>（Edit の new 側にあって old 側に無い行。Write は、それまでに Read で見えていた行を除いた行）が、今も同じ行として残っている割合。</p>
@@ -969,7 +985,10 @@ async function maybeAnalyze(){
   showProgress('突き合わせ中', 1, 1, 1);
   await tick();
   const R = analyzeParsed(inputs.acc, inputs.project, inputs.projectName, $('#optStrict').checked);
-  if (!R.root) { setError('ログに記録されたファイルの場所と、このフォルダのファイルが一致しませんでした。Claude Code で作業したリポジトリの一番上のフォルダを選んでください。'); return; }
+  if (!R.root) {
+    setError(`ログに記録されたファイルがこのフォルダに1つも無く、フォルダ名（${inputs.projectName || '—'}）もログの作業フォルダ${R.cwdTop ? `（${baseName(R.cwdTop)}）` : ''}と合いませんでした。Claude Code で作業したリポジトリの一番上のフォルダを選んでください。`);
+    return;
+  }
   current = R; renderAll();
 }
 

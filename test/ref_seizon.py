@@ -154,7 +154,8 @@ def apply_events(evs, acc, strict):
         if rec:
             rec["removed"] = True
     def apply_edit(p, old_s, new_s, ev):
-        old_k, new_k = set(line_keys(old_s, strict)), set(line_keys(new_s, strict))
+        # 並びを保つ（JS の Set と同じ挿入順）＝直し癖の hunk は Claude が書いた順に依存する。set() だと PYTHONHASHSEED で順が変わる
+        old_k, new_k = dict.fromkeys(line_keys(old_s, strict)), dict.fromkeys(line_keys(new_s, strict))
         for k in new_k:
             if k not in old_k:
                 claude_add(p, k, ev)
@@ -192,7 +193,7 @@ def apply_events(evs, acc, strict):
         elif ev["name"] == "Write":
             if not isinstance(inp.get("content"), str):
                 continue
-            cur = set(line_keys(inp["content"], strict))
+            cur = dict.fromkeys(line_keys(inp["content"], strict))   # 並びを保つ
             pre = set(known.get(p, set()))
             tur = res["tur"]
             if tur and tur.get("type") == "create":

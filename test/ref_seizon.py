@@ -341,10 +341,10 @@ def handle_gemini(o, acc):
     if prev is None or score < prev["score"]:
         acc["gem"][key] = {"score": score, "o": o, "conv": conv}
 
-def gem_value(v):
+def gem_value(v, wrapped):
     if not isinstance(v, str):
         return None
-    if not v.startswith('"'):
+    if not wrapped:
         return v
     try:
         x = json.loads(v)
@@ -383,21 +383,22 @@ def finalize_gemini(acc):
                 continue
             if t.get("name") == "run_command":
                 sv["bash"] += 1
-                c = gem_value(a.get("Cwd"))
+                c = gem_value(a.get("Cwd"), isinstance(a.get("Cwd"), str) and a["Cwd"].startswith('"'))
                 if not sv["cwd"] and c:
                     sv["cwd"] = norm_path(c)
                 continue
             if t.get("name") not in ("write_to_file", "replace_file_content"):
                 continue
-            f = gem_value(a.get("TargetFile"))
+            wrapped = isinstance(a.get("TargetFile"), str) and a["TargetFile"].startswith('"')
+            f = gem_value(a.get("TargetFile"), wrapped)
             uid = "gm:" + conv + ":" + str(o["step_index"]) + ":" + str(i)
             if t["name"] == "write_to_file":
-                content = gem_value(a.get("CodeContent"))
+                content = gem_value(a.get("CodeContent"), wrapped)
                 if not f or content is None:
                     acc["gmSkipped"] += 1; continue
                 add_use(acc, uid, "Write", {"file_path": abs_path(f, sv["cwd"]), "content": content}, ts, sid, sv["cwd"], None)
             else:
-                old_s, new_s = gem_value(a.get("TargetContent")), gem_value(a.get("ReplacementContent"))
+                old_s, new_s = gem_value(a.get("TargetContent"), wrapped), gem_value(a.get("ReplacementContent"), wrapped)
                 if not f or old_s is None or new_s is None:
                     acc["gmSkipped"] += 1; continue
                 add_use(acc, uid, "Edit", {"file_path": abs_path(f, sv["cwd"]), "old_string": old_s, "new_string": new_s}, ts, sid, sv["cwd"], None)

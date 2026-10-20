@@ -584,9 +584,11 @@ function handleGemini(o, acc){
   const prev = acc.gem.get(key);
   if (!prev || score < prev.score) acc.gem.set(key, { score, o, conv });
 }
-function gemValue(v){
+/* 値が JSON の文字列でもう一段包まれているかは、呼び出しごとに決める（本文が " で始まる値もあるので、値の頭では決めない）。
+   包まれた写しは TargetFile も包まれている＝パスが " で始まれば、その呼び出しの値は全部包まれている（Codex の指摘 PR #20） */
+function gemValue(v, wrapped){
   if (typeof v !== 'string') return null;
-  if (!v.startsWith('"')) return v;
+  if (!wrapped) return v;
   try { const x = JSON.parse(v); return typeof x === 'string' ? x : null; } catch (e) { return null; }
 }
 function finalizeGemini(acc){
@@ -612,16 +614,17 @@ function finalizeGemini(acc){
       let a = t.args;
       if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = null; } }
       if (!a || typeof a !== 'object') return;
-      if (t.name === 'run_command') { sv.bash++; const c = gemValue(a.Cwd); if (!sv.cwd && c) sv.cwd = normPath(c); return; }
+      if (t.name === 'run_command') { sv.bash++; const c = gemValue(a.Cwd, typeof a.Cwd === 'string' && a.Cwd.startsWith('"')); if (!sv.cwd && c) sv.cwd = normPath(c); return; }
       if (t.name !== 'write_to_file' && t.name !== 'replace_file_content') return;
-      const file = gemValue(a.TargetFile);
+      const wrapped = typeof a.TargetFile === 'string' && a.TargetFile.startsWith('"');
+      const file = gemValue(a.TargetFile, wrapped);
       const id = 'gm:' + conv + ':' + o.step_index + ':' + i;
       if (t.name === 'write_to_file') {
-        const content = gemValue(a.CodeContent);
+        const content = gemValue(a.CodeContent, wrapped);
         if (!file || content === null) { acc.gmSkipped++; return; }
         addUse(acc, id, 'Write', { file_path: absPath(file, sv.cwd), content }, ts, sid, sv.cwd, null);
       } else {
-        const oldS = gemValue(a.TargetContent), newS = gemValue(a.ReplacementContent);
+        const oldS = gemValue(a.TargetContent, wrapped), newS = gemValue(a.ReplacementContent, wrapped);
         if (!file || oldS === null || newS === null) { acc.gmSkipped++; return; }
         addUse(acc, id, 'Edit', { file_path: absPath(file, sv.cwd), old_string: oldS, new_string: newS }, ts, sid, sv.cwd, null);
       }
@@ -1395,7 +1398,7 @@ function habitsHTML(R, hide){
 /* 前回と比べる：結果を JSON（数だけ・行の中身は入れない）で保存し、次に測った時に読み込んで差を見る */
 let prevSnap = null;
 function snapshotOf(R){
-  return { tool: 'cc-seizon', v: 1, savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
+  return { tool: 'cc-seizon', v: 1, ai: aiLabel(R), savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
     written: R.written, alive: R.alive, rewritten: R.rewritten, human: R.human, dropped: R.dropped, droppedWritten: R.droppedWritten,
     aiLines: R.aiLines, projectLines: R.projectLines, edits: R.edits, sessions: R.sessions,
     outTotal: R.sessionStats ? R.sessionStats.outTotal : 0, outGone: R.sessionStats ? R.sessionStats.outGone : 0,
@@ -1413,11 +1416,13 @@ function compareHTML(R){
   const per = x => x && x.period ? `${x.period.start}〜${x.period.end}` : '—';
   const r = (a, b) => b > 0 ? a / b : 0;
   const pctN = x => (x * 100).toFixed(1) + '%';
+  // 前回と今回で書いた AI が違う（または前回の記録が無い古い JSON）なら、呼び名は「AI」（Codex の指摘 PR #20）
+  const who = (p.ai || 'Claude') === AI ? AI : 'AI';
   const rows = [
     li('期間', `<b>${per(p)} → ${per(R)}</b>`),
-    li(`${AI} が書いた行`, num(p.written, R.written, fmt)),
+    li(`${who} が書いた行`, num(p.written, R.written, fmt)),
     li('残った（生存率）', num(r(p.alive, p.written), r(R.alive, R.written), pctN)),
-    li(`${AI} が自分で書き直した`, num(r(p.rewritten, p.written), r(R.rewritten, R.written), pctN, true)),
+    li(`${who} が自分で書き直した`, num(r(p.rewritten, p.written), r(R.rewritten, R.written), pctN, true)),
     li('人が消した・直した（行単位）', num(r(p.human - (p.dropped || 0), p.written), r(R.human - R.dropped, R.written), pctN, true)),
     li('ファイルごと消えた', num(r(p.dropped || 0, p.written), r(R.dropped, R.written), pctN, true)),
     li('AI率（下限）', num(r(p.aiLines, p.projectLines), r(R.aiLines, R.projectLines), pctN)),
@@ -1430,7 +1435,8 @@ function compareHTML(R){
   const habRows = hab.length ? hab.map(o => li(o.label, num(o.a, o.b, fmt, true))).join('') : '<li><span>直しの型</span><b>—</b></li>';
   const warn = p.projectName && R.projectName && p.projectName !== R.projectName ? `<p class="fine"><b>前回は別のプロジェクト（${esc(p.projectName)}）の結果です。</b>同じプロジェクトの JSON を選んでください。</p>` : '';
   const strictWarn = !!p.strict !== !!R.strict ? '<p class="fine"><b>厳密モードの設定が前回と違います。</b>同じ設定で比べてください。</p>' : '';
-  return sec('前回', '前回と比べる', `${warn}${strictWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
+  const aiWarn = who === 'AI' && (p.ai || 'Claude') !== AI ? `<p class="fine"><b>前回は ${esc(p.ai || 'Claude')} の結果、今回は ${esc(AI)} の結果です。</b>書いた AI が違うので、数の差は AI の違いも含みます。</p>` : '';
+  return sec('前回', '前回と比べる', `${warn}${strictWarn}${aiWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
   <p class="fine">前回＝${esc(p.savedAt || '—')} に保存した JSON（${esc(p.projectName || '—')}）。ログは30日で消えるので、期間は重ならないことがあります。「人が消した・直した」と「直しの型」は減った方が良い＝緑。</p>`, `<button type="button" class="btn small ghost" id="clearPrev">前回を外す</button>`);
 }
 /* 頼み方 × 残った1行あたりの出力トークン：どの頼み方が高くついて消えたか、安くて残ったか */

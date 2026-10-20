@@ -365,8 +365,12 @@ s2_cut = dict(s2, truncated_fields=["tool_calls"], tool_calls=[wcall(YP, G1[:20]
 s3 = gstep(3, "PLANNER_RESPONSE", "2026-10-02T10:02:00Z", content="", input_tokens=100, output_tokens=10, cache_read_tokens=0, tool_calls=[rcall(YP, G_REP_OLD, G_REP_NEW)])
 s4_cut = gstep(4, "PLANNER_RESPONSE", "2026-10-02T10:03:00Z", content="", input_tokens=0, output_tokens=0, cache_read_tokens=0, truncated_fields=["tool_calls"],
                tool_calls=[{"name": "write_to_file", "args": {"TargetFile": json.dumps(YP), "CodeContent": '"def cut(', "Overwrite": '"true"'}}])
+#   step 5：本文が " で始まる値（包まれていない）＝そのまま数える（Codex の指摘 PR #20：値の頭の " で包まれたと決めない）。書いた 2・残った 2
+ZP = f"{MULTI}/src/z.js"
+Z_NOW = '"use strict";\nconst zed = 1;\n'
+s5 = gstep(5, "PLANNER_RESPONSE", "2026-10-02T10:04:00Z", content="", input_tokens=0, output_tokens=0, cache_read_tokens=0, tool_calls=[wcall(ZP, Z_NOW)])
 GB = LOGS3 / "gemini" / "antigravity" / "brain" / CONV / ".system_generated" / "logs"
-write_log(GB / "transcript.jsonl", [s0, s1, s2_cut, s3, s4_cut])
+write_log(GB / "transcript.jsonl", [s0, s1, s2_cut, s3, s4_cut, s5])
 write_log(GB / "chunks" / "transcript" / "00000000.jsonl", [s0, s1, dict(s3, tool_calls=[rcall(YP, G_REP_OLD, G_REP_NEW, q=True)])])
 write_log(GB / "chunks" / "transcript_full" / "00000000.jsonl", [s1, dict(s2, tool_calls=[wcall(YP, G1, q=True)])])
 def put3(rel, data):
@@ -375,4 +379,5 @@ def put3(rel, data):
     p.write_bytes(data.encode("utf-8"))
 put3("src/x.ts", X_NOW)
 put3("src/y.py", G_NOW)
+put3("src/z.js", Z_NOW)
 put3("README.md", "# multi\n")

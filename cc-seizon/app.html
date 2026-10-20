@@ -631,7 +631,9 @@ function analyzeHabits(habitIn){
     const info = new Map(); const infoOf = k => { let v = info.get(k); if (!v) { v = tokInfo(k); info.set(k, v); } return v; };
     const used = new Set();
     const quick = h => RX_DEBUG.test(h.key) || isCommentLine(h.key, ext);
-    const resolve = (lines, cands, anchored) => {
+    // commentOk＝hunk の前後がどちらも「残ったコード行」の時だけ、消えたコメントを「コメントの削除」の癖に数える
+    // （コメント塊の一部だけ消えた＝前後もコメント、は文書の書き直しであって癖ではない）
+    const resolve = (lines, cands, anchored, commentOk) => {
       // 1) 似ている組を、スコアの高い順に1対1で
       const scored = [];
       for (const h of lines) for (const c of cands) { const s = simScore(infoOf(h.key), infoOf(c)); if (anchored ? acceptIn(s) : acceptGlobal(s)) scored.push([s.score, h.key, c]); }
@@ -645,10 +647,12 @@ function analyzeHabits(habitIn){
       const block = !positional && unp.length >= 3 && codeUnp.length >= 2;
       if (positional) codeUnp.forEach((h, idx) => { pair.set(h.key, restC[idx]); taken.add(restC[idx]); });
       for (const c of taken) used.add(c);
+      const allComments = unp.length > 0 && unp.every(h => isCommentLine(h.key, ext));
       for (const h of lines) {
         const after = pair.has(h.key) ? pair.get(h.key) : null;
         if (after === null && block) { add('block', h, null, f.file, ''); continue; }
         const c = classifyPair(h.key, after, ext);
+        if (c.id === 'comment' && !(commentOk && allComments)) { add('delete', h, null, f.file, ''); continue; }
         add(c.id, h, after, f.file, c.dir || '');
       }
     };
@@ -669,10 +673,11 @@ function analyzeHabits(habitIn){
       const lo = prevKey !== null ? pos.get(prevKey) : -1, hi = nextKey !== null ? pos.get(nextKey) : curList.length;
       if ((prevKey !== null || nextKey !== null) && hi > lo) {
         const cands = curList.slice(lo + 1, hi).filter(k => !f.claudeKeys.has(k) && !used.has(k));
-        resolve(lines, cands, true);
+        const commentOk = prevKey !== null && nextKey !== null && !isCommentLine(prevKey, ext) && !isCommentLine(nextKey, ext);
+        resolve(lines, cands, true, commentOk);
       } else pending.push(lines);
     }
-    for (const lines of pending) resolve(lines, curList.filter(k => !f.claudeKeys.has(k) && !used.has(k)), false);
+    for (const lines of pending) resolve(lines, curList.filter(k => !f.claudeKeys.has(k) && !used.has(k)), false, false);
   }
   for (const it of agg.values()) {
     const def = HABITS[it.id];

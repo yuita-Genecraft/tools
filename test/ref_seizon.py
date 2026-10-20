@@ -401,7 +401,7 @@ def analyze_habits(habit_in):
         used = set()
         def quick(h):
             return bool(RX_DEBUG.search(h["key"])) or is_comment_line(h["key"], ext)
-        def resolve(lines, cands, anchored):
+        def resolve(lines, cands, anchored, comment_ok):
             scored = []
             for h in lines:
                 for c in cands:
@@ -423,11 +423,14 @@ def analyze_habits(habit_in):
                 for idx, h in enumerate(code_unp):
                     pair[h["key"]] = rest_c[idx]; taken.add(rest_c[idx])
             used.update(taken)
+            all_comments = len(unp) > 0 and all(is_comment_line(h["key"], ext) for h in unp)
             for h in lines:
                 after = pair.get(h["key"])
                 if after is None and block:
                     add("block", h, None, f["file"], ""); continue
                 hid, d = classify_pair(h["key"], after, ext)
+                if hid == "comment" and not (comment_ok and all_comments):
+                    add("delete", h, None, f["file"], ""); continue
                 add(hid, h, after, f["file"], d)
         order = f["order"]; pending = []
         i = 0
@@ -448,11 +451,12 @@ def analyze_habits(habit_in):
             hi = pos[next_key] if next_key is not None else len(cur_list)
             if (prev_key is not None or next_key is not None) and hi > lo:
                 cands = [k for k in cur_list[lo + 1:hi] if k not in f["claudeKeys"] and k not in used]
-                resolve(lines, cands, True)
+                comment_ok = prev_key is not None and next_key is not None and not is_comment_line(prev_key, ext) and not is_comment_line(next_key, ext)
+                resolve(lines, cands, True, comment_ok)
             else:
                 pending.append(lines)
         for lines in pending:
-            resolve(lines, [k for k in cur_list if k not in f["claudeKeys"] and k not in used], False)
+            resolve(lines, [k for k in cur_list if k not in f["claudeKeys"] and k not in used], False, False)
     for it in agg.values():
         dirs_sorted = sorted(it["dirs"].items(), key=lambda e: (-e[1], e[0]))
         d = dirs_sorted[0][0] if dirs_sorted else ""

@@ -37,3 +37,7 @@ jobs:
         # A failed comparison still makes the job fail.
         if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: python -u test/test_overlap.py
+      - name: Compare survival rate against Python reference
+        # Independent of the notification report; run even if it failed.
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: python -u test/e2e_seizon.py

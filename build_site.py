@@ -6,7 +6,7 @@ import pathlib, shutil, subprocess, sys
 HERE = pathlib.Path(__file__).parent
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://yuita-genecraft.github.io/tools/").rstrip("/") + "/"
 DOCS = HERE / "docs"
-TOOLS = [("cc-tsuchihyo", "cc-tsuchihyo/app.html"), ("fbcheck", "fbcheck-web/app.html")]
+TOOLS = [("cc-tsuchihyo", "cc-tsuchihyo/app.html"), ("fbcheck", "fbcheck-web/app.html"), ("cc-seizon", "cc-seizon/app.html")]
 DOCS.mkdir(exist_ok=True)
 (DOCS / ".nojekyll").write_text("\n")  # 中身は何でもよい（GitHub は有無だけを見る）。空だと一部の送り方で弾かれるので改行1つ
 shutil.copy(HERE / "site-src" / "index.html", DOCS / "index.html")

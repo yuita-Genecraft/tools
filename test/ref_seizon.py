@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""生存率（cc-seizon/app.html）の別実装。ブラウザ版と同じ規則で、同じ数字が出るかを突き合わせるためのもの。
+規則の正本は app.html のコメント。ここは写し（違いが出たらどちらかが間違い）。
+使い方: run(log_paths, project_dir, strict=False) -> dict"""
+import json, os, pathlib, re
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("Asia/Tokyo")   # e2e は Chromium のタイムゾーンを Asia/Tokyo にして揃える
+
+# ---------- 行の正規化（app.html と同じ） ----------
+WS = "[ \t\u000b\f\r   -     　﻿]"
+RX_TRIM = re.compile("^" + WS + "+|" + WS + "+$")
+RX_WS = re.compile(WS + "+")
+RX_STRUCT = re.compile(r"^(?:[{}()\[\];,.:]|[ \t])*(?:else|try|finally|do|break|continue|return|pass|done|end|fi|esac|endif|default|then|begin|yield|next|catch)?(?:[{}()\[\];,.:]|[ \t])*$", re.I)
+RX_CLOSE_TAG = re.compile(r"^<\/[A-Za-z][\w-]*>$")
+TRIVIAL_MIN = 4
+
+def utf16len(s):
+    return len(s.encode("utf-16-le")) // 2
+
+def norm_line(raw, strict):
+    s = raw[:-1] if raw.endswith("\r") else raw
+    if not strict:
+        s = RX_WS.sub(" ", RX_TRIM.sub("", s.replace("\t", " ")))
+    return s
+
+def is_trivial(key):
+    t = RX_TRIM.sub("", key)
+    return utf16len(t) < TRIVIAL_MIN or not any(ch.isalnum() for ch in t) or bool(RX_STRUCT.match(t)) or bool(RX_CLOSE_TAG.match(t))
+
+def line_keys(text, strict):
+    out = []
+    for raw in str(text).split("\n"):
+        k = norm_line(raw, strict)
+        if not is_trivial(k):
+            out.append(k)
+    return out
+
+def norm_path(p):
+    return str(p).replace("\\", "/")
+
+# ---------- ログ ----------
+USE_NAMES = {"Edit", "MultiEdit", "Write", "Read"}
+RX_NUMBERED = re.compile(r"^\s*\d+(?:→|\t)")
+LOG_SKIP_DIRS = {"node_modules", ".git", "plugins", "shell-snapshots", "statsig", "todos", "debug", "file-history", "session-env", "backups", "ide"}
+
+def tool_result_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(x.get("text", "") if isinstance(x, dict) and isinstance(x.get("text"), str) else "" for x in content)
+    return ""
+
+def parse_ts(s):
+    if not isinstance(s, str):
+        return None
+    try:
+        return int(round(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp() * 1000))
+    except ValueError:
+        return None
+
+def new_acc():
+    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0}
+
+def handle_line(line, acc):
+    acc["lines"] += 1
+    if utf16len(line) < 40:
+        return
+    if "tool_use" not in line and "tool_result" not in line:
+        return
+    try:
+        o = json.loads(line)
+    except ValueError:
+        acc["bad"] += 1
+        return
+    if not isinstance(o, dict) or not isinstance(o.get("message"), dict):
+        return
+    c = o["message"].get("content")
+    if not isinstance(c, list):
+        return
+    if o.get("type") == "assistant":
+        ts = parse_ts(o.get("timestamp"))
+        for b in c:
+            if not isinstance(b, dict) or b.get("type") != "tool_use" or b.get("name") not in USE_NAMES or not isinstance(b.get("id"), str):
+                continue
+            if b["id"] in acc["uses"]:
+                continue
+            inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            acc["uses"][b["id"]] = {"id": b["id"], "name": b["name"], "input": inp, "ts": ts,
+                                    "sid": o["sessionId"] if isinstance(o.get("sessionId"), str) else "",
+                                    "cwd": norm_path(o["cwd"]) if isinstance(o.get("cwd"), str) else ""}
+    elif o.get("type") == "user":
+        for b in c:
+            if not isinstance(b, dict) or b.get("type") != "tool_result" or not isinstance(b.get("tool_use_id"), str):
+                continue
+            if b["tool_use_id"] in acc["results"]:
+                continue
+            text = tool_result_text(b.get("content"))
+            t = o.get("toolUseResult")
+            tur = None
+            if isinstance(t, dict):
+                tur = {}
+                if isinstance(t.get("type"), str):
+                    tur["type"] = t["type"]
+                if isinstance(t.get("originalFile"), str):
+                    tur["originalFile"] = t["originalFile"]
+                if isinstance(t.get("file"), dict) and isinstance(t["file"].get("content"), str):
+                    tur["file"] = {"content": t["file"]["content"]}
+            acc["results"][b["tool_use_id"]] = {"isError": b.get("is_error") is True, "text": text if RX_NUMBERED.match(text) else "", "tur": tur}
+
+def read_content(res):
+    f = (res["tur"] or {}).get("file") if res["tur"] else None
+    if isinstance(f, dict) and isinstance(f.get("content"), str):
+        return f["content"]
+    t = res["text"] or ""
+    if not RX_NUMBERED.match(t):
+        return ""
+    return "\n".join(RX_NUMBERED.sub("", l, count=1) for l in t.split("\n"))
+
+def read_log_file(path, acc):
+    text = path.read_bytes().decode("utf-8", errors="replace")
+    if text.startswith("﻿"):
+        text = text[1:]
+    parts = text.split("\n")
+    if parts and parts[-1] == "":
+        parts.pop()
+    for line in parts:
+        handle_line(line, acc)
+    acc["files"] += 1
+
+# ---------- 適用 ----------
+def build_events(acc):
+    evs = [u for u in acc["uses"].values() if u["ts"] is not None]
+    evs.sort(key=lambda u: (u["ts"], u["id"]))
+    return evs
+
+def apply_events(evs, acc, strict):
+    claude, known = {}, {}
+    def known_add(p, keys):
+        known.setdefault(p, set()).update(keys)
+    def claude_add(p, k, ev):
+        m = claude.setdefault(p, {})
+        if k in m:
+            m[k]["removed"] = False
+        else:
+            m[k] = {"ts": ev["ts"], "sid": ev["sid"], "removed": False}
+    def claude_remove(p, k):
+        rec = claude.get(p, {}).get(k)
+        if rec:
+            rec["removed"] = True
+    def apply_edit(p, old_s, new_s, ev):
+        old_k, new_k = set(line_keys(old_s, strict)), set(line_keys(new_s, strict))
+        for k in new_k:
+            if k not in old_k:
+                claude_add(p, k, ev)
+        for k in old_k:
+            if k not in new_k:
+                claude_remove(p, k)
+        known_add(p, new_k)
+    applied = []
+    for ev in evs:
+        res = acc["results"].get(ev["id"])
+        inp = ev["input"]
+        p = norm_path(inp["file_path"]) if isinstance(inp.get("file_path"), str) else ""
+        if not p:
+            continue
+        if ev["name"] == "Read":
+            if res and not res["isError"]:
+                t = read_content(res)
+                if t:
+                    known_add(p, line_keys(t, strict))
+            continue
+        if not res or res["isError"]:
+            continue
+        if ev["name"] in ("Edit", "MultiEdit") and res["tur"] and isinstance(res["tur"].get("originalFile"), str):
+            known_add(p, line_keys(res["tur"]["originalFile"], strict))
+        if ev["name"] == "Edit":
+            if not isinstance(inp.get("new_string"), str):
+                continue
+            apply_edit(p, inp["old_string"] if isinstance(inp.get("old_string"), str) else "", inp["new_string"], ev)
+        elif ev["name"] == "MultiEdit":
+            if not isinstance(inp.get("edits"), list):
+                continue
+            for e in inp["edits"]:
+                if isinstance(e, dict) and isinstance(e.get("new_string"), str):
+                    apply_edit(p, e["old_string"] if isinstance(e.get("old_string"), str) else "", e["new_string"], ev)
+        elif ev["name"] == "Write":
+            if not isinstance(inp.get("content"), str):
+                continue
+            cur = set(line_keys(inp["content"], strict))
+            pre = set(known.get(p, set()))
+            tur = res["tur"]
+            if tur and tur.get("type") == "create":
+                pre = set()
+            elif tur and isinstance(tur.get("originalFile"), str):
+                pre.update(line_keys(tur["originalFile"], strict))
+            for k in cur:
+                if k not in pre:
+                    claude_add(p, k, ev)
+            for k, rec in claude.get(p, {}).items():
+                if k not in cur:
+                    rec["removed"] = True
+            known[p] = set(cur)
+        else:
+            continue
+        applied.append({"path": p, "ts": ev["ts"], "sid": ev["sid"], "name": ev["name"]})
+    return claude, applied
+
+def base_name(p):
+    return p.split("/")[-1] or p
+
+def find_root(claude, project):
+    by_base = {}
+    for rel in project:
+        by_base.setdefault(base_name(rel), []).append(rel)
+    votes = {}
+    for p in claude:
+        for rel in by_base.get(base_name(p), []):
+            if len(p) > len(rel) and p.endswith("/" + rel):
+                root = p[: len(p) - len(rel) - 1]
+                votes[root] = votes.get(root, 0) + 1
+    best, best_n = None, 0
+    for root, n in votes.items():
+        if n > best_n or (n == best_n and best is not None and (len(root) > len(best) or (len(root) == len(best) and root < best))):
+            best, best_n = root, n
+    return best, best_n, len(votes)
+
+RX_SECRET = re.compile(r"(sk|pk|ghp|gho|ghs|xox[abp]|AKIA|AIza)[-_A-Za-z0-9]{8,}|-----BEGIN|api[_-]?key|secret|token|passw|Bearer\s|[A-Za-z0-9+/=]{32,}|[0-9a-f]{32,}", re.I)
+
+def pick_example(cands):
+    ok = [c for c in cands if 12 <= utf16len(c["key"]) <= 72 and not RX_SECRET.search(c["key"])]
+    ok.sort(key=lambda c: (-utf16len(c["key"]), c["key"], c["file"]))
+    return ok[0] if ok else None
+
+def date_key(ms):
+    d = datetime.fromtimestamp(ms / 1000, TZ)
+    return f"{d.year}-{d.month:02d}-{d.day:02d}"
+
+def days_between(a, b):
+    y1, m1, d1 = map(int, a.split("-")); y2, m2, d2 = map(int, b.split("-"))
+    return (datetime(y2, m2, d2) - datetime(y1, m1, d1)).days
+
+def alias_of(i):
+    s = ""
+    i += 1
+    while i > 0:
+        r = (i - 1) % 26
+        s = chr(65 + r) + s
+        i = (i - 1) // 26
+    return s
+
+RX_EXT = re.compile(r"\.([A-Za-z0-9]{1,8})$")
+
+def assign_aliases(R):
+    i = 0
+    for f in R["files"]:
+        if f["written"] > 0:
+            m = RX_EXT.search(f["file"]); f["alias"] = "ファイル" + alias_of(i) + (("." + m.group(1)) if m else ""); i += 1
+        else:
+            f["alias"] = ""
+    for f in R["missingFiles"]:
+        m = RX_EXT.search(f["file"]); f["alias"] = "ファイル" + alias_of(i) + (("." + m.group(1)) if m else ""); i += 1
+
+def analyze(acc, project, project_name, strict):
+    evs = build_events(acc)
+    claude, applied = apply_events(evs, acc, strict)
+    root, matched, candidates = find_root(claude, project)
+    R = {"sample": False, "strict": bool(strict), "projectName": project_name or "", "root": root or "",
+         "logFiles": acc["files"], "logLines": acc["lines"], "logBad": acc["bad"], "uses": len(acc["uses"]), "edits": 0, "sessions": 0,
+         "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
+         "written": 0, "alive": 0, "rewritten": 0, "human": 0, "aiLines": 0,
+         "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched}
+    if not root:
+        return R
+    prefix = root + "/"
+    sids = set(); tmin = None; tmax = None
+    for a in applied:
+        if not a["path"].startswith(prefix):
+            continue
+        R["edits"] += 1; sids.add(a["sid"])
+        tmin = a["ts"] if tmin is None or a["ts"] < tmin else tmin
+        tmax = a["ts"] if tmax is None or a["ts"] > tmax else tmax
+    R["sessions"] = len(sids)
+    if R["edits"]:
+        s, e = date_key(tmin), date_key(tmax)
+        R["period"] = {"start": s, "end": e, "days": days_between(s, e) + 1}
+    alive_c, human_c = [], []
+    seen_rel = set()
+    for p, m in claude.items():
+        if not p.startswith(prefix):
+            R["otherProjectFiles"] += 1
+            continue
+        rel = p[len(prefix):]
+        seen_rel.add(rel)
+        text = project.get(rel)
+        cur_keys = [] if text is None else line_keys(text, strict)
+        cur_set = set(cur_keys)
+        row = {"file": rel, "exists": text is not None, "lines": len(cur_keys), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
+        for k, rec in m.items():
+            if k in cur_set:
+                row["alive"] += 1; alive_c.append({"key": k, "file": rel})
+            elif rec["removed"]:
+                row["rewritten"] += 1
+            else:
+                row["human"] += 1; human_c.append({"key": k, "file": rel})
+        if text is not None:
+            for k in cur_keys:
+                if k in m:
+                    row["ai"] += 1
+        for k in ("written", "alive", "rewritten", "human"):
+            R[k] += row[k]
+        R["aiLines"] += row["ai"]
+        if text is None:
+            R["missingFiles"].append({"file": rel, "exists": False, "written": row["written"], "rewritten": row["rewritten"], "human": row["human"]})
+        else:
+            R["files"].append(row)
+    for rel, text in project.items():
+        n = len(line_keys(text, strict))
+        R["projectLines"] += n
+        if rel not in seen_rel:
+            R["files"].append({"file": rel, "exists": True, "lines": n, "written": 0, "alive": 0, "rewritten": 0, "human": 0, "ai": 0})
+    R["files"].sort(key=lambda f: (-f["written"], -f["lines"], f["file"]))
+    R["missingFiles"].sort(key=lambda f: (-f["written"], f["file"]))
+    assign_aliases(R)
+    top = [f for f in R["files"] + R["missingFiles"] if f["human"] > 0]
+    top.sort(key=lambda f: (-f["human"], -f["written"], f["file"]))
+    R["top"] = [{"file": f["file"], "alias": f["alias"], "human": f["human"], "written": f["written"], "exists": f["exists"] is not False} for f in top[:3]]
+    R["examples"] = {"alive": pick_example(alive_c), "human": pick_example(human_c)}
+    return R
+
+# ---------- プロジェクトのフォルダ（app.html と同じ除外） ----------
+PROJ_SKIP_DIRS = {"node_modules", ".git", ".hg", ".svn", "dist", "build", "out", ".next", ".nuxt", ".output", ".svelte-kit", ".turbo", ".cache", "coverage", "vendor", "__pycache__", ".venv", "venv", "target", "Pods", "DerivedData", ".idea", ".vscode", ".claude", ".pytest_cache", ".mypy_cache", ".parcel-cache", ".gradle", "bin", "obj"}
+SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "Cargo.lock", "poetry.lock", "Pipfile.lock", "Gemfile.lock", "composer.lock", "go.sum", ".DS_Store", "Thumbs.db"}
+BIN_EXT = re.compile(r"\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|psd|svg|woff2?|ttf|otf|eot|mp[34]|m4a|wav|ogg|webm|mov|avi|zip|gz|tgz|bz2|xz|7z|rar|jar|war|pdf|wasm|exe|dll|so|dylib|class|pyc|pyo|o|a|lib|bin|dat|db|sqlite3?|lock|map|min\.js|min\.css|ipynb|pb|onnx|safetensors|ckpt|pt|npy|npz|parquet|keynote|numbers|pages|docx?|xlsx?|pptx?)$", re.I)
+MAX_TEXT = int(1.5 * 1024 * 1024)
+
+def project_filter(rel, size):
+    segs = rel.split("/")
+    name = segs[-1]
+    if any(s in PROJ_SKIP_DIRS for s in segs[:-1]):
+        return False
+    if name in SKIP_FILES or BIN_EXT.search(name):
+        return False
+    if size > MAX_TEXT:
+        return False
+    return True
+
+def load_project(project_dir):
+    project_dir = pathlib.Path(project_dir)
+    project = {}
+    for p in sorted(project_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(project_dir).as_posix()
+        if not project_filter(rel, p.stat().st_size):
+            continue
+        text = p.read_bytes().decode("utf-8", errors="replace")
+        if text.startswith("﻿"):
+            text = text[1:]
+        if "\x00" in text[:4096]:
+            continue
+        project[rel] = text
+    return project
+
+def run(log_paths, project_dir, strict=False):
+    acc = new_acc()
+    for p in log_paths:
+        p = pathlib.Path(p)
+        if p.suffix.lower() != ".jsonl" or any(seg in LOG_SKIP_DIRS for seg in p.parts):
+            continue
+        read_log_file(p, acc)
+    project = load_project(project_dir)
+    return analyze(acc, project, pathlib.Path(project_dir).name, strict)
+
+if __name__ == "__main__":
+    import sys
+    logs = [p for p in pathlib.Path(sys.argv[1]).rglob("*.jsonl")]
+    print(json.dumps(run(logs, sys.argv[2], strict="--strict" in sys.argv), ensure_ascii=False, indent=1))

@@ -495,7 +495,9 @@ function applyEvents(evs, acc, strict){
   const claudeAdd = (p, k, ev) => {
     let m = claude.get(p); if (!m) { m = new Map(); claude.set(p, m); }
     const rec = m.get(k);
-    if (rec) rec.removed = false; else m.set(k, { ts: ev.ts, sid: ev.sid, seq: ev.seq, removed: false });
+    // 一度消えた行をあとで入れ直したら、今ある行はその時の Edit／Write のもの（頼み方の節で会話ごとに数えるため・Codex の指摘 PR #17）
+    if (rec) { if (rec.removed) { rec.ts = ev.ts; rec.sid = ev.sid; rec.seq = ev.seq; } rec.removed = false; }
+    else m.set(k, { ts: ev.ts, sid: ev.sid, seq: ev.seq, removed: false });
   };
   const claudeRemove = (p, k) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) rec.removed = true; };
   const applyEdit = (p, oldS, newS, ev) => {
@@ -1129,7 +1131,7 @@ function drawCard(R, opts){
 }
 
 /* ---------- 内訳（HTML） ---------- */
-const sec = (kicker, title, body, aside) => `<section class="sec"><header><span class="kicker">${kicker}</span><h2>${title}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</header>${body}</section>`;
+const sec = (kicker, title, body, aside) => `<section class="sec" data-kicker="${esc(kicker)}"><header><span class="kicker">${kicker}</span><h2>${title}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</header>${body}</section>`;
 function stackHTML(R){
   const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human - R.dropped, w), sd = rate(R.dropped, w);
   const J = judge(R);
@@ -1366,7 +1368,7 @@ function loadPrev(obj){
   if (!isSnapshot(obj)) { setError('この JSON は、このページの「結果を保存」で作ったものではないようです。'); return false; }
   prevSnap = obj;
   renderDetails(current, opts());
-  const secEl = document.querySelector('#details .sec:nth-of-type(2)');
+  const secEl = document.querySelector('#details .sec[data-kicker="前回"]');
   if (secEl && secEl.scrollIntoView) secEl.scrollIntoView({ block: 'start' });
   return true;
 }

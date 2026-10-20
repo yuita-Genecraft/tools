@@ -22,19 +22,20 @@ expect = {False: ref_seizon.run(log_files, PROJ, strict=False), True: ref_seizon
 # 手で数えた期待値（gen_seizon.py のコメントと対応）。別実装と同じ間違いをしていないかの歯止め
 HAND = {
     # human=6 のうち 4 は gone.ts（ファイルごと消えた）＝dropped。gone.ts に Claude が書いた 5 行＝droppedWritten。急所（top）は今もあるファイルだけ
-    False: dict(written=26, alive=17, rewritten=3, human=6, dropped=4, droppedWritten=5, aiLines=17, projectLines=35, projectFiles=11, edits=11, sessions=2,
-                otherProjectFiles=2, rootCandidates=2, rootMatched=8, uses=18, logFiles=4, logBad=1, root="/Users/t/dev/alpha",
+    # re.ts：s1 が RE・RE2 を書いて RE2 を自分で消し、s2 が RE2 を入れ直した＝written 28（RE は s1・RE2 は s2）・どちらも残っている（alive +2）。rewritten は 3 のまま（入れ直した行は s2 の行になる）
+    False: dict(written=28, alive=19, rewritten=3, human=6, dropped=4, droppedWritten=5, aiLines=19, projectLines=37, projectFiles=12, edits=14, sessions=2,
+                otherProjectFiles=2, rootCandidates=2, rootMatched=9, uses=21, logFiles=4, logBad=1, root="/Users/t/dev/alpha",
                 period={"start": "2026-09-01", "end": "2026-09-05", "days": 5},
                 top=[("src/a.ts", 1, 6, True), ("src/c.ts", 1, 3, True)],
                 examples={"alive": ("return db.notes.where({ userId }).sortBy('updatedAt');", "src/a.ts"),
                           "human": ("return list.reduce((x, y) => x + y, 0);", "src/c.ts")},
-                # 頼み方：s1＝12通×100＝1,200・21行書いて12行残存（消えた9行）→ 今は無い分 1,200×9/21=514・残った1行あたり 100
-                #         s2＝6通×300＝1,800・alpha に5行＋別の場所に1行（decoy）＝按分 5/6 → 1,500・全部残存 → 0・1行あたり 300
-                #         再開で写った s1 の2通（s2.jsonl の先頭）は uuid で重複を除く＝s1 は 12 通のまま。20行以上書いたのは s1 だけ＝高くて消えた・安くて残ったは無し（残存 57%）
-                sessionStats=dict(outTotal=2700, outGone=514, costly=["s1"], cheap=[],
-                                  rows=[("s2", "引き継ぎ：win.ts・sec.ts・d.ts を足す。範囲外は触らない", 1800, 1500, 6, 3, 5, 5, 0, 0, 0, 300, "2026-09-03", "2026-09-05"),   # s2 の写しは sessionId が s1 のまま＝別の会話のまま（本物の再開は habits の h5 で試す）
-                                        ("s1", "a.ts に listNotes を足して、並びは updatedAt にして", 1200, 1200, 12, 8, 21, 12, 3, 2, 4, 100, "2026-09-01", "2026-09-01")])),
-    True: dict(written=26, alive=16, rewritten=3, human=7, dropped=4, droppedWritten=5, aiLines=16, projectLines=35),
+                # 頼み方：s1＝14通×100＝1,400（m2・m5 は2行に分かれているが応答は1つ）・22行書いて13行残存（消えた9行）→ 今は無い分 1,400×9/22=573・残った1行あたり 1,400/13=108
+                #         s2＝7通×300＝2,100・alpha に6行（RE2 の入れ直しを含む）＋別の場所に1行（decoy）＝按分 6/7 → 1,800・全部残存 → 0・1行あたり 300
+                #         再開で写った s1 の2行（s2.jsonl の先頭）は uuid で重複を除く＝s1 は 14 通のまま。20行以上書いたのは s1 だけ＝高くて消えた・安くて残ったは無し（残存 59%）
+                sessionStats=dict(outTotal=3200, outGone=573, costly=["s1"], cheap=[],
+                                  rows=[("s2", "引き継ぎ：win.ts・sec.ts・d.ts を足す。範囲外は触らない", 2100, 1800, 7, 4, 6, 6, 0, 0, 0, 300, "2026-09-03", "2026-09-05"),   # s2 の写しは sessionId が s1 のまま＝別の会話のまま（本物の再開は habits の h5 で試す）
+                                        ("s1", "a.ts に listNotes を足して、並びは updatedAt にして", 1400, 1400, 14, 10, 22, 13, 3, 2, 4, 108, "2026-09-01", "2026-09-01")])),
+    True: dict(written=28, alive=18, rewritten=3, human=7, dropped=4, droppedWritten=5, aiLines=18, projectLines=37),
 }
 # 直し癖の手計算（gen_seizon.py の habits の節と対応）：(id, 回数, セッション数, ファイル数, 候補か, 型にならないか)
 # 候補＝3回以上かつ2セッション以上。rename は3回でも1セッション＝参考。old.ts の丸ごと書き直し5行は block（癖ではない）
@@ -218,7 +219,7 @@ with sync_playwright() as p:
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'alpha'", timeout=20000)
             ok &= check("sessions prompt shown (alpha)", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), True)
             ok &= check("sessions pasted tag stripped", page.evaluate("document.getElementById('details').textContent.includes('pasted_content')"), False)
-            ok &= check("share text has token line", "今は無いコードに使った出力トークン：19%（514／2,700）" in page.input_value("#shareText"), True)
+            ok &= check("share text has token line", "今は無いコードに使った出力トークン：18%（573／3,200）" in page.input_value("#shareText"), True)
             page.check("#optHidePrompts"); page.wait_for_timeout(200)
             ok &= check("sessions prompt hidden", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), False)
             page.uncheck("#optHidePrompts"); page.wait_for_timeout(200)
@@ -233,6 +234,8 @@ with sync_playwright() as p:
                 if h["id"] == "debug": h["count"] = 5
             ok &= check("loadPrev", page.evaluate("s => window.__seizon.loadPrev(s)", prev), True)
             ok &= check("compare rendered", page.evaluate("[...document.querySelectorAll('#details .sec h2')].some(h => h.textContent === '前回と比べる')"), True)
+            # 前回を読んだら、比べる節（3つ目）が画面の上に来る（Codex の指摘 PR #17：2つ目の節に飛んでいた）
+            ok &= check("compare scrolled into view", page.evaluate("Math.abs(document.querySelector('#details .sec[data-kicker=\"前回\"]').getBoundingClientRect().top) < 2"), True)
             ok &= check("compare delta", page.evaluate("[...document.querySelectorAll('#details .rows li')].some(li => li.textContent.includes('デバッグ出力の削除') && li.textContent.includes('5 → 3') && li.querySelector('.delta.good') !== null)"), True)
             ok &= check("loadPrev rejects foreign json", page.evaluate("window.__seizon.loadPrev({foo: 1})"), False)
             page.click("#clearPrev")

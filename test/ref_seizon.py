@@ -244,7 +244,10 @@ def apply_events(evs, acc, strict):
     def claude_add(p, k, ev):
         m = claude.setdefault(p, {})
         if k in m:
-            m[k]["removed"] = False
+            rec = m[k]
+            if rec["removed"]:   # 消えた行の入れ直し＝今ある行はその時のもの
+                rec["ts"] = ev["ts"]; rec["sid"] = ev["sid"]; rec["seq"] = ev["seq"]
+            rec["removed"] = False
         else:
             m[k] = {"ts": ev["ts"], "sid": ev["sid"], "seq": ev["seq"], "removed": False}
     def claude_remove(p, k):

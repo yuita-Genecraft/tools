@@ -123,6 +123,12 @@ S1.append('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"
 # ws.ts：数えない行（}・ab・----・} else {・break;・</div>・return;）を含む
 S1.append(asst(use("Write", "w_ws", {"file_path": f"{ALPHA}/src/ws.ts", "content": WS_V1}), "2026-09-01T14:10:00.000Z", mid="m12"))
 S1.append(result("w_ws", "2026-09-01T14:10:05.000Z", "File created successfully", {"type": "create", "filePath": f"{ALPHA}/src/ws.ts", "content": WS_V1}))
+# re.ts：s1 が2行書き、2行目を自分で消す → s2 があとで同じ行を入れ直す（下）＝今ある RE2 の行は s2 のもの（Codex の指摘・PR #17）
+RE_V1 = "export const RE = 1;\nexport const RE2 = 2;\n"
+S1.append(asst(use("Write", "w_re", {"file_path": f"{ALPHA}/src/re.ts", "content": RE_V1}), "2026-09-01T14:11:00.000Z", mid="m20"))
+S1.append(result("w_re", "2026-09-01T14:11:05.000Z", "File created successfully", {"type": "create", "filePath": f"{ALPHA}/src/re.ts", "content": RE_V1}))
+S1.append(asst(use("Edit", "e_re1", {"file_path": f"{ALPHA}/src/re.ts", "old_string": "export const RE2 = 2;\n", "new_string": ""}), "2026-09-01T14:12:00.000Z", mid="m21"))
+S1.append(result("e_re1", "2026-09-01T14:12:05.000Z", "The file has been updated.", {"filePath": f"{ALPHA}/src/re.ts", "oldString": "export const RE2 = 2;\n", "newString": "", "originalFile": RE_V1, "structuredPatch": []}))
 # 短い行・summary 行・空行
 S1.append({"type": "summary", "summary": "x", "leafUuid": "x"})
 S1.append("")
@@ -147,6 +153,9 @@ S2.append(result("w_d", "2026-09-04T16:30:05.000Z", "The file has been updated."
 S2.append(asst(use("Edit", "e_decoy", {"file_path": "/Users/t/other/alpha-copy/src/a.ts", "old_string": "", "new_string": "export const DECOY = 1;"}), "2026-09-04T16:40:00.000Z", sid="s2", mid="m17", out=300))
 S2.append(result("e_decoy", "2026-09-04T16:40:05.000Z", "The file has been updated.", sid="s2"))
 # NotebookEdit は拾わない
+# re.ts：s1 が消した RE2 の行を s2 が入れ直す＝RE2 は s2 の行（s2 の alpha の行は 6・別の場所に 1＝按分 6/7）
+S2.append(asst(use("Edit", "e_re2", {"file_path": f"{ALPHA}/src/re.ts", "old_string": "export const RE = 1;\n", "new_string": "export const RE = 1;\nexport const RE2 = 2;\n"}), "2026-09-04T16:35:00.000Z", sid="s2", mid="m22", out=300))
+S2.append(result("e_re2", "2026-09-04T16:35:05.000Z", "The file has been updated.", {"filePath": f"{ALPHA}/src/re.ts", "oldString": "export const RE = 1;\n", "newString": "export const RE = 1;\nexport const RE2 = 2;\n", "originalFile": "export const RE = 1;\n", "structuredPatch": []}, sid="s2"))
 S2.append(asst(use("NotebookEdit", "nb", {"notebook_path": f"{ALPHA}/nb.ipynb", "new_source": "print(1)"}), "2026-09-04T16:41:00.000Z", sid="s2", mid="m18", out=300))
 S2.append(result("nb", "2026-09-04T16:41:05.000Z", "ok", sid="s2"))
 
@@ -185,6 +194,7 @@ put("src/ws.ts", WS_NOW)
 put("src/win.ts", WIN_NOW)
 put("src/sec.ts", SEC_V1)
 put("src/d.ts", D_V1)
+put("src/re.ts", "export const RE = 1;\nexport const RE2 = 2;\n")   # RE＝s1 の行・RE2＝s2 が入れ直した行（どちらも残っている）
 put("src/human.ts", "export const h1 = 1;\nexport const h2 = 2;\nexport const h3 = 3;\n")
 put("README.md", "# alpha\n\nA small project.\n")
 # 読まないもの

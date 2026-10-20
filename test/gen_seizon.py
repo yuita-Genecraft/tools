@@ -199,9 +199,9 @@ put("src/blob.ts", "export const z = 1;\x00\x00binary\n")
 #     8 export const UNUSED = 1                  → 消えた。hunk（前=6・次なし）窓は空 → delete（コードの1行＝型にならない）
 #   h3：Claude が old.ts を Write（5行）→ 人が丸ごと書き直し（5行とも無い・今の中身は別物4行）＝前後の目印なし
 #     → 窓なし（全体から厳しめ）→ 似ている行なし → 5行まとめて消えた（コード≥2）→ block ×5
-#   → lines=16（app 7＋util 4＋old 5）・matched=6（quote1＋rename3＋any1＋string1）
-#   → debug 3回・2セッション・2ファイル＝候補 ／ rename 3回・1セッション（total → sum が3回）＝参考 ／ any・comment・quote・string 各1＝参考 ／ block 5・delete 1＝型にならない
-#   → written 22（app 10＋util 7＋old 5・数えない行 } を除く）・alive 6（app 3＋util 3）・human 16・rewritten 0・dropped 0
+#   → lines=18（app 7＋util 4＋old 5＋tool 2）・matched=8（quote1＋rename3＋any1＋string1＋import1＋other1）
+#   → debug 3回・2セッション・2ファイル＝候補 ／ rename 3回・1セッション（total → sum が3回）＝参考 ／ any・comment・import・quote・string 各1＝参考 ／ block 5・delete 1・other 1＝型にならない
+#   → written 26（app 10＋util 7＋old 5＋tool 4・数えない行 } を除く）・alive 8（app 3＋util 3＋tool 2）・human 18・rewritten 0・dropped 0
 HAB = "/Users/t/dev/habits"
 LOGS2 = HERE / "logs2" / "projects"
 PROJ2 = HERE / "proj" / "habits"
@@ -254,6 +254,14 @@ def hw(tid, path, content, ts, sid, mid):
 write_log(LOGS2 / "-Users-t-dev-habits" / "h1.jsonl", hw("hw_app", f"{HAB}/src/app.ts", APP_V1, "2026-09-10T10:00:00.000Z", "h1", "hm1"))
 write_log(LOGS2 / "-Users-t-dev-habits" / "h2.jsonl", hw("hw_util", f"{HAB}/src/util.ts", UTIL_V1, "2026-09-12T10:00:00.000Z", "h2", "hm2"))
 write_log(LOGS2 / "-Users-t-dev-habits" / "h3.jsonl", hw("hw_old", f"{HAB}/src/old.ts", OLD_V1, "2026-09-13T10:00:00.000Z", "h3", "hm3"))
+#   h4：Claude が tool.py を Write（4行）。Python の import は引用符のパスが無い（Codex の指摘・PR #15）
+#     1 from oldpkg.utils import foo   → from newpkg.utils import foo（モジュールが変わった＝import）。hunk（前なし・次=2）
+#     2 VALUE = 1                       残った
+#     3 from pkg import a               → from pkg import a, b（名前の追加＝other）。hunk（2〜4）
+#     4 print(VALUE)                    残った
+TOOL_V1 = "from oldpkg.utils import foo\nVALUE = 1\nfrom pkg import a\nprint(VALUE)\n"
+TOOL_NOW = "from newpkg.utils import foo\nVALUE = 1\nfrom pkg import a, b\nprint(VALUE)\n"
+write_log(LOGS2 / "-Users-t-dev-habits" / "h4.jsonl", hw("hw_tool", f"{HAB}/src/tool.py", TOOL_V1, "2026-09-14T10:00:00.000Z", "h4", "hm4"))
 def put2(rel, data):
     p = PROJ2 / rel
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -261,4 +269,5 @@ def put2(rel, data):
 put2("src/app.ts", APP_NOW)
 put2("src/util.ts", UTIL_NOW)
 put2("src/old.ts", OLD_NOW)
+put2("src/tool.py", TOOL_NOW)
 put2("README.md", "# habits\n")

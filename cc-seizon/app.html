@@ -574,6 +574,12 @@ const HABITS = {
   other:       { label: 'その他の書き換え', generic: true },
   block:       { label: 'まとまった削除・書き直し（3行以上）', generic: true },
 };
+/* 引用符の無い import（Python など）のモジュール部分：from X import … → X、import X as Y, Z → X, Z */
+function importModule(s){
+  const m = /^from\s+(\S+)\s+import\s/.exec(s);
+  if (m) return m[1];
+  return s.replace(/^import\s+/, '').replace(/\s+as\s+[A-Za-z_]\w*/g, '').replace(/\s+/g, '');   // 別名は識別子だけ外す（「, 」は残す＝import foo as f, bar と import foobar を混同しない）
+}
 /* 1組（before → after）を型に分ける。after が null＝置き換え先が見つからない＝削除 */
 function classifyPair(before, after, ext){
   if (after === null) {
@@ -588,9 +594,10 @@ function classifyPair(before, after, ext){
   if (tb.includes('any') && !ta.includes('any')) return { id: 'any' };
   if (isCommentLine(before, ext) && isCommentLine(after, ext) && RX_CJK.test(before) !== RX_CJK.test(after)) return { id: 'commentLang', dir: RX_CJK.test(after) ? 'ja' : 'en' };
   if (RX_IMPORT.test(before)) {
-    // import は、パス（文字列）が変わった時だけ「書き方」。名前の追加・削除は中身の変更＝その他
+    // import は、パス（モジュール）が変わった時だけ「書き方」。名前の追加・削除は中身の変更＝その他
     const sb = tb.filter(t => RX_STRTOK.test(t)).join('\u0000'), sa = ta.filter(t => RX_STRTOK.test(t)).join('\u0000');
-    return { id: sb !== sa ? 'import' : 'other' };
+    if (sb || sa) return { id: sb !== sa ? 'import' : 'other' };   // JS/TS など：引用符のパス
+    return { id: importModule(before) !== importModule(after) ? 'import' : 'other' };   // Python など：from X import … の X／import X, Y の全部
   }
   if (tb.length && tb.length === ta.length) {
     const diff = [];

@@ -35,7 +35,8 @@ HAND = {
 LOGS2 = HERE / "seizon" / "logs2"
 PROJ2 = HERE / "seizon" / "proj" / "habits"
 HAND_HABITS = [("debug", 3, 2, 2, True, False), ("rename", 3, 1, 1, False, False), ("any", 1, 1, 1, False, False), ("comment", 1, 1, 1, False, False),
-               ("quote", 1, 1, 1, False, False), ("string", 1, 1, 1, False, False), ("block", 5, 1, 1, False, True), ("delete", 1, 1, 1, False, True)]
+               ("import", 1, 1, 1, False, False), ("quote", 1, 1, 1, False, False), ("string", 1, 1, 1, False, False),
+               ("block", 5, 1, 1, False, True), ("delete", 1, 1, 1, False, True), ("other", 1, 1, 1, False, True)]
 failures = 0
 
 def check(name, got, want):
@@ -172,23 +173,31 @@ with sync_playwright() as p:
             ok &= check("logs-as-project keeps result", page.evaluate("window.__seizon.current.written"), expect[False]["written"])
             # 8) 直し癖：別のログ（logs2）とプロジェクト（habits）＝手計算 HAND_HABITS ＝ Python ＝ Chromium
             page.set_input_files("#logInput", str(LOGS2))
-            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('3ファイル')", timeout=20000)
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('4ファイル')", timeout=20000)
             page.set_input_files("#projInput", str(PROJ2))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'habits'", timeout=20000)
             cur_h = page.evaluate(CURRENT)
             exp_h = ref_seizon.run(sorted(LOGS2.rglob("*.jsonl")), PROJ2, strict=False)
-            ok &= check("habits written/alive/human", (cur_h["written"], cur_h["alive"], cur_h["human"], cur_h["dropped"]), (22, 6, 16, 0))
+            ok &= check("habits written/alive/human", (cur_h["written"], cur_h["alive"], cur_h["human"], cur_h["dropped"]), (26, 8, 18, 0))
             ok &= check("habits js=py", cur_h["habits"], exp_h["habits"])
             ok &= check("habits hand", [(it["id"], it["count"], it["sessions"], it["files"], it["candidate"], it["generic"]) for it in cur_h["habits"]["items"]], HAND_HABITS)
-            ok &= check("habits lines/matched", (cur_h["habits"]["lines"], cur_h["habits"]["matched"]), (16, 6))
+            ok &= check("habits lines/matched", (cur_h["habits"]["lines"], cur_h["habits"]["matched"]), (18, 8))
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])
             ok &= check("habits cards rendered", page.evaluate("document.querySelectorAll('#details .habit').length"), 1)
+            # import の型の境界（Codex の指摘 #15・#16）：引用符の無い import・別名つきの一覧
+            PAIRS = [("import foo as f, bar", "import foobar", "import"), ("import foo as f, bar", "import foo, bar", "other"), ("import os", "import os, sys", "import"),
+                     ("from oldpkg.utils import foo", "from newpkg.utils import foo", "import"), ("from pkg import a", "from pkg import a, b", "other"),
+                     ('import { a } from "./x";', 'import { a, b } from "./x";', "other"), ('import { a } from "./x";', "import { a } from './x';", "quote"), ('import { a } from "./x";', 'import { a } from "./x.js";', "import")]
+            js_ids = page.evaluate("ps => ps.map(([b, a]) => window.__seizon.classifyPair(b, a, 'py').id)", [[b, a] for b, a, _ in PAIRS])
+            py_ids = [ref_seizon.classify_pair(b, a, "py")[0] for b, a, _ in PAIRS]
+            ok &= check("classifyPair import boundary js", js_ids, [w for _, _, w in PAIRS])
+            ok &= check("classifyPair import boundary py", py_ids, [w for _, _, w in PAIRS])
             ok &= check("habits weak listed", page.evaluate("document.getElementById('details').textContent.includes('回数が足りない型')"), True)
             page.screenshot(path=str(SHOTS / "seizon-habits.png"), full_page=True)
             # 9) 結果の保存（JSON）と前回との比較：数だけ・行の中身は入らない／減った型が緑
             snap = page.evaluate("window.__seizon.snapshotOf(window.__seizon.current)")
-            ok &= check("snapshot keys", (snap["tool"], snap["projectName"], snap["written"], len(snap["habits"]), "examples" in json.dumps(snap), "console.log" in json.dumps(snap)), ("cc-seizon", "habits", 22, 8, False, False))
+            ok &= check("snapshot keys", (snap["tool"], snap["projectName"], snap["written"], len(snap["habits"]), "examples" in json.dumps(snap), "console.log" in json.dumps(snap)), ("cc-seizon", "habits", 26, 10, False, False))
             prev = json.loads(json.dumps(snap)); prev["savedAt"] = "2026-09-01"
             for h in prev["habits"]:
                 if h["id"] == "debug": h["count"] = 5

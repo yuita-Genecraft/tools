@@ -321,6 +321,12 @@ def habit_rule(hid, d, count):
         "number": lambda: f"数値（上限・件数・待ち時間）を後で直した行が{fmt_n(count)}回。数値は既存の設定値や定数から引かせる。",
     }[hid]()
 
+def import_module(s):
+    m = re.match(r"^from\s+(\S+)\s+import\s", s)
+    if m:
+        return m.group(1)
+    return re.sub(r"\s+", "", re.sub(r"\s+as\s+[A-Za-z_]\w*", "", re.sub(r"^import\s+", "", s)))   # 別名は識別子だけ外す（「, 」は残す）
+
 def classify_pair(before, after, ext):
     if after is None:
         if RX_DEBUG.search(before):
@@ -340,9 +346,11 @@ def classify_pair(before, after, ext):
     if is_comment_line(before, ext) and is_comment_line(after, ext) and bool(RX_CJK.search(before)) != bool(RX_CJK.search(after)):
         return "commentLang", ("ja" if RX_CJK.search(after) else "en")
     if RX_IMPORT.search(before):
-        # import は、パス（文字列）が変わった時だけ「書き方」。名前の追加・削除は中身の変更＝その他
+        # import は、パス（モジュール）が変わった時だけ「書き方」。名前の追加・削除は中身の変更＝その他
         sb = "\0".join(t for t in tb if RX_STRTOK.match(t)); sa = "\0".join(t for t in ta if RX_STRTOK.match(t))
-        return ("import" if sb != sa else "other"), ""
+        if sb or sa:
+            return ("import" if sb != sa else "other"), ""
+        return ("import" if import_module(before) != import_module(after) else "other"), ""
     if tb and len(tb) == len(ta):
         diff = [i for i in range(len(tb)) if tb[i] != ta[i]]
         if len(diff) == 1 and RX_IDENT.match(tb[diff[0]]) and RX_IDENT.match(ta[diff[0]]):

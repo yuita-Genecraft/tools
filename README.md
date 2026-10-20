@@ -6,7 +6,7 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
 |---|---|---|
 | Claude Code 通知表 | `~/.claude/projects` のログを集計し、推定作業時間・使った日数・よく使ったツール・APIトークン料金の換算を通知表の画像にする（「ありがとう」などの回数と称号はおまけ） | `cc-tsuchihyo/app.html` |
 | Firebase 公開前チェック | [fbcheck](https://github.com/yuita-Genecraft/fbcheck)（Node版）と同じ判定をブラウザで。フォルダをドロップするだけ | `fbcheck-web/app.html` |
-| Claude Code 生存率 | `~/.claude/projects`（Claude Code）・`~/.codex/sessions`（Codex）・`~/.gemini`（Gemini／Antigravity）のログと、手元のプロジェクトのフォルダを突き合わせて、AI が書いた行のうち今も残っている割合を「残った・Claude が自分で書き直した・人が消した・ファイルごと消えた」に分けて1枚の画像にする。会話ごとに最初の指示と「残った1行あたりの出力トークン」を並べ、今は無いコードに使った出力トークンの割合を出す（どの頼み方が高くついて消えたか）。人が直した行から直し癖（直しの型）を数え、CLAUDE.md に足す1行の案を出す。結果を JSON で保存して次回と比べられる。期間つきの AI率、人が消した行が多いファイルも | `cc-seizon/app.html` |
+| Claude Code 生存率 | `~/.claude/projects`（Claude Code）・`~/.codex/sessions`（Codex）・`~/.gemini/antigravity*`（Antigravity）のログと、手元のプロジェクトのフォルダを突き合わせて、AI が書いた行のうち今も残っている割合を「残った・Claude が自分で書き直した・人が消した・ファイルごと消えた」に分けて1枚の画像にする。会話ごとに最初の指示と「残った1行あたりの出力トークン」を並べ、今は無いコードに使った出力トークンの割合を出す（どの頼み方が高くついて消えたか）。人が直した行から直し癖（直しの型）を数え、CLAUDE.md に足す1行の案を出す。結果を JSON で保存して次回と比べられる。期間つきの AI率、人が消した行が多いファイルも | `cc-seizon/app.html` |
 
 ## 仕組み
 
@@ -59,9 +59,9 @@ python -u test/test_overlap.py
 - 失敗した Edit（`is_error`）と、結果の記録が無い Edit／Write は適用しない。tool_use の id で重複を除く（再開したセッションは前の行を写す）
 - ログは初期設定で30日より古いものが消えるので、AI率は必ず期間つきで出す。頭に置く数字は生存率
 - Codex（2026-10-21）：`~/.codex/sessions/年/月/日/rollout-*.jsonl`。ファイルの変更は `event_msg` の `item_completed` → `FileChange`（`changes` の中に `add`＝全文・`update`＝`unified_diff`・`delete`）。`add` は Claude Code の Write（新規）、`update` は unified diff の前の行（`-` と共通の行）→ 後の行（`+` と共通の行）の Edit に直して同じ計算に流す。`status` が `completed` 以外は数えない。会話＝ファイルの頭の `session_meta` の id（作業フォルダも同じ所）。使用量＝`token_usage_record` を `response_id` ごとに1回（`input_tokens` はキャッシュから読んだ分を含むので引く）。普段の編集（シェル経由の `apply_patch`）も FileChange に残る＝本人のログで 560 回中 554 回は 30 秒以内に FileChange があった
-- Gemini（Antigravity）：`~/.gemini/antigravity（-cli）/brain/〈会話〉/.system_generated/logs/` の下。同じ step が `transcript.jsonl`・`chunks/transcript`・`chunks/transcript_full` に重ねて残り、中身が切られた写し（`truncated_fields`）もある＝step ごとに「切られていない → full → 本体 → chunks」の順で1つだけ選んでから数える（全部読んだ後）。`write_to_file` は Write、`replace_file_content`（`TargetContent` → `ReplacementContent`）は Edit。値が JSON の文字列でもう一段包まれた写しはほどき、ほどけない値（途中で切れた）は数えずに件数だけ出す。Gemini は書いた前に読んだ行の記録（Read）が無いので、既存のファイルを丸ごと書き直すと、元からあった行も AI の行に数える（過大になりうる）。書き込みが成功したかの記録は見ていない
+- Antigravity（ログは `~/.gemini` の下。Gemini CLI のログは形式を確かめていないので対象外）：`~/.gemini/antigravity（-cli）/brain/〈会話〉/.system_generated/logs/` の下。同じ step が `transcript.jsonl`・`chunks/transcript`・`chunks/transcript_full` に重ねて残り、中身が切られた写し（`truncated_fields`）もある＝step ごとに「切られていない → full → 本体 → chunks」の順で1つだけ選んでから数える（全部読んだ後）。`write_to_file` は Write、`replace_file_content`（`TargetContent` → `ReplacementContent`）は Edit。値が JSON の文字列でもう一段包まれた写しはほどき、ほどけない値（途中で切れた）は数えずに件数だけ出す。Antigravity は書いた前に読んだ行の記録（Read）が無いので、既存のファイルを丸ごと書き直すと、元からあった行も AI の行に数える（過大になりうる）。書き込みが成功したかの記録は見ていない
 - 同じ AI のログを入れ直すと置き換え、別の AI のログなら足す（Claude Code と Codex を両方入れられる）。会話の ID の頭（`codex:`・`gemini:`）で AI を分け、内訳と会話の表に出す。書いた行がある AI が1つならその名前（Claude／Codex／Gemini）、2つ以上なら「AI」と書く
-- 本物のログでの確認（2026-10-21・本人の Mac）：Codex（1会話・変更 305 回・17,733 行）と Gemini（1会話・31 回・1,331 行）で、Chromium と Python の別実装が全項目一致。Codex はログの変更を当て直すと 157 ファイル中 142 で今の中身と完全に一致した（残り 15 はシェルのリダイレクトや `sed -i` での書き換えが多いファイル＝数えない経路）
+- 本物のログでの確認（2026-10-21・本人の Mac）：Codex（1会話・変更 305 回・17,733 行）と Antigravity（1会話・31 回・1,331 行）で、Chromium と Python の別実装が全項目一致。Codex はログの変更を当て直すと 157 ファイル中 142 で今の中身と完全に一致した（残り 15 はシェルのリダイレクトや `sed -i` での書き換えが多いファイル＝数えない経路）
 
 ## 集計で気をつけたこと（通知表）
 

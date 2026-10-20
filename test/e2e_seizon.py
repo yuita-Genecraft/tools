@@ -225,7 +225,7 @@ with sync_playwright() as p:
             page.set_input_files("#logInput", str(LOGS3 / "codex"))
             page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Codex 2件')", timeout=20000)
             page.set_input_files("#logInput", str(LOGS3 / "gemini"))
-            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Gemini 2件')", timeout=20000)
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Antigravity 2件')", timeout=20000)
             ok &= check("multi loaded both", "Codex 2件" in page.text_content("#logLoaded"), True)
             page.set_input_files("#projInput", str(PROJ3))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'multi'", timeout=20000)
@@ -236,11 +236,11 @@ with sync_playwright() as p:
             for k, v in HAND_MULTI.items():
                 ok &= check(f"multi hand {k}", cur_m[k] if k != "rows" else [(r["sid"], r["tool"], r["first"], r["out"], r["msgs"], r["bash"], r["written"], r["alive"], r["perAlive"]) for r in cur_m["sessionStats"]["rows"]], v)
             ok &= check("multi outGone", (cur_m["sessionStats"]["outTotal"], cur_m["sessionStats"]["outGone"]), (200, 64))
-            ok &= check("multi card title", page.evaluate("document.getElementById('details').textContent.includes('Gemini が書いた行')"), True)
+            ok &= check("multi card title", page.evaluate("document.getElementById('details').textContent.includes('Antigravity が書いた行')"), True)
             ok &= check("multi label AI", "AI が書いた" in page.input_value("#shareText"), True)
             # 同じ AI のログを入れ直すと置き換える（Codex だけになる）
             page.set_input_files("#logInput", str(LOGS3 / "codex"))
-            page.wait_for_function("!document.getElementById('logLoaded').textContent.includes('Gemini') && window.__seizon.current.written === 5", timeout=20000)
+            page.wait_for_function("!document.getElementById('logLoaded').textContent.includes('Antigravity') && window.__seizon.current.written === 5", timeout=20000)
             ok &= check("multi replace same tool", (page.evaluate("window.__seizon.current.written"), "Codex が書いた" in page.input_value("#shareText")), (5, True))
             # 頼み方の節：最初に出る・指示の冒頭が見える・隠すと消える・共有文に1行
             ok &= check("sessions section first", page.evaluate("document.querySelector('#details .sec h2').textContent"), "頼み方と、残った1行あたりの出力トークン")

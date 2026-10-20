@@ -165,6 +165,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 .pairs .arrow.del{color:var(--human)}
 .rule{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-top:4px}
 .rule .k{font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.04em;white-space:nowrap}
+.habit.content .rule .k{color:var(--muted)} .habit.content .rule code{background:var(--desk-deep);border-color:var(--rule);font-weight:500}
 .rule code{flex:1 1 16rem;font-family:var(--f-gothic);font-size:14px;font-weight:700;padding:8px 12px;border-radius:8px;background:var(--accent-wash);border:1px solid var(--accent);min-width:0;word-break:break-word}
 .rule-all{display:grid;gap:8px;margin-top:14px;justify-items:start}
 .rule-all .share-text{width:100%;margin:0}
@@ -555,20 +556,21 @@ function isCommentLine(key, ext){
   if (key.startsWith('#') && !key.startsWith('#!') && HASH_COMMENT_EXT.has(ext)) return true;
   return false;
 }
-/* 直しの型。rule は CLAUDE.md に書く1行の案（generic の型には出さない）。dir は実例から向きを決める */
+/* 直しの型。kind: style＝書き方の癖（CLAUDE.md の1行で直る）／content＝内容の直し（名前・文言・数値が後で変わった＝癖とは限らない。観察と案だけ）
+   generic＝型にしない。rule は1行の案。it＝{dir, count}（dir は実例から向きを決める） */
 const HABITS = {
-  debug:       { label: 'デバッグ出力の削除', rule: () => 'デバッグ用の出力（console.log など）は残さない。' },
-  comment:     { label: 'コメントの削除', rule: () => '説明のコメントは足さない。コードで分かることはコメントに書かない。' },
+  debug:       { kind: 'style', label: 'デバッグ出力の削除', rule: () => 'デバッグ用の出力（console.log など）は残さない。' },
+  comment:     { kind: 'style', label: 'コメントの削除', rule: () => '説明のコメントは足さない。コードで分かることはコメントに書かない。' },
+  quote:       { kind: 'style', label: '引用符の統一', rule: it => `文字列の引用符は ${it.dir === '"' ? '"（ダブル）' : "'（シングル）"} で統一する。` },
+  semi:        { kind: 'style', label: 'セミコロンの有無', rule: it => it.dir === ';' ? '文末のセミコロンを付ける。' : '文末のセミコロンは付けない。' },
+  const:       { kind: 'style', label: 'const 化', rule: () => '再代入しない変数は const で宣言する。' },
+  any:         { kind: 'style', label: 'any の型付け', rule: () => 'any を使わない。型が決まらなければ unknown か具体的な型を書く。' },
+  commentLang: { kind: 'style', label: 'コメントの言語', rule: it => it.dir === 'ja' ? 'コメントは日本語で書く。' : 'コメントは英語で書く。' },
+  import:      { kind: 'style', label: 'import のパス・拡張子', rule: () => 'import のパスと拡張子は、既存ファイルの書き方に合わせる。' },
+  rename:      { kind: 'content', label: '名前の変更', rule: it => `名前を後で変えた行が${fmt(it.count)}回${it.dir ? `（例：${it.dir}）` : ''}。命名は先に決めて渡すか、既存の名前に合わせるよう書いておく。` },
+  string:      { kind: 'content', label: '文字列（文言）の変更', rule: it => `文言（メッセージ・テストの説明）を後で直した行が${fmt(it.count)}回。文言は仕様や既存の文に合わせ、決まっていない所は仮置きと明記させる。` },
+  number:      { kind: 'content', label: '数値の変更', rule: it => `数値（上限・件数・待ち時間）を後で直した行が${fmt(it.count)}回。数値は既存の設定値や定数から引かせる。` },
   delete:      { label: '行の削除（置き換え無し）', generic: true },
-  quote:       { label: '引用符の統一', rule: it => `文字列の引用符は ${it.dir === '"' ? '"（ダブル）' : "'（シングル）"} で統一する。` },
-  semi:        { label: 'セミコロンの有無', rule: it => it.dir === ';' ? '文末のセミコロンを付ける。' : '文末のセミコロンは付けない。' },
-  const:       { label: 'const 化', rule: () => '再代入しない変数は const で宣言する。' },
-  any:         { label: 'any の型付け', rule: () => 'any を使わない。型が決まらなければ unknown か具体的な型を書く。' },
-  commentLang: { label: 'コメントの言語', rule: it => it.dir === 'ja' ? 'コメントは日本語で書く。' : 'コメントは英語で書く。' },
-  import:      { label: 'import の書き方', rule: () => 'import は既存ファイルの書き方（順序・パス・拡張子・引用符）に合わせる。' },
-  rename:      { label: '名前の変更', rule: it => `命名は既存のコードに合わせる${it.dir ? `（例：${it.dir}）` : ''}。` },
-  string:      { label: '文字列（文言）の変更', rule: () => '表示する文言は既存の言い回しに合わせる。文言を勝手に作らない。' },
-  number:      { label: '数値の変更', rule: () => '数値（上限・待ち時間など）は既存の設定値や定数を使う。' },
   other:       { label: 'その他の書き換え', generic: true },
   block:       { label: 'まとまった削除・書き直し（3行以上）', generic: true },
 };
@@ -585,7 +587,11 @@ function classifyPair(before, after, ext){
   const tb = tokensOf(before), ta = tokensOf(after);
   if (tb.includes('any') && !ta.includes('any')) return { id: 'any' };
   if (isCommentLine(before, ext) && isCommentLine(after, ext) && RX_CJK.test(before) !== RX_CJK.test(after)) return { id: 'commentLang', dir: RX_CJK.test(after) ? 'ja' : 'en' };
-  if (RX_IMPORT.test(before)) return { id: 'import' };
+  if (RX_IMPORT.test(before)) {
+    // import は、パス（文字列）が変わった時だけ「書き方」。名前の追加・削除は中身の変更＝その他
+    const sb = tb.filter(t => RX_STRTOK.test(t)).join('\u0000'), sa = ta.filter(t => RX_STRTOK.test(t)).join('\u0000');
+    return { id: sb !== sa ? 'import' : 'other' };
+  }
   if (tb.length && tb.length === ta.length) {
     const diff = [];
     for (let i = 0; i < tb.length; i++) if (tb[i] !== ta[i]) diff.push(i);
@@ -689,8 +695,8 @@ function analyzeHabits(habitIn){
     const ex = [];
     for (const e of it.examples) { if (ex.length === 0 || (ex.length === 1 && e.file !== ex[0].file)) ex.push(e); if (ex.length === 2) break; }
     if (ex.length === 1 && it.examples.length > 1) ex.push(it.examples[1]);
-    H.items.push({ id: it.id, label: def.label, count: it.count, sessions: it.sessions.size, files: it.files.size, generic, candidate, dir,
-      rule: generic ? null : def.rule({ dir }), examples: ex.map(e => ({ before: e.before, after: e.after, file: e.file })) });
+    H.items.push({ id: it.id, label: def.label, kind: def.kind || 'generic', count: it.count, sessions: it.sessions.size, files: it.files.size, generic, candidate, dir,
+      rule: generic ? null : def.rule({ dir, count: it.count }), examples: ex.map(e => ({ before: e.before, after: e.after, file: e.file })) });
   }
   H.items.sort((a, b) => (b.candidate - a.candidate) || (a.generic - b.generic) || b.count - a.count || b.sessions - a.sessions || cmpStr(a.id, b.id));
   return H;
@@ -753,7 +759,7 @@ function sampleResult(){
   R.projectLines = files.reduce((a, f) => a + f.lines, 0) + 4312;
   R.files.sort((a, b) => b.written - a.written || b.lines - a.lines);
   assignAliases(R);
-  const hx = (id, count, sessions, files, candidate, examples, dir = '') => ({ id, label: HABITS[id].label, count, sessions, files, generic: !!HABITS[id].generic, candidate, dir, rule: HABITS[id].generic ? null : HABITS[id].rule({ dir }), examples });
+  const hx = (id, count, sessions, files, candidate, examples, dir = '') => ({ id, label: HABITS[id].label, kind: HABITS[id].kind || 'generic', count, sessions, files, generic: !!HABITS[id].generic, candidate, dir, rule: HABITS[id].generic ? null : HABITS[id].rule({ dir, count }), examples });
   R.habits = { lines: 287, matched: 103, items: [   // 合計＝人が直した 287 行（書き換え 103・削除 184）
     hx('debug', 41, 9, 7, true, [{ before: "console.log('notes', notes.length);", after: null, file: 'src/app/api/notes/route.ts' }, { before: "console.log('render', props);", after: null, file: 'src/components/Editor.tsx' }]),
     hx('comment', 23, 6, 8, true, [{ before: '// Fetch all notes for the current user', after: null, file: 'src/lib/db.ts' }, { before: '// Handle the submit event', after: null, file: 'src/components/Editor.tsx' }]),
@@ -1037,15 +1043,16 @@ function habitsHTML(R, hide){
   const cands = H.items.filter(it => it.candidate), weak = H.items.filter(it => !it.candidate && !it.generic), generic = H.items.filter(it => it.generic);
   const blockN = (H.items.find(it => it.id === 'block') || { count: 0 }).count;
   const intro = `<p class="def">人が直した <b>${fmt(H.lines)} 行</b>を、同じファイルの今の行と突き合わせました（書き換え ${fmt(H.matched)}・削除 ${fmt(H.lines - H.matched)}${blockN ? `・うち <b>${fmt(blockN)} 行</b>は3行以上まとまって消えた・書き直された所＝作り直しで、癖には数えません` : ''}）。<b>3回以上・2セッション以上</b>で出た型だけを候補にしています。</p>`;
-  const cardsHtml = cands.length ? cands.map(it => `<article class="habit">
-    <header><b>${esc(it.label)}</b><span>${fmt(it.count)}回 ・ ${fmt(it.sessions)}セッション ・ ${fmt(it.files)}ファイル</span></header>
+  const cardsHtml = cands.length ? cands.map(it => `<article class="habit${it.kind === 'content' ? ' content' : ''}">
+    <header><b>${esc(it.label)}</b><span>${fmt(it.count)}回 ・ ${fmt(it.sessions)}セッション ・ ${fmt(it.files)}ファイル${it.kind === 'content' ? ' ・ 内容の直し（癖とは限らない）' : ''}</span></header>
     <ul class="pairs">${it.examples.map(pair).join('')}</ul>
-    <div class="rule"><span class="k">CLAUDE.md に</span><code>${esc(it.rule)}</code><button type="button" class="btn small copy-rule" data-rule="${esc(it.rule)}">コピー</button></div>
+    <div class="rule"><span class="k">${it.kind === 'content' ? '観察と案' : 'CLAUDE.md に'}</span><code>${esc(it.rule)}</code><button type="button" class="btn small copy-rule" data-rule="${esc(it.rule)}">コピー</button></div>
   </article>`).join('') : `<p class="fine"><b>候補なし</b>＝3回以上・2セッション以上で出た型はありませんでした${weak.length ? '（回数が足りない型は下に）' : ''}。</p>`;
   const weakHtml = weak.length ? `<h3 class="sub">回数が足りない型（参考）</h3><ul class="rows">${weak.map(it => `<li><span>${esc(it.label)}<small class="dim">　${it.examples[0] ? esc(it.examples[0].before) : ''}</small></span><b>${fmt(it.count)}回 ・ ${fmt(it.sessions)}セッション</b></li>`).join('')}</ul>` : '';
   const genHtml = generic.length ? `<h3 class="sub">型にならない直し</h3><ul class="rows">${generic.map(it => `<li><span>${esc(it.label)}<small class="dim">　${it.examples[0] ? esc(it.examples[0].before) : ''}</small></span><b>${fmt(it.count)}回</b></li>`).join('')}</ul>` : '';
-  const all = cands.map(it => '- ' + it.rule).join('\n');
-  const allHtml = cands.length ? `<div class="rule-all"><textarea class="share-text" rows="${Math.min(6, cands.length + 1)}" readonly aria-label="CLAUDE.md に足す行">${esc(all)}</textarea><button type="button" class="btn copy-rule" data-rule="${esc(all)}">全部コピー</button></div>` : '';
+  const styleC = cands.filter(it => it.kind === 'style');
+  const all = styleC.map(it => '- ' + it.rule).join('\n');
+  const allHtml = styleC.length ? `<div class="rule-all"><textarea class="share-text" rows="${Math.min(6, styleC.length + 1)}" readonly aria-label="CLAUDE.md に足す行">${esc(all)}</textarea><button type="button" class="btn copy-rule" data-rule="${esc(all)}">CLAUDE.md の行を全部コピー</button></div>` : '';
   return intro + cardsHtml + allHtml + weakHtml + genHtml + `<p class="fine">型は決め打ちの規則で判定しています（会話の内容は見ていません）。置き換え先は、Claude が書いた並びの前後で今も残っている行を目印に、その間にある今の行（Claude の行でないもの）から、語の重なりで1対1に探します。目印が無い（塊ごと消えた）時だけファイル全体から厳しめに探します。3行以上まとめて消えた・書き直された所は「まとまった削除・書き直し」＝癖ではなく作り直しとして、型に数えません。<b>「人が直した」には、このログに無い経路で変わった行（git pull・別の作業コピーやクラウドのセッション・Bash）も入ります</b>＝人の直しの上限です。ファイルごと消えた行は入りません。1行は案です。CLAUDE.md に入れたら「結果を保存」で今の数字を残し、次に測った時に「前回と比べる」で、その型が減ったかを見てください。</p>`;
 }
 /* 前回と比べる：結果を JSON（数だけ・行の中身は入れない）で保存し、次に測った時に読み込んで差を見る */

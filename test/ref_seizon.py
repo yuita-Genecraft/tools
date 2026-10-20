@@ -288,7 +288,7 @@ RX_IMPORT = re.compile(r"^(import\s|from\s\S+\simport\s|export\s.+\sfrom\s|(cons
 RX_IDENT = re.compile(r"^[A-Za-z_$][\w$]*$"); RX_NUMTOK = re.compile(r"^\d+(?:\.\d+)?$"); RX_STRTOK = re.compile(r"^['\"`]")
 RX_COMMENT_START = re.compile(r"^(//|/\*|\*\s|\*$|<!--|--\s)")
 HABIT_LABELS = {"debug": "デバッグ出力の削除", "comment": "コメントの削除", "delete": "行の削除（置き換え無し）", "quote": "引用符の統一", "semi": "セミコロンの有無",
-                "const": "const 化", "any": "any の型付け", "commentLang": "コメントの言語", "import": "import の書き方", "rename": "名前の変更",
+                "const": "const 化", "any": "any の型付け", "commentLang": "コメントの言語", "import": "import のパス・拡張子", "rename": "名前の変更",
                 "string": "文字列（文言）の変更", "number": "数値の変更", "other": "その他の書き換え", "block": "まとまった削除・書き直し（3行以上）"}
 HABIT_GENERIC = {"delete", "other", "block"}
 
@@ -300,7 +300,13 @@ def is_comment_line(key, ext):
         return True
     return key.startswith("#") and not key.startswith("#!") and ext in HASH_COMMENT_EXT
 
-def habit_rule(hid, d):
+HABIT_KIND = {"debug": "style", "comment": "style", "quote": "style", "semi": "style", "const": "style", "any": "style", "commentLang": "style", "import": "style",
+              "rename": "content", "string": "content", "number": "content"}
+
+def fmt_n(n):
+    return f"{n:,}"
+
+def habit_rule(hid, d, count):
     return {
         "debug": lambda: "デバッグ用の出力（console.log など）は残さない。",
         "comment": lambda: "説明のコメントは足さない。コードで分かることはコメントに書かない。",
@@ -309,10 +315,10 @@ def habit_rule(hid, d):
         "const": lambda: "再代入しない変数は const で宣言する。",
         "any": lambda: "any を使わない。型が決まらなければ unknown か具体的な型を書く。",
         "commentLang": lambda: "コメントは日本語で書く。" if d == "ja" else "コメントは英語で書く。",
-        "import": lambda: "import は既存ファイルの書き方（順序・パス・拡張子・引用符）に合わせる。",
-        "rename": lambda: "命名は既存のコードに合わせる" + (f"（例：{d}）" if d else "") + "。",
-        "string": lambda: "表示する文言は既存の言い回しに合わせる。文言を勝手に作らない。",
-        "number": lambda: "数値（上限・待ち時間など）は既存の設定値や定数を使う。",
+        "import": lambda: "import のパスと拡張子は、既存ファイルの書き方に合わせる。",
+        "rename": lambda: f"名前を後で変えた行が{fmt_n(count)}回" + (f"（例：{d}）" if d else "") + "。命名は先に決めて渡すか、既存の名前に合わせるよう書いておく。",
+        "string": lambda: f"文言（メッセージ・テストの説明）を後で直した行が{fmt_n(count)}回。文言は仕様や既存の文に合わせ、決まっていない所は仮置きと明記させる。",
+        "number": lambda: f"数値（上限・件数・待ち時間）を後で直した行が{fmt_n(count)}回。数値は既存の設定値や定数から引かせる。",
     }[hid]()
 
 def classify_pair(before, after, ext):
@@ -334,7 +340,9 @@ def classify_pair(before, after, ext):
     if is_comment_line(before, ext) and is_comment_line(after, ext) and bool(RX_CJK.search(before)) != bool(RX_CJK.search(after)):
         return "commentLang", ("ja" if RX_CJK.search(after) else "en")
     if RX_IMPORT.search(before):
-        return "import", ""
+        # import は、パス（文字列）が変わった時だけ「書き方」。名前の追加・削除は中身の変更＝その他
+        sb = "\0".join(t for t in tb if RX_STRTOK.match(t)); sa = "\0".join(t for t in ta if RX_STRTOK.match(t))
+        return ("import" if sb != sa else "other"), ""
     if tb and len(tb) == len(ta):
         diff = [i for i in range(len(tb)) if tb[i] != ta[i]]
         if len(diff) == 1 and RX_IDENT.match(tb[diff[0]]) and RX_IDENT.match(ta[diff[0]]):
@@ -471,8 +479,8 @@ def analyze_habits(habit_in):
                 break
         if len(ex) == 1 and len(it["examples"]) > 1:
             ex.append(it["examples"][1])
-        H["items"].append({"id": it["id"], "label": HABIT_LABELS[it["id"]], "count": it["count"], "sessions": len(it["sessions"]), "files": len(it["files"]),
-                           "generic": generic, "candidate": candidate, "dir": d, "rule": None if generic else habit_rule(it["id"], d), "examples": ex})
+        H["items"].append({"id": it["id"], "label": HABIT_LABELS[it["id"]], "kind": HABIT_KIND.get(it["id"], "generic"), "count": it["count"], "sessions": len(it["sessions"]), "files": len(it["files"]),
+                           "generic": generic, "candidate": candidate, "dir": d, "rule": None if generic else habit_rule(it["id"], d, it["count"]), "examples": ex})
     H["items"].sort(key=lambda a: (-int(a["candidate"]), int(a["generic"]), -a["count"], -a["sessions"], a["id"]))
     return H
 

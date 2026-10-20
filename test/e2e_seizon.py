@@ -22,13 +22,20 @@ expect = {False: ref_seizon.run(log_files, PROJ, strict=False), True: ref_seizon
 # 手で数えた期待値（gen_seizon.py のコメントと対応）。別実装と同じ間違いをしていないかの歯止め
 HAND = {
     # human=6 のうち 4 は gone.ts（ファイルごと消えた）＝dropped。gone.ts に Claude が書いた 5 行＝droppedWritten。急所（top）は今もあるファイルだけ
-    False: dict(written=26, alive=17, rewritten=3, human=6, dropped=4, droppedWritten=5, aiLines=17, projectLines=35, projectFiles=11, edits=11, sessions=2,
-                otherProjectFiles=2, rootCandidates=2, rootMatched=8, uses=18, logFiles=4, logBad=1, root="/Users/t/dev/alpha",
+    # re.ts：s1 が RE・RE2 を書いて RE2 を自分で消し、s2 が RE2 を入れ直した＝written 28（RE は s1・RE2 は s2）・どちらも残っている（alive +2）。rewritten は 3 のまま（入れ直した行は s2 の行になる）
+    False: dict(written=28, alive=19, rewritten=3, human=6, dropped=4, droppedWritten=5, aiLines=19, projectLines=37, projectFiles=12, edits=14, sessions=2,
+                otherProjectFiles=2, rootCandidates=2, rootMatched=9, uses=21, logFiles=4, logBad=1, root="/Users/t/dev/alpha",
                 period={"start": "2026-09-01", "end": "2026-09-05", "days": 5},
                 top=[("src/a.ts", 1, 6, True), ("src/c.ts", 1, 3, True)],
                 examples={"alive": ("return db.notes.where({ userId }).sortBy('updatedAt');", "src/a.ts"),
-                          "human": ("return list.reduce((x, y) => x + y, 0);", "src/c.ts")}),
-    True: dict(written=26, alive=16, rewritten=3, human=7, dropped=4, droppedWritten=5, aiLines=16, projectLines=35),
+                          "human": ("return list.reduce((x, y) => x + y, 0);", "src/c.ts")},
+                # 頼み方：s1＝14通×100＝1,400（m2・m5 は2行に分かれているが応答は1つ）・22行書いて13行残存（消えた9行）→ 今は無い分 1,400×9/22=573・残った1行あたり 1,400/13=108
+                #         s2＝7通×300＝2,100・alpha に6行（RE2 の入れ直しを含む）＋別の場所に1行（decoy）＝按分 6/7 → 1,800・全部残存 → 0・1行あたり 300
+                #         再開で写った s1 の2行（s2.jsonl の先頭）は uuid で重複を除く＝s1 は 14 通のまま。20行以上書いたのは s1 だけ＝高くて消えた・安くて残ったは無し（残存 59%）
+                sessionStats=dict(outTotal=3200, outGone=573, costly=["s1"], cheap=[],
+                                  rows=[("s2", "引き継ぎ：win.ts・sec.ts・d.ts を足す。範囲外は触らない", 2100, 1800, 7, 4, 6, 6, 0, 0, 0, 300, "2026-09-03", "2026-09-05"),   # s2 の写しは sessionId が s1 のまま＝別の会話のまま（本物の再開は habits の h5 で試す）
+                                        ("s1", "a.ts に listNotes を足して、並びは updatedAt にして", 1400, 1400, 14, 10, 22, 13, 3, 2, 4, 108, "2026-09-01", "2026-09-01")])),
+    True: dict(written=28, alive=18, rewritten=3, human=7, dropped=4, droppedWritten=5, aiLines=18, projectLines=37),
 }
 # 直し癖の手計算（gen_seizon.py の habits の節と対応）：(id, 回数, セッション数, ファイル数, 候補か, 型にならないか)
 # 候補＝3回以上かつ2セッション以上。rename は3回でも1セッション＝参考。old.ts の丸ごと書き直し5行は block（癖ではない）
@@ -55,7 +62,7 @@ ROW_KEYS = ("file", "exists", "lines", "written", "alive", "rewritten", "human",
 def compare(label, cur, exp):
     ok = True
     for k in ("written", "alive", "rewritten", "human", "dropped", "droppedWritten", "aiLines", "projectLines", "projectFiles", "otherProjectFiles", "edits", "sessions",
-              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples", "habits"):
+              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples", "habits", "sessionStats"):
         ok &= check(f"{label} {k}", cur[k], exp[k])
     ok &= check(f"{label} files", [[r[k] for k in ROW_KEYS] for r in cur["files"]], [[r[k] for k in ROW_KEYS] for r in exp["files"]])
     ok &= check(f"{label} missingFiles", cur["missingFiles"], exp["missingFiles"])
@@ -69,6 +76,10 @@ def compare_hand(label, cur, strict):
             ok &= check(f"{label} hand top", [(t["file"], t["human"], t["written"], t["exists"]) for t in cur["top"]], v)
         elif k == "examples":
             ok &= check(f"{label} hand examples", {kk: (e["key"], e["file"]) if e else None for kk, e in cur["examples"].items()}, v)
+        elif k == "sessionStats":
+            S = cur["sessionStats"]
+            ok &= check(f"{label} hand sessionStats totals", (S["outTotal"], S["outGone"], S["costly"], S["cheap"]), (v["outTotal"], v["outGone"], v["costly"], v["cheap"]))
+            ok &= check(f"{label} hand sessionStats rows", [(r["sid"], r["first"], r["out"], r["outRepo"], r["msgs"], r["edits"], r["written"], r["alive"], r["rewritten"], r["human"], r["dropped"], r["perAlive"], r["start"], r["end"]) for r in S["rows"]], v["rows"])
         else:
             ok &= check(f"{label} hand {k}", cur[k], v)
     return ok
@@ -173,15 +184,22 @@ with sync_playwright() as p:
             ok &= check("logs-as-project keeps result", page.evaluate("window.__seizon.current.written"), expect[False]["written"])
             # 8) 直し癖：別のログ（logs2）とプロジェクト（habits）＝手計算 HAND_HABITS ＝ Python ＝ Chromium
             page.set_input_files("#logInput", str(LOGS2))
-            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('4ファイル')", timeout=20000)
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('5ファイル')", timeout=20000)
             page.set_input_files("#projInput", str(PROJ2))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'habits'", timeout=20000)
             cur_h = page.evaluate(CURRENT)
             exp_h = ref_seizon.run(sorted(LOGS2.rglob("*.jsonl")), PROJ2, strict=False)
-            ok &= check("habits written/alive/human", (cur_h["written"], cur_h["alive"], cur_h["human"], cur_h["dropped"]), (26, 8, 18, 0))
+            ok &= check("habits written/alive/human", (cur_h["written"], cur_h["alive"], cur_h["human"], cur_h["dropped"]), (27, 9, 18, 0))
             ok &= check("habits js=py", cur_h["habits"], exp_h["habits"])
             ok &= check("habits hand", [(it["id"], it["count"], it["sessions"], it["files"], it["candidate"], it["generic"]) for it in cur_h["habits"]["items"]], HAND_HABITS)
             ok &= check("habits lines/matched", (cur_h["habits"]["lines"], cur_h["habits"]["matched"]), (18, 8))
+            # 頼み方（habits）：h4 と h5 は --resume の関係（同じ uuid・別の sessionId）＝1つの会話にまとめる。出力 100×4 セッション＋h5 の新しい1通＝500
+            #   今は無い分＝h1 100×7/10=70・h2 100×4/7=57・h3 100・h4+h5 200×2/5=80 → 307。20行以上書いた会話が無いので costly/cheap は空
+            Sh = cur_h["sessionStats"]
+            ok &= check("habits sessionStats totals", (Sh["outTotal"], Sh["outGone"], Sh["costly"], Sh["cheap"], cur_h["sessions"]), (500, 307, [], [], 4))
+            ok &= check("habits sessionStats rows", [(r["sid"], r["first"], r["out"], r["outRepo"], r["msgs"], r["members"], r["edits"], r["written"], r["alive"], r["perAlive"]) for r in Sh["rows"]],
+                        [("h4", "tool.py を作って", 200, 200, 2, 2, 2, 5, 3, 67), ("h1", "app.ts を書いて", 100, 100, 1, 1, 1, 10, 3, 33), ("h2", "util.ts を書いて", 100, 100, 1, 1, 1, 7, 3, 33), ("h3", "キャッシュをとりあえず作って", 100, 100, 1, 1, 1, 5, 0, None)])
+            ok &= check("habits resume shown", page.evaluate("document.getElementById('details').textContent.includes('再開 1 回を含む')"), True)
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])
             ok &= check("habits cards rendered", page.evaluate("document.querySelectorAll('#details .habit').length"), 1)
@@ -194,15 +212,30 @@ with sync_playwright() as p:
             ok &= check("classifyPair import boundary js", js_ids, [w for _, _, w in PAIRS])
             ok &= check("classifyPair import boundary py", py_ids, [w for _, _, w in PAIRS])
             ok &= check("habits weak listed", page.evaluate("document.getElementById('details').textContent.includes('回数が足りない型')"), True)
+            # 頼み方の節：最初に出る・指示の冒頭が見える・隠すと消える・共有文に1行
+            ok &= check("sessions section first", page.evaluate("document.querySelector('#details .sec h2').textContent"), "頼み方と、残った1行あたりの出力トークン")
+            ok &= check("sessions prompt shown", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), False)  # habits プロジェクトには user text が無い
+            page.set_input_files("#logInput", str(LOGS)); page.set_input_files("#projInput", str(PROJ))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'alpha'", timeout=20000)
+            ok &= check("sessions prompt shown (alpha)", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), True)
+            ok &= check("sessions pasted tag stripped", page.evaluate("document.getElementById('details').textContent.includes('pasted_content')"), False)
+            ok &= check("share text has token line", "今は無いコードに使った出力トークン：18%（573／3,200）" in page.input_value("#shareText"), True)
+            page.check("#optHidePrompts"); page.wait_for_timeout(200)
+            ok &= check("sessions prompt hidden", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), False)
+            page.uncheck("#optHidePrompts"); page.wait_for_timeout(200)
+            page.set_input_files("#logInput", str(LOGS2)); page.set_input_files("#projInput", str(PROJ2))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'habits'", timeout=20000)
             page.screenshot(path=str(SHOTS / "seizon-habits.png"), full_page=True)
             # 9) 結果の保存（JSON）と前回との比較：数だけ・行の中身は入らない／減った型が緑
             snap = page.evaluate("window.__seizon.snapshotOf(window.__seizon.current)")
-            ok &= check("snapshot keys", (snap["tool"], snap["projectName"], snap["written"], len(snap["habits"]), "examples" in json.dumps(snap), "console.log" in json.dumps(snap)), ("cc-seizon", "habits", 26, 10, False, False))
+            ok &= check("snapshot keys", (snap["tool"], snap["projectName"], snap["written"], len(snap["habits"]), "examples" in json.dumps(snap), "console.log" in json.dumps(snap), "outTotal" in snap, "first" in json.dumps(snap)), ("cc-seizon", "habits", 27, 10, False, False, True, False))
             prev = json.loads(json.dumps(snap)); prev["savedAt"] = "2026-09-01"
             for h in prev["habits"]:
                 if h["id"] == "debug": h["count"] = 5
             ok &= check("loadPrev", page.evaluate("s => window.__seizon.loadPrev(s)", prev), True)
             ok &= check("compare rendered", page.evaluate("[...document.querySelectorAll('#details .sec h2')].some(h => h.textContent === '前回と比べる')"), True)
+            # 前回を読んだら、比べる節（3つ目）が画面の上に来る（Codex の指摘 PR #17：2つ目の節に飛んでいた）
+            ok &= check("compare scrolled into view", page.evaluate("Math.abs(document.querySelector('#details .sec[data-kicker=\"前回\"]').getBoundingClientRect().top) < 2"), True)
             ok &= check("compare delta", page.evaluate("[...document.querySelectorAll('#details .rows li')].some(li => li.textContent.includes('デバッグ出力の削除') && li.textContent.includes('5 → 3') && li.querySelector('.delta.good') !== null)"), True)
             ok &= check("loadPrev rejects foreign json", page.evaluate("window.__seizon.loadPrev({foo: 1})"), False)
             page.click("#clearPrev")

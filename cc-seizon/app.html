@@ -611,7 +611,7 @@ const acceptGlobal = s => s.score >= 0.6 && s.content;                   // 窓�
 /* 直し癖の本体。ファイルごとに：
    1. Claude が書いた行の並び（同じ Edit／Write の中だけが隣）を、「残っていない行の連なり」（hunk）に切る。hunk の前後の残った行が、今のファイルでの位置の目印（窓）
    2. 窓の中の「Claude の行でない今の行」から、似ている行を1対1で探す（置き換え後）
-   3. 残り：デバッグ出力・コメントは削除。残りのコード行の数が窓の中の残りの行数と同じなら、順番どおりに組にする（書き換え）。3行以上まとめて消えていれば「まとまった削除・書き直し」＝癖ではなく作り直し
+   3. 残り：デバッグ出力・コメントは削除（コメントは、前後が残ったコード行の時だけ癖に数える）。残りのコード行が3行までで、窓の中の残りの行数と同じなら、順番どおりに組にする（小さな書き換え）。3行以上まとめて消えた・書き直されたなら「まとまった削除・書き直し」＝癖ではなく作り直し
    4. 窓が無い hunk（塊ごと消えた）は、最後にファイル全体から厳しめに探す。見つからなければ 3 と同じ */
 function analyzeHabits(habitIn){
   const H = { lines: 0, matched: 0, items: [] };
@@ -643,7 +643,7 @@ function analyzeHabits(habitIn){
       const unp = lines.filter(h => !pair.has(h.key));
       const restC = cands.filter(c => !taken.has(c));
       const codeUnp = unp.filter(h => !quick(h));
-      const positional = anchored && codeUnp.length > 0 && codeUnp.length === restC.length;
+      const positional = anchored && codeUnp.length > 0 && codeUnp.length <= 3 && codeUnp.length === restC.length;   // 順番で組にするのは小さな直し（3行まで）だけ。大きな塊は「まとまった書き直し」
       const block = !positional && unp.length >= 3 && codeUnp.length >= 2;
       if (positional) codeUnp.forEach((h, idx) => { pair.set(h.key, restC[idx]); taken.add(restC[idx]); });
       for (const c of taken) used.add(c);

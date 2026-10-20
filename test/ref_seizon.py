@@ -418,7 +418,7 @@ def analyze_habits(habit_in):
             unp = [h for h in lines if h["key"] not in pair]
             rest_c = [c for c in cands if c not in taken]
             code_unp = [h for h in unp if not quick(h)]
-            positional = anchored and len(code_unp) > 0 and len(code_unp) == len(rest_c)
+            positional = anchored and 0 < len(code_unp) <= 3 and len(code_unp) == len(rest_c)
             block = (not positional) and len(unp) >= 3 and len(code_unp) >= 2
             if positional:
                 for idx, h in enumerate(code_unp):

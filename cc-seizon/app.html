@@ -321,6 +321,7 @@ function handleLogLine(line, acc){
         tur = {};
         if (typeof t.type === 'string') tur.type = t.type;
         if (typeof t.originalFile === 'string') tur.originalFile = t.originalFile;
+        else if (typeof t.originalFileContents === 'string') tur.originalFile = t.originalFileContents; // MultiEdit
         if (t.file && typeof t.file === 'object' && typeof t.file.content === 'string') tur.file = { content: t.file.content };
       }
       acc.results.set(b.tool_use_id, { isError: b.is_error === true, text: RX_NUMBERED.test(text) ? text : '', tur });
@@ -422,7 +423,9 @@ function findRoot(claude, project, cwds, projectName){
   let from = best ? 'files' : '';
   if (!best) {
     const sorted = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0]));
-    for (const [c] of sorted) if (projectName && baseName(c) === projectName) { best = c; from = 'cwd'; break; }
+    const same = sorted.filter(([c]) => projectName && baseName(c) === projectName);
+    // 同じ名前の作業フォルダが複数あるとどれがこのフォルダか決められない → 根拠なしとして選ばない
+    if (same.length === 1) { best = same[0][0]; from = 'cwd'; }
   }
   return { root: best, matched: bestN, candidates: votes.size, ambiguous, from };
 }
@@ -1001,7 +1004,7 @@ async function collectEntries(entries){
       try { Object.defineProperty(f, '_path', { value: path + entry.name }); } catch (e) {}
       out.push(f);
     } else if (entry.isDirectory) {
-      if (LOG_SKIP_DIRS.has(entry.name) || PROJ_SKIP_DIRS.has(entry.name)) return;
+      if (PROJ_SKIP_DIRS.has(entry.name)) return; // ログ側だけの除外（plugins・debug 等）は handleLogs で掛ける。ここで掛けるとプロジェクトの同名フォルダが消える
       const reader = entry.createReader();
       for (;;) {
         const batch = await new Promise((res, rej) => reader.readEntries(res, rej));

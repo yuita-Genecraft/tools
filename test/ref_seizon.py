@@ -105,6 +105,8 @@ def handle_line(line, acc):
                     tur["type"] = t["type"]
                 if isinstance(t.get("originalFile"), str):
                     tur["originalFile"] = t["originalFile"]
+                elif isinstance(t.get("originalFileContents"), str):
+                    tur["originalFile"] = t["originalFileContents"]
                 if isinstance(t.get("file"), dict) and isinstance(t["file"].get("content"), str):
                     tur["file"] = {"content": t["file"]["content"]}
             acc["results"][b["tool_use_id"]] = {"isError": b.get("is_error") is True, "text": text if RX_NUMBERED.match(text) else "", "tur": tur}
@@ -233,10 +235,9 @@ def find_root(claude, project, cwds, project_name):
     ambiguous = any(root != best and n == best_n and rank(root) == best_rank for root, n in votes.items())
     src = "files" if best else ""
     if not best:
-        for c, _ in sorted(cwds.items(), key=lambda e: (-e[1], e[0])):
-            if project_name and base_name(c) == project_name:
-                best, src = c, "cwd"
-                break
+        same = [c for c, _ in sorted(cwds.items(), key=lambda e: (-e[1], e[0])) if project_name and base_name(c) == project_name]
+        if len(same) == 1:
+            best, src = same[0], "cwd"
     return best, best_n, len(votes), ambiguous, src
 
 RX_SECRET = re.compile(r"(sk|pk|ghp|gho|ghs|xox[abp]|AKIA|AIza)[-_A-Za-z0-9]{8,}|-----BEGIN|api[_-]?key|secret|token|passw|Bearer\s|[A-Za-z0-9+/=]{32,}|[0-9a-f]{32,}", re.I)

@@ -135,6 +135,8 @@ def read_log_file(path, acc):
 def build_events(acc):
     evs = [u for u in acc["uses"].values() if u["ts"] is not None]
     evs.sort(key=lambda u: (u["ts"], u["id"]))
+    for i, e in enumerate(evs):
+        e["seq"] = i   # 同じ Edit／Write で入った行は seq が同じ（直し癖の hunk 用）
     return evs
 
 def apply_events(evs, acc, strict):
@@ -146,7 +148,7 @@ def apply_events(evs, acc, strict):
         if k in m:
             m[k]["removed"] = False
         else:
-            m[k] = {"ts": ev["ts"], "sid": ev["sid"], "removed": False}
+            m[k] = {"ts": ev["ts"], "sid": ev["sid"], "seq": ev["seq"], "removed": False}
     def claude_remove(p, k):
         rec = claude.get(p, {}).get(k)
         if rec:
@@ -286,8 +288,8 @@ RX_IDENT = re.compile(r"^[A-Za-z_$][\w$]*$"); RX_NUMTOK = re.compile(r"^\d+(?:\.
 RX_COMMENT_START = re.compile(r"^(//|/\*|\*\s|\*$|<!--|--\s)")
 HABIT_LABELS = {"debug": "デバッグ出力の削除", "comment": "コメントの削除", "delete": "行の削除（置き換え無し）", "quote": "引用符の統一", "semi": "セミコロンの有無",
                 "const": "const 化", "any": "any の型付け", "commentLang": "コメントの言語", "import": "import の書き方", "rename": "名前の変更",
-                "string": "文字列（文言）の変更", "number": "数値の変更", "other": "その他の書き換え"}
-HABIT_GENERIC = {"delete", "other"}
+                "string": "文字列（文言）の変更", "number": "数値の変更", "other": "その他の書き換え", "block": "まとまった削除・書き直し（3行以上）"}
+HABIT_GENERIC = {"delete", "other", "block"}
 
 def tokens_of(key):
     return RX_TOK.findall(key)
@@ -342,42 +344,120 @@ def classify_pair(before, after, ext):
             return "number", ""
     return "other", ""
 
-def best_match(key, cands):
-    t = set(tokens_of(key))
-    if not t:
-        return None
-    best, bs = None, 0.0
-    for ckey, cset in cands:
-        if not cset:
-            continue
-        inter = len(t & cset)
-        s = 2 * inter / (len(t) + len(cset))
-        if s > bs or (s == bs and best is not None and ckey < best):
-            bs, best = s, ckey
-    return best if bs >= 0.5 else None
+HABIT_STOP = set("const let var function return export import from default async await if else for while do switch case break continue new this class interface type enum extends implements public private protected static readonly void null undefined true false number string boolean any unknown never object in of as is try catch finally throw typeof instanceof yield def self None True False and or not elif pass lambda with print len str int float list dict set it test describe expect toBe toEqual fn func end then push length map filter get value key name id data result res err error e i j k n s t x y z max min optional describe z".split())
+
+def tok_w(t):
+    return 0.15 if (t in HABIT_STOP or len(t) <= 2 or RX_NUMTOK.match(t)) else 1.0
+
+def tok_info(key):
+    m = {}
+    for t in tokens_of(key):
+        m[t] = tok_w(t)
+    return m, sum(m.values())
+
+def sim_score(a, b):
+    (ma, sa), (mb, sb) = a, b
+    if not sa or not sb:
+        return 0.0, False
+    sh, content = 0.0, False
+    for t, w in ma.items():
+        if t in mb:
+            sh += w
+            if w == 1.0:
+                content = True
+    return 2 * sh / (sa + sb), content
+
+def accept_in(s):
+    return s[0] >= 0.5 or (s[1] and s[0] >= 0.3)
+
+def accept_global(s):
+    return s[0] >= 0.6 and s[1]
 
 def analyze_habits(habit_in):
+    """app.html の analyzeHabits と同じ：hunk（残っていない行の連なり）→ 窓の中で1対1 → 残りは削除／位置で組／まとまった削除"""
     H = {"lines": 0, "matched": 0, "items": []}
     agg = {}
+    def add(hid, h, after, file, d):
+        H["lines"] += 1
+        if after is not None:
+            H["matched"] += 1
+        it = agg.setdefault(hid, {"id": hid, "count": 0, "sessions": set(), "files": set(), "examples": [], "dirs": {}})
+        it["count"] += 1; it["sessions"].add(h["sid"] or ""); it["files"].add(file)
+        if d:
+            it["dirs"][d] = it["dirs"].get(d, 0) + 1
+        if len(it["examples"]) < 8 and not RX_SECRET.search(h["key"]) and not (after and RX_SECRET.search(after)):
+            it["examples"].append({"before": h["key"], "after": after, "file": file})
     for f in habit_in:
         m = RX_EXT.search(f["file"]); ext = (m.group(1) if m else "").lower()
-        cands = [(k, set(tokens_of(k))) for k in f["cur"]]
-        for h in sorted(f["human"], key=lambda h: h["key"]):
-            after = best_match(h["key"], cands)
-            hid, d = classify_pair(h["key"], after, ext)
-            H["lines"] += 1
-            if after is not None:
-                H["matched"] += 1
-            it = agg.setdefault(hid, {"id": hid, "count": 0, "sessions": set(), "files": set(), "examples": [], "dirs": {}})
-            it["count"] += 1; it["sessions"].add(h["sid"] or ""); it["files"].add(f["file"])
-            if d:
-                it["dirs"][d] = it["dirs"].get(d, 0) + 1
-            if len(it["examples"]) < 8 and not RX_SECRET.search(h["key"]) and not (after and RX_SECRET.search(after)):
-                it["examples"].append({"before": h["key"], "after": after, "file": f["file"]})
+        cur_list, pos = [], {}
+        for k in f["cur"]:
+            if k not in pos:
+                pos[k] = len(cur_list); cur_list.append(k)
+        info = {}
+        def info_of(k):
+            if k not in info:
+                info[k] = tok_info(k)
+            return info[k]
+        used = set()
+        def quick(h):
+            return bool(RX_DEBUG.search(h["key"])) or is_comment_line(h["key"], ext)
+        def resolve(lines, cands, anchored):
+            scored = []
+            for h in lines:
+                for c in cands:
+                    sc = sim_score(info_of(h["key"]), info_of(c))
+                    if (accept_in(sc) if anchored else accept_global(sc)):
+                        scored.append((sc[0], h["key"], c))
+            scored.sort(key=lambda e: (-e[0], e[1], e[2]))
+            pair, taken = {}, set()
+            for _, hk, c in scored:
+                if hk in pair or c in taken:
+                    continue
+                pair[hk] = c; taken.add(c)
+            unp = [h for h in lines if h["key"] not in pair]
+            rest_c = [c for c in cands if c not in taken]
+            code_unp = [h for h in unp if not quick(h)]
+            positional = anchored and len(code_unp) > 0 and len(code_unp) == len(rest_c)
+            block = (not positional) and len(unp) >= 3 and len(code_unp) >= 2
+            if positional:
+                for idx, h in enumerate(code_unp):
+                    pair[h["key"]] = rest_c[idx]; taken.add(rest_c[idx])
+            used.update(taken)
+            for h in lines:
+                after = pair.get(h["key"])
+                if after is None and block:
+                    add("block", h, None, f["file"], ""); continue
+                hid, d = classify_pair(h["key"], after, ext)
+                add(hid, h, after, f["file"], d)
+        order = f["order"]; pending = []
+        i = 0
+        while i < len(order):
+            if order[i]["alive"]:
+                i += 1; continue
+            start, seq = i, order[i]["seq"]
+            j = i
+            while j < len(order) and not order[j]["alive"] and order[j]["seq"] == seq:
+                j += 1
+            i = j
+            lines = [o for o in order[start:j] if o["human"]]
+            if not lines:
+                continue
+            prev_key = order[start - 1]["key"] if (start > 0 and order[start - 1]["seq"] == seq and order[start - 1]["alive"]) else None
+            next_key = order[j]["key"] if (j < len(order) and order[j]["seq"] == seq and order[j]["alive"]) else None
+            lo = pos[prev_key] if prev_key is not None else -1
+            hi = pos[next_key] if next_key is not None else len(cur_list)
+            if (prev_key is not None or next_key is not None) and hi > lo:
+                cands = [k for k in cur_list[lo + 1:hi] if k not in f["claudeKeys"] and k not in used]
+                resolve(lines, cands, True)
+            else:
+                pending.append(lines)
+        for lines in pending:
+            resolve(lines, [k for k in cur_list if k not in f["claudeKeys"] and k not in used], False)
     for it in agg.values():
-        d = (sorted(it["dirs"].items(), key=lambda e: (-e[1], e[0])) or [("", 0)])[0][0]
+        dirs_sorted = sorted(it["dirs"].items(), key=lambda e: (-e[1], e[0]))
+        d = dirs_sorted[0][0] if dirs_sorted else ""
         generic = it["id"] in HABIT_GENERIC
-        candidate = (not generic) and it["count"] >= 3 and len(it["sessions"]) >= 2
+        candidate = (not generic) and it["count"] >= 3 and len(it["sessions"]) >= 2 and (it["id"] != "rename" or (bool(dirs_sorted) and dirs_sorted[0][1] >= 2))
         ex = []
         for e in it["examples"]:
             if len(ex) == 0 or (len(ex) == 1 and e["file"] != ex[0]["file"]):
@@ -433,7 +513,7 @@ def analyze(acc, project, project_name, strict):
         # 行は「種類」で数える（同じ内容の行は1つ）＝app.html と同じ
         cur_set = set() if text is None else set(line_keys(text, strict))
         row = {"file": rel, "exists": text is not None, "lines": len(cur_set), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
-        human_keys = []
+        human_n = 0
         for k, rec in m.items():
             if k in cur_set:
                 row["alive"] += 1; alive_c.append({"key": k, "file": rel})
@@ -442,9 +522,11 @@ def analyze(acc, project, project_name, strict):
             else:
                 row["human"] += 1
                 if text is not None:   # 典型的な「人が消した行」は、今もあるファイルから
-                    human_c.append({"key": k, "file": rel}); human_keys.append({"key": k, "sid": rec.get("sid", "")})
-        if human_keys:
-            habit_in.append({"file": rel, "human": human_keys, "cur": [k for k in line_keys(text, strict) if k not in m]})
+                    human_c.append({"key": k, "file": rel}); human_n += 1
+        if human_n:
+            habit_in.append({"file": rel, "claudeKeys": m,
+                             "order": [{"key": k, "seq": rec["seq"], "sid": rec.get("sid", ""), "alive": k in cur_set, "human": (k not in cur_set) and not rec["removed"]} for k, rec in m.items()],
+                             "cur": line_keys(text, strict)})
         row["ai"] = row["alive"]
         for k in ("written", "alive", "rewritten", "human"):
             R[k] += row[k]

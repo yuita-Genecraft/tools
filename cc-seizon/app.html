@@ -381,6 +381,7 @@ function buildEvents(acc){
   const evs = [];
   for (const u of acc.uses.values()) if (Number.isFinite(u.ts)) evs.push(u);
   evs.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  evs.forEach((e, i) => { e.seq = i; });   // 同じ Edit／Write で入った行は、この番号が同じ＝並びが分かる（直し癖の hunk 用）
   return evs;
 }
 function applyEvents(evs, acc, strict){
@@ -389,7 +390,7 @@ function applyEvents(evs, acc, strict){
   const claudeAdd = (p, k, ev) => {
     let m = claude.get(p); if (!m) { m = new Map(); claude.set(p, m); }
     const rec = m.get(k);
-    if (rec) rec.removed = false; else m.set(k, { ts: ev.ts, sid: ev.sid, removed: false });
+    if (rec) rec.removed = false; else m.set(k, { ts: ev.ts, sid: ev.sid, seq: ev.seq, removed: false });
   };
   const claudeRemove = (p, k) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) rec.removed = true; };
   const applyEdit = (p, oldS, newS, ev) => {
@@ -505,13 +506,17 @@ function analyzeParsed(acc, project, projectName, strict){
     // 行は「種類」で数える（同じ内容の行は1つ）。Claude の行も今の行も同じ数え方＝AI率の分子は「残った」と同じ数
     const curSet = text === undefined ? new Set() : new Set(lineKeys(text, strict));
     const row = { file: rel, exists: text !== undefined, lines: curSet.size, written: m.size, alive: 0, rewritten: 0, human: 0, ai: 0 };
-    const humanKeys = [];
+    let humanN = 0;
     for (const [k, rec] of m) {
       if (curSet.has(k)) { row.alive++; aliveC.push({ key: k, file: rel }); }
       else if (rec.removed) row.rewritten++;
-      else { row.human++; if (text !== undefined) { humanC.push({ key: k, file: rel }); humanKeys.push({ key: k, sid: rec.sid }); } }   // 典型的な「人が消した行」は、今もあるファイルから選ぶ
+      else { row.human++; if (text !== undefined) { humanC.push({ key: k, file: rel }); humanN++; } }   // 典型的な「人が消した行」は、今もあるファイルから選ぶ
     }
-    if (humanKeys.length) habitIn.push({ file: rel, human: humanKeys, cur: [...curSet].filter(k => !m.has(k)) });   // 置き換え先の候補＝今の行のうち Claude の行でないもの
+    if (humanN) habitIn.push({   // 直し癖の材料：Claude の行の並び（残った／人が消した の印つき）と、今の行の並び
+      file: rel, claudeKeys: m,
+      order: [...m.entries()].map(([k, rec]) => ({ key: k, seq: rec.seq, sid: rec.sid, alive: curSet.has(k), human: !curSet.has(k) && !rec.removed })),
+      cur: lineKeys(text, strict),
+    });
     row.ai = row.alive;
     R.written += row.written; R.alive += row.alive; R.rewritten += row.rewritten; R.human += row.human; R.aiLines += row.ai;
     if (text === undefined) {
@@ -565,6 +570,7 @@ const HABITS = {
   string:      { label: '文字列（文言）の変更', rule: () => '表示する文言は既存の言い回しに合わせる。文言を勝手に作らない。' },
   number:      { label: '数値の変更', rule: () => '数値（上限・待ち時間など）は既存の設定値や定数を使う。' },
   other:       { label: 'その他の書き換え', generic: true },
+  block:       { label: 'まとまった削除・書き直し（3行以上）', generic: true },
 };
 /* 1組（before → after）を型に分ける。after が null＝置き換え先が見つからない＝削除 */
 function classifyPair(before, after, ext){
@@ -589,44 +595,92 @@ function classifyPair(before, after, ext){
   }
   return { id: 'other' };
 }
-/* 同じファイルの今の行から、いちばん近い行を探す（語の集合の Dice 係数・0.5 以上）。候補は Claude の行でない今の行だけ */
-function bestMatch(key, cands){
-  const t = new Set(tokensOf(key));
-  if (!t.size) return null;
-  let best = null, bs = 0;
-  for (const c of cands) {
-    if (!c.set.size) continue;
-    let inter = 0;
-    for (const x of t) if (c.set.has(x)) inter++;
-    const s = 2 * inter / (t.size + c.set.size);
-    if (s > bs || (s === bs && best !== null && cmpStr(c.key, best) < 0)) { bs = s; best = c.key; }
-  }
-  return bs >= 0.5 ? best : null;
+/* 似ている行の探し方：語の集合の重みつき Dice 係数。予約語・短い語・数字は軽く（0.15）、それ以外の語と文字列は 1。
+   「中身の語」（重み 1）を1つも共有しない組は、同じ骨組み（it(…)・export function …・.max(N)）なだけで別物のことが多い */
+const HABIT_STOP = new Set(['const','let','var','function','return','export','import','from','default','async','await','if','else','for','while','do','switch','case','break','continue','new','this','class','interface','type','enum','extends','implements','public','private','protected','static','readonly','void','null','undefined','true','false','number','string','boolean','any','unknown','never','object','in','of','as','is','try','catch','finally','throw','typeof','instanceof','yield','def','self','None','True','False','and','or','not','elif','pass','lambda','with','print','len','str','int','float','list','dict','set','it','test','describe','expect','toBe','toEqual','fn','func','end','then','push','length','map','filter','get','value','key','name','id','data','result','res','err','error','e','i','j','k','n','s','t','x','y','z','max','min','optional','describe','z']);
+const tokW = t => (HABIT_STOP.has(t) || t.length <= 2 || RX_NUMTOK.test(t)) ? 0.15 : 1;
+function tokInfo(key){ const m = new Map(); for (const t of tokensOf(key)) m.set(t, tokW(t)); let sum = 0; for (const w of m.values()) sum += w; return { set: m, sum }; }
+function simScore(a, b){
+  if (!a.sum || !b.sum) return { score: 0, content: false };
+  let sh = 0, content = false;
+  for (const [t, w] of a.set) if (b.set.has(t)) { sh += w; if (w === 1) content = true; }
+  return { score: 2 * sh / (a.sum + b.sum), content };
 }
+const acceptIn = s => s.score >= 0.5 || (s.content && s.score >= 0.3);   // 窓の中（前後に残った行がある）＝位置の根拠があるので緩め
+const acceptGlobal = s => s.score >= 0.6 && s.content;                   // 窓が無い（塊ごと消えた）＝厳しめ
+/* 直し癖の本体。ファイルごとに：
+   1. Claude が書いた行の並び（同じ Edit／Write の中だけが隣）を、「残っていない行の連なり」（hunk）に切る。hunk の前後の残った行が、今のファイルでの位置の目印（窓）
+   2. 窓の中の「Claude の行でない今の行」から、似ている行を1対1で探す（置き換え後）
+   3. 残り：デバッグ出力・コメントは削除。残りのコード行の数が窓の中の残りの行数と同じなら、順番どおりに組にする（書き換え）。3行以上まとめて消えていれば「まとまった削除・書き直し」＝癖ではなく作り直し
+   4. 窓が無い hunk（塊ごと消えた）は、最後にファイル全体から厳しめに探す。見つからなければ 3 と同じ */
 function analyzeHabits(habitIn){
   const H = { lines: 0, matched: 0, items: [] };
   const agg = new Map();
+  const add = (id, h, after, file, dir) => {
+    H.lines++; if (after !== null) H.matched++;
+    let it = agg.get(id);
+    if (!it) { it = { id, count: 0, sessions: new Set(), files: new Set(), examples: [], dirs: new Map() }; agg.set(id, it); }
+    it.count++; it.sessions.add(h.sid || ''); it.files.add(file);
+    if (dir) it.dirs.set(dir, (it.dirs.get(dir) || 0) + 1);
+    if (it.examples.length < 8 && !RX_SECRET.test(h.key) && !(after && RX_SECRET.test(after))) it.examples.push({ before: h.key, after, file });
+  };
   for (const f of habitIn) {
     const ext = (/\.([A-Za-z0-9]{1,8})$/.exec(f.file) || [, ''])[1].toLowerCase();
-    const cands = f.cur.map(k => ({ key: k, set: new Set(tokensOf(k)) }));
-    const human = [...f.human].sort((a, b) => cmpStr(a.key, b.key));
-    for (const h of human) {
-      const after = bestMatch(h.key, cands);
-      const c = classifyPair(h.key, after, ext);
-      H.lines++; if (after !== null) H.matched++;
-      let it = agg.get(c.id);
-      if (!it) { it = { id: c.id, count: 0, sessions: new Set(), files: new Set(), examples: [], dirs: new Map() }; agg.set(c.id, it); }
-      it.count++; it.sessions.add(h.sid || ''); it.files.add(f.file);
-      if (c.dir) it.dirs.set(c.dir, (it.dirs.get(c.dir) || 0) + 1);
-      // 実例の材料（鍵や秘密らしい行は載せない）。最後に2組選ぶ＝できれば別のファイルから
-      if (it.examples.length < 8 && !RX_SECRET.test(h.key) && !(after && RX_SECRET.test(after))) it.examples.push({ before: h.key, after, file: f.file });
+    const curList = [], pos = new Map();
+    for (const k of f.cur) if (!pos.has(k)) { pos.set(k, curList.length); curList.push(k); }
+    const info = new Map(); const infoOf = k => { let v = info.get(k); if (!v) { v = tokInfo(k); info.set(k, v); } return v; };
+    const used = new Set();
+    const quick = h => RX_DEBUG.test(h.key) || isCommentLine(h.key, ext);
+    const resolve = (lines, cands, anchored) => {
+      // 1) 似ている組を、スコアの高い順に1対1で
+      const scored = [];
+      for (const h of lines) for (const c of cands) { const s = simScore(infoOf(h.key), infoOf(c)); if (anchored ? acceptIn(s) : acceptGlobal(s)) scored.push([s.score, h.key, c]); }
+      scored.sort((a, b) => b[0] - a[0] || cmpStr(a[1], b[1]) || cmpStr(a[2], b[2]));
+      const pair = new Map(), taken = new Set();
+      for (const [, hk, c] of scored) { if (pair.has(hk) || taken.has(c)) continue; pair.set(hk, c); taken.add(c); }
+      const unp = lines.filter(h => !pair.has(h.key));
+      const restC = cands.filter(c => !taken.has(c));
+      const codeUnp = unp.filter(h => !quick(h));
+      const positional = anchored && codeUnp.length > 0 && codeUnp.length === restC.length;
+      const block = !positional && unp.length >= 3 && codeUnp.length >= 2;
+      if (positional) codeUnp.forEach((h, idx) => { pair.set(h.key, restC[idx]); taken.add(restC[idx]); });
+      for (const c of taken) used.add(c);
+      for (const h of lines) {
+        const after = pair.has(h.key) ? pair.get(h.key) : null;
+        if (after === null && block) { add('block', h, null, f.file, ''); continue; }
+        const c = classifyPair(h.key, after, ext);
+        add(c.id, h, after, f.file, c.dir || '');
+      }
+    };
+    // hunk に切る（同じ seq の中で、残っていない行の連なり）
+    const order = f.order, pending = [];
+    let i = 0;
+    while (i < order.length) {
+      if (order[i].alive) { i++; continue; }
+      const start = i, seq = order[i].seq;
+      let j = i;
+      while (j < order.length && !order[j].alive && order[j].seq === seq) j++;   // 残っていない行の連なり（同じ seq の中）
+      i = j;
+      const lines = order.slice(start, j).filter(o => o.human);
+      if (!lines.length) continue;
+      // hunk の直前・直後にある「残った行」（同じ seq）が、今のファイルでの位置の目印
+      const prevKey = (start > 0 && order[start - 1].seq === seq && order[start - 1].alive) ? order[start - 1].key : null;
+      const nextKey = (j < order.length && order[j].seq === seq && order[j].alive) ? order[j].key : null;
+      const lo = prevKey !== null ? pos.get(prevKey) : -1, hi = nextKey !== null ? pos.get(nextKey) : curList.length;
+      if ((prevKey !== null || nextKey !== null) && hi > lo) {
+        const cands = curList.slice(lo + 1, hi).filter(k => !f.claudeKeys.has(k) && !used.has(k));
+        resolve(lines, cands, true);
+      } else pending.push(lines);
     }
+    for (const lines of pending) resolve(lines, curList.filter(k => !f.claudeKeys.has(k) && !used.has(k)), false);
   }
   for (const it of agg.values()) {
     const def = HABITS[it.id];
-    const dir = [...it.dirs.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).map(e => e[0])[0] || '';
+    const dirsSorted = [...it.dirs.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0]));
+    const dir = dirsSorted.length ? dirsSorted[0][0] : '';
     const generic = !!def.generic;
-    const candidate = !generic && it.count >= 3 && it.sessions.size >= 2;
+    // 候補＝3回以上・2セッション以上。名前の変更は、同じ名前の組が2回以上出た時だけ（1回ずつ違う組は、たまたま語が1つ違うだけのことが多い）
+    const candidate = !generic && it.count >= 3 && it.sessions.size >= 2 && (it.id !== 'rename' || (dirsSorted.length && dirsSorted[0][1] >= 2));
     const ex = [];
     for (const e of it.examples) { if (ex.length === 0 || (ex.length === 1 && e.file !== ex[0].file)) ex.push(e); if (ex.length === 2) break; }
     if (ex.length === 1 && it.examples.length > 1) ex.push(it.examples[1]);
@@ -702,7 +756,8 @@ function sampleResult(){
     hx('string', 9, 3, 4, true, [{ before: "toast('Saved successfully!');", after: "toast('保存しました');", file: 'src/components/Editor.tsx' }, { before: "throw new Error('Note not found');", after: "throw new Error('ノートが見つかりません');", file: 'src/lib/db.ts' }]),
     hx('rename', 7, 2, 3, true, [{ before: 'const notesList = await listNotes(userId);', after: 'const notes = await listNotes(userId);', file: 'src/app/page.tsx' }, { before: 'function handleOnClickSave() {', after: 'function handleSave() {', file: 'src/components/Editor.tsx' }], 'notesList → notes'),
     hx('quote', 2, 1, 1, false, [{ before: 'import { db } from "./db";', after: "import { db } from './db';", file: 'src/lib/search.ts' }]),
-    hx('delete', 120, 11, 9, false, [{ before: 'const unusedHelper = () => null;', after: null, file: 'src/lib/search.ts' }]),
+    hx('delete', 30, 8, 6, false, [{ before: 'const unusedHelper = () => null;', after: null, file: 'src/lib/search.ts' }]),
+    hx('block', 90, 4, 3, false, [{ before: 'function legacySyncLoop(queue: Job[]) {', after: null, file: 'src/lib/search.ts' }]),
     hx('other', 73, 8, 6, false, [{ before: 'const rows = await db.notes.where({ userId }).toArray();', after: 'const rows = await db.notes.where({ userId }).sortBy(\'updatedAt\');', file: 'src/lib/db.ts' }]),
   ] };
   R.top = files.filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: true }));
@@ -985,7 +1040,7 @@ function habitsHTML(R, hide){
   const genHtml = generic.length ? `<h3 class="sub">型にならない直し</h3><ul class="rows">${generic.map(it => `<li><span>${esc(it.label)}<small class="dim">　${it.examples[0] ? esc(it.examples[0].before) : ''}</small></span><b>${fmt(it.count)}回</b></li>`).join('')}</ul>` : '';
   const all = cands.map(it => '- ' + it.rule).join('\n');
   const allHtml = cands.length ? `<div class="rule-all"><textarea class="share-text" rows="${Math.min(6, cands.length + 1)}" readonly aria-label="CLAUDE.md に足す行">${esc(all)}</textarea><button type="button" class="btn copy-rule" data-rule="${esc(all)}">全部コピー</button></div>` : '';
-  return intro + cardsHtml + allHtml + weakHtml + genHtml + `<p class="fine">型は決め打ちの規則で判定しています（会話の内容は見ていません）。置き換え先は、同じファイルの今の行のうち Claude の行でないものから、語の重なりがいちばん大きい行（Dice 係数 0.5 以上）。ファイルごと消えた行と、Bash で変えた行は入りません。1行は案です。CLAUDE.md に入れたら「結果を保存」で今の数字を残し、次に測った時に「前回と比べる」で、その型が減ったかを見てください。</p>`;
+  return intro + cardsHtml + allHtml + weakHtml + genHtml + `<p class="fine">型は決め打ちの規則で判定しています（会話の内容は見ていません）。置き換え先は、Claude が書いた並びの前後で今も残っている行を目印に、その間にある今の行（Claude の行でないもの）から、語の重なりで1対1に探します。目印が無い（塊ごと消えた）時だけファイル全体から厳しめに探します。3行以上まとめて消えた・書き直された所は「まとまった削除・書き直し」＝癖ではなく作り直しとして、型に数えません。<b>「人が直した」には、このログに無い経路で変わった行（git pull・別の作業コピーやクラウドのセッション・Bash）も入ります</b>＝人の直しの上限です。ファイルごと消えた行は入りません。1行は案です。CLAUDE.md に入れたら「結果を保存」で今の数字を残し、次に測った時に「前回と比べる」で、その型が減ったかを見てください。</p>`;
 }
 /* 前回と比べる：結果を JSON（数だけ・行の中身は入れない）で保存し、次に測った時に読み込んで差を見る */
 let prevSnap = null;
@@ -1364,7 +1419,7 @@ function analyzeTexts(logs, project, projectName, strict){
   for (const { rel, text } of project) if (projectFilter(rel, String(text).length) && !looksBinary(String(text).slice(0, 4096))) pm.set(normPath(rel), String(text));
   return analyzeParsed(acc, pm, projectName || '', !!strict);
 }
-window.__seizon = { analyzeTexts, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, bestMatch, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
+window.__seizon = { analyzeTexts, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
 renderAll();
 })();
 </script>

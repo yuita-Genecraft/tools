@@ -1035,7 +1035,8 @@ function habitsHTML(R, hide){
   if (!H.lines) return `<p class="fine">今もあるファイルの中で、人が行単位で直した Claude の行がありません${R.dropped ? '（ファイルごと消えた分は、直しの型になりません）' : ''}。直し癖は、人が直した行から読みます。</p>`;
   const pair = e => `<li><code class="b">${esc(e.before)}</code><span class="arrow${e.after === null ? ' del' : ''}">${e.after === null ? '削除' : '→'}</span>${e.after === null ? '<span></span>' : `<code class="a">${esc(e.after)}</code>`}<small>${fname(e.file)}</small></li>`;
   const cands = H.items.filter(it => it.candidate), weak = H.items.filter(it => !it.candidate && !it.generic), generic = H.items.filter(it => it.generic);
-  const intro = `<p class="def">人が直した <b>${fmt(H.lines)} 行</b>を、同じファイルの今の行と突き合わせました（書き換え ${fmt(H.matched)}・削除 ${fmt(H.lines - H.matched)}）。<b>3回以上・2セッション以上</b>で出た型だけを候補にしています。</p>`;
+  const blockN = (H.items.find(it => it.id === 'block') || { count: 0 }).count;
+  const intro = `<p class="def">人が直した <b>${fmt(H.lines)} 行</b>を、同じファイルの今の行と突き合わせました（書き換え ${fmt(H.matched)}・削除 ${fmt(H.lines - H.matched)}${blockN ? `・うち <b>${fmt(blockN)} 行</b>は3行以上まとまって消えた・書き直された所＝作り直しで、癖には数えません` : ''}）。<b>3回以上・2セッション以上</b>で出た型だけを候補にしています。</p>`;
   const cardsHtml = cands.length ? cands.map(it => `<article class="habit">
     <header><b>${esc(it.label)}</b><span>${fmt(it.count)}回 ・ ${fmt(it.sessions)}セッション ・ ${fmt(it.files)}ファイル</span></header>
     <ul class="pairs">${it.examples.map(pair).join('')}</ul>

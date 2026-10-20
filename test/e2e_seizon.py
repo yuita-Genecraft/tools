@@ -21,13 +21,14 @@ expect = {False: ref_seizon.run(log_files, PROJ, strict=False), True: ref_seizon
 
 # 手で数えた期待値（gen_seizon.py のコメントと対応）。別実装と同じ間違いをしていないかの歯止め
 HAND = {
-    False: dict(written=26, alive=17, rewritten=3, human=6, aiLines=17, projectLines=35, projectFiles=11, edits=11, sessions=2,
+    # human=6 のうち 4 は gone.ts（ファイルごと消えた）＝dropped。gone.ts に Claude が書いた 5 行＝droppedWritten。急所（top）は今もあるファイルだけ
+    False: dict(written=26, alive=17, rewritten=3, human=6, dropped=4, droppedWritten=5, aiLines=17, projectLines=35, projectFiles=11, edits=11, sessions=2,
                 otherProjectFiles=2, rootCandidates=2, rootMatched=8, uses=18, logFiles=4, logBad=1, root="/Users/t/dev/alpha",
                 period={"start": "2026-09-01", "end": "2026-09-05", "days": 5},
-                top=[("src/gone.ts", 4, 5, False), ("src/a.ts", 1, 6, True), ("src/c.ts", 1, 3, True)],
+                top=[("src/a.ts", 1, 6, True), ("src/c.ts", 1, 3, True)],
                 examples={"alive": ("return db.notes.where({ userId }).sortBy('updatedAt');", "src/a.ts"),
-                          "human": ("const notes = fetchAllNotesWithoutPaging();", "src/gone.ts")}),
-    True: dict(written=26, alive=16, rewritten=3, human=7, aiLines=16, projectLines=35),
+                          "human": ("return list.reduce((x, y) => x + y, 0);", "src/c.ts")}),
+    True: dict(written=26, alive=16, rewritten=3, human=7, dropped=4, droppedWritten=5, aiLines=16, projectLines=35),
 }
 failures = 0
 
@@ -46,7 +47,7 @@ ROW_KEYS = ("file", "exists", "lines", "written", "alive", "rewritten", "human",
 
 def compare(label, cur, exp):
     ok = True
-    for k in ("written", "alive", "rewritten", "human", "aiLines", "projectLines", "projectFiles", "otherProjectFiles", "edits", "sessions",
+    for k in ("written", "alive", "rewritten", "human", "dropped", "droppedWritten", "aiLines", "projectLines", "projectFiles", "otherProjectFiles", "edits", "sessions",
               "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples"):
         ok &= check(f"{label} {k}", cur[k], exp[k])
     ok &= check(f"{label} files", [[r[k] for k in ROW_KEYS] for r in cur["files"]], [[r[k] for k in ROW_KEYS] for r in exp["files"]])
@@ -83,7 +84,7 @@ SCENES = {
     # 同数の候補（/repo と /repo/src）＝cwd と同じ /repo を選ぶ
     "tie-cwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t1")],
                     project={"index.ts": "export const root = 1;\n", "src/index.ts": IDX, "README.md": "# r\n"}, name="repo",
-                    want=dict(root="/repo", rootFrom="files", rootAmbiguous=False, written=2, alive=2, human=0)),
+                    want=dict(root="/repo", rootFrom="files", rootAmbiguous=False, written=2, alive=2, human=0, dropped=0)),
     # 同数で cwd も無い＝浅い方を選び、決めきれなかった印を立てる
     "tie-nocwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", None, "t2")],
                       project={"index.ts": "export const root = 1;\n", "src/index.ts": IDX, "README.md": "# r\n"}, name="repo",
@@ -91,7 +92,7 @@ SCENES = {
     # 触ったファイルが全部消えた＝フォルダ名が cwd の末尾と同じなら cwd を root にして「消えた」に数える
     "all-gone": dict(logs=[mk_write("/repo/gone.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t3")],
                      project={"README.md": "# r\n"}, name="repo",
-                     want=dict(root="/repo", rootFrom="cwd", rootAmbiguous=False, written=2, alive=0, human=2)),
+                     want=dict(root="/repo", rootFrom="cwd", rootAmbiguous=False, written=2, alive=0, human=2, dropped=2, droppedWritten=2)),
     # 全部消えていて、フォルダ名も合わない＝root 無し（読めませんでした）
     "all-gone-wrong-folder": dict(logs=[mk_write("/repo/gone.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t4")],
                                   project={"README.md": "# r\n"}, name="other",
@@ -156,7 +157,14 @@ with sync_playwright() as p:
                 py = ref_seizon.run_texts(sc["logs"], sc["project"], sc["name"])
                 for k, v in sc["want"].items():
                     ok &= check(f"scene {name} {k}", (js[k], py[k]), (v, v))
-            # 7) 見本に戻す
+            # 7) ログのフォルダを右（プロジェクト）に入れた時＝「ログのフォルダのようです」で止まり、前の結果は残る（2026-10-20 に本人が踏んだ）
+            page.set_input_files("#projInput", str(LOGS / "projects"))
+            page.wait_for_function("document.getElementById('statusPill').textContent === '読めませんでした'", timeout=20000)
+            msg = page.locator("#statusText").text_content()
+            print("logs-as-project:", msg)
+            ok &= check("logs-as-project guard", "ログのフォルダのようです" in msg, True)
+            ok &= check("logs-as-project keeps result", page.evaluate("window.__seizon.current.written"), expect[False]["written"])
+            # 8) 見本に戻す
             page.click("#resetBtn")
             page.wait_for_function("document.getElementById('statusPill').textContent === '見本'")
             print("ALL MATCH" if ok else "MISMATCH")

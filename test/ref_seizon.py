@@ -288,7 +288,7 @@ def analyze(acc, project, project_name, strict):
     R = {"sample": False, "strict": bool(strict), "projectName": project_name or "", "root": root or "", "rootFrom": src, "rootAmbiguous": ambiguous, "cwdTop": cwd_top,
          "logFiles": acc["files"], "logLines": acc["lines"], "logBad": acc["bad"], "uses": len(acc["uses"]), "edits": 0, "sessions": 0,
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
-         "written": 0, "alive": 0, "rewritten": 0, "human": 0, "aiLines": 0,
+         "written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "droppedWritten": 0, "aiLines": 0,
          "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched}
     if not root:
         return R
@@ -322,12 +322,16 @@ def analyze(acc, project, project_name, strict):
             elif rec["removed"]:
                 row["rewritten"] += 1
             else:
-                row["human"] += 1; human_c.append({"key": k, "file": rel})
+                row["human"] += 1
+                if text is not None:   # 典型的な「人が消した行」は、今もあるファイルから
+                    human_c.append({"key": k, "file": rel})
         row["ai"] = row["alive"]
         for k in ("written", "alive", "rewritten", "human"):
             R[k] += row[k]
         R["aiLines"] += row["ai"]
         if text is None:
+            # ファイルごと消えた：中の「人が消した」行は dropped に分けて数える
+            R["dropped"] += row["human"]; R["droppedWritten"] += row["written"]
             R["missingFiles"].append({"file": rel, "exists": False, "written": row["written"], "rewritten": row["rewritten"], "human": row["human"]})
         else:
             R["files"].append(row)
@@ -339,9 +343,10 @@ def analyze(acc, project, project_name, strict):
     R["files"].sort(key=lambda f: (-f["written"], -f["lines"], f["file"]))
     R["missingFiles"].sort(key=lambda f: (-f["written"], f["file"]))
     assign_aliases(R)
-    top = [f for f in R["files"] + R["missingFiles"] if f["human"] > 0]
+    # 急所＝今もあるファイルだけ（ファイルごと消えたものは dropped に分けた）
+    top = [f for f in R["files"] if f["human"] > 0]
     top.sort(key=lambda f: (-f["human"], -f["written"], f["file"]))
-    R["top"] = [{"file": f["file"], "alias": f["alias"], "human": f["human"], "written": f["written"], "exists": f["exists"] is not False} for f in top[:3]]
+    R["top"] = [{"file": f["file"], "alias": f["alias"], "human": f["human"], "written": f["written"], "exists": True} for f in top[:3]]
     R["examples"] = {"alive": pick_example(alive_c), "human": pick_example(human_c)}
     return R
 

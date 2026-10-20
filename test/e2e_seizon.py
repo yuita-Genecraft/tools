@@ -44,6 +44,13 @@ PROJ2 = HERE / "seizon" / "proj" / "habits"
 HAND_HABITS = [("debug", 3, 2, 2, True, False), ("rename", 3, 1, 1, False, False), ("any", 1, 1, 1, False, False), ("comment", 1, 1, 1, False, False),
                ("import", 1, 1, 1, False, False), ("quote", 1, 1, 1, False, False), ("string", 1, 1, 1, False, False),
                ("block", 5, 1, 1, False, True), ("delete", 1, 1, 1, False, True), ("other", 1, 1, 1, False, True)]
+LOGS3 = HERE / "seizon" / "logs3"
+PROJ3 = HERE / "seizon" / "proj" / "multi"
+# Codex：x.ts を作って差分で two→five（書いた5・残った3・書き直し1・人が消した1・出力 50＋70・同じ response_id は1回・失敗した変更は数えない）
+# Gemini：y.py を書いて return 'one'→'uno'（書いた5・残った4・書き直し1）。3か所に重ねて残った step は1回・切られた写しは full を使う・ほどけない値は数えず1件
+HAND_MULTI = dict(written=10, alive=7, rewritten=2, human=1, edits=4, sessions=2, uses=4, gmSkipped=1, root="/Users/t/dev/multi",
+                  tools={"codex": {"written": 5, "alive": 3, "edits": 2, "sessions": 1}, "gemini": {"written": 5, "alive": 4, "edits": 2, "sessions": 1}},
+                  rows=[("codex:cx-1", "codex", "x.ts を作って", 120, 2, 1, 5, 3, 40), ("gemini:11111111-2222-4333-8444-555555555555", "gemini", "y.py を作って", 80, 4, 1, 5, 4, 20)])
 failures = 0
 
 def check(name, got, want):
@@ -212,6 +219,29 @@ with sync_playwright() as p:
             ok &= check("classifyPair import boundary js", js_ids, [w for _, _, w in PAIRS])
             ok &= check("classifyPair import boundary py", py_ids, [w for _, _, w in PAIRS])
             ok &= check("habits weak listed", page.evaluate("document.getElementById('details').textContent.includes('回数が足りない型')"), True)
+            # 9) Codex と Gemini（logs3・multi）：Codex を入れてから Gemini を入れる＝別の AI なので足す。手計算 HAND_MULTI ＝ Python ＝ Chromium
+            page.click("#logClear")   # 前の Claude Code のログ（habits）を外してから（別の AI のログは足されるので）
+            ok &= check("log clear", page.evaluate("document.getElementById('logLoaded').hidden && window.__seizon.inputs.acc === null"), True)
+            page.set_input_files("#logInput", str(LOGS3 / "codex"))
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Codex 2件')", timeout=20000)
+            page.set_input_files("#logInput", str(LOGS3 / "gemini"))
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Gemini 2件')", timeout=20000)
+            ok &= check("multi loaded both", "Codex 2件" in page.text_content("#logLoaded"), True)
+            page.set_input_files("#projInput", str(PROJ3))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'multi'", timeout=20000)
+            cur_m = page.evaluate(CURRENT)
+            exp_m = ref_seizon.run(sorted(LOGS3.rglob("*.jsonl")), PROJ3, strict=False)
+            for k in ("written", "alive", "rewritten", "human", "dropped", "edits", "sessions", "root", "uses", "gmSkipped", "tools", "period", "sessionStats", "files"):
+                ok &= check(f"multi js=py {k}", cur_m[k], exp_m[k])
+            for k, v in HAND_MULTI.items():
+                ok &= check(f"multi hand {k}", cur_m[k] if k != "rows" else [(r["sid"], r["tool"], r["first"], r["out"], r["msgs"], r["bash"], r["written"], r["alive"], r["perAlive"]) for r in cur_m["sessionStats"]["rows"]], v)
+            ok &= check("multi outGone", (cur_m["sessionStats"]["outTotal"], cur_m["sessionStats"]["outGone"]), (200, 64))
+            ok &= check("multi card title", page.evaluate("document.getElementById('details').textContent.includes('Gemini が書いた行')"), True)
+            ok &= check("multi label AI", "AI が書いた" in page.input_value("#shareText"), True)
+            # 同じ AI のログを入れ直すと置き換える（Codex だけになる）
+            page.set_input_files("#logInput", str(LOGS3 / "codex"))
+            page.wait_for_function("!document.getElementById('logLoaded').textContent.includes('Gemini') && window.__seizon.current.written === 5", timeout=20000)
+            ok &= check("multi replace same tool", (page.evaluate("window.__seizon.current.written"), "Codex が書いた" in page.input_value("#shareText")), (5, True))
             # 頼み方の節：最初に出る・指示の冒頭が見える・隠すと消える・共有文に1行
             ok &= check("sessions section first", page.evaluate("document.querySelector('#details .sec h2').textContent"), "頼み方と、残った1行あたりの出力トークン")
             ok &= check("sessions prompt shown", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), False)  # habits プロジェクトには user text が無い

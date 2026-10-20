@@ -61,7 +61,16 @@ def parse_ts(s):
         return None
 
 def new_acc():
-    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "resp": {}, "sessLink": []}
+    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "resp": {}, "sessLink": [],
+            "cur": new_file_state(""), "cxSeen": set(), "gem": {}, "gmSkipped": 0}
+
+def new_file_state(path):
+    return {"path": str(path or ""), "sid": "", "cwd": ""}
+
+TOOL_NAME = {"claude": "Claude", "codex": "Codex", "gemini": "Gemini"}
+def tool_of(sid):
+    sid = str(sid)
+    return "codex" if sid.startswith("codex:") else "gemini" if sid.startswith("gemini:") else "claude"
 
 def resolve_sessions(acc):
     """app.html の resolveSessions と同じ：同じ uuid が別の sessionId で出たセッションを1つの会話にまとめる。代表＝いちばん早く始まった方（同時なら sid の文字列順）"""
@@ -116,14 +125,20 @@ def handle_line(line, acc):
     acc["lines"] += 1
     if utf16len(line) < 40:
         return
-    if '"message"' not in line:
+    if '"message"' not in line and '"payload"' not in line and '"step_index"' not in line:
         return
     try:
         o = json.loads(line)
     except ValueError:
         acc["bad"] += 1
         return
-    if not isinstance(o, dict) or not isinstance(o.get("message"), dict):
+    if not isinstance(o, dict):
+        return
+    if not o.get("message") and isinstance(o.get("payload"), dict) and isinstance(o.get("type"), str):
+        handle_codex(o, acc); return
+    if not o.get("message") and isinstance(o.get("step_index"), (int, float)) and not isinstance(o.get("step_index"), bool) and isinstance(o.get("type"), str):
+        handle_gemini(o, acc); return
+    if not isinstance(o.get("message"), dict):
         return
     sid = o["sessionId"] if isinstance(o.get("sessionId"), str) else ""
     ts_raw = parse_ts(o.get("timestamp"))
@@ -209,6 +224,184 @@ def handle_line(line, acc):
                     tur["file"] = {"content": t["file"]["content"]}
             acc["results"][b["tool_use_id"]] = {"isError": b.get("is_error") is True, "text": text if RX_NUMBERED.match(text) else "", "tur": tur}
 
+# ---------- Codex・Gemini（app.html の handleCodex・handleGemini・finalizeGemini と同じ） ----------
+def pos_num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 0
+
+def abs_path(p, cwd):
+    p = norm_path(p)
+    return p if (p.startswith("/") or re.match(r"^[A-Za-z]:/", p) or not cwd) else norm_path(cwd + "/" + p)
+
+def diff_sides(diff):
+    old_l, new_l = [], []
+    in_hunk = False
+    for l in str(diff).split("\n"):
+        if l.startswith("@@"):
+            in_hunk = True; continue
+        if not in_hunk or l.startswith("\\"):
+            continue
+        if l.startswith("+"):
+            new_l.append(l[1:])
+        elif l.startswith("-"):
+            old_l.append(l[1:])
+        else:
+            t = l[1:] if l.startswith(" ") else l
+            old_l.append(t); new_l.append(t)
+    return "\n".join(old_l), "\n".join(new_l)
+
+def add_use(acc, uid, name, inp, ts, sid, cwd, tur):
+    if uid in acc["uses"]:
+        return
+    acc["uses"][uid] = {"id": uid, "name": name, "input": inp, "ts": ts, "sid": sid, "cwd": cwd or ""}
+    acc["results"][uid] = {"isError": False, "text": "", "tur": tur}
+
+def sess_touch(acc, sid, ts, cwd):
+    sv = sess_of(acc, sid)
+    if ts is not None:
+        if sv["start"] is None or ts < sv["start"]:
+            sv["start"] = ts
+        if sv["end"] is None or ts > sv["end"]:
+            sv["end"] = ts
+    if not sv["cwd"] and cwd:
+        sv["cwd"] = cwd
+    return sv
+
+def first_prompt(sv, h, ts):
+    if h and ts is not None and (sv["firstTs"] is None or ts < sv["firstTs"]):
+        sv["first"] = h; sv["firstTs"] = ts
+
+def handle_codex(o, acc):
+    st, p = acc["cur"], o["payload"]
+    if o["type"] == "session_meta":
+        if not st["sid"] and isinstance(p.get("id"), str) and p["id"]:
+            st["sid"] = "codex:" + p["id"]
+        if not st["cwd"] and isinstance(p.get("cwd"), str):
+            st["cwd"] = norm_path(p["cwd"])
+    elif o["type"] == "turn_context" and isinstance(p.get("cwd"), str):
+        st["cwd"] = norm_path(p["cwd"])
+    sid = st["sid"] or ("codex:" + (st["path"] or "?"))
+    ts = parse_ts(o.get("timestamp"))
+    sv = sess_touch(acc, sid, ts, st["cwd"])
+    tstr = o["timestamp"] if isinstance(o.get("timestamp"), str) else ""
+    if o["type"] == "token_usage_record":
+        u = p.get("usage")
+        rid = "cx:" + (p["response_id"] if isinstance(p.get("response_id"), str) and p["response_id"] else sid + ":" + tstr)
+        if not isinstance(u, dict) or rid in acc["resp"]:
+            return
+        acc["resp"][rid] = {"sid": sid}
+        sv["msgs"] += 1
+        cached = pos_num(u.get("cached_input_tokens"))
+        sv["out"] += pos_num(u.get("output_tokens")); sv["inp"] += max(0, pos_num(u.get("input_tokens")) - cached); sv["cache"] += cached + pos_num(u.get("cache_write_input_tokens"))
+        return
+    it = p.get("item")
+    if o["type"] != "event_msg" or p.get("type") != "item_completed" or not isinstance(it, dict):
+        return
+    iid = it["id"] if isinstance(it.get("id"), str) and it["id"] else sid + ":" + tstr + ":" + str(it.get("type"))
+    if iid in acc["cxSeen"]:
+        return
+    acc["cxSeen"].add(iid)
+    if it.get("type") == "UserMessage":
+        c = it.get("content"); h = ""
+        if isinstance(c, str):
+            h = prompt_head(c)
+        elif isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and isinstance(b.get("text"), str):
+                    h = prompt_head(b["text"])
+                    if h:
+                        break
+        first_prompt(sv, h, ts)
+    elif it.get("type") == "CommandExecution":
+        sv["bash"] += 1
+    elif it.get("type") == "FileChange" and it.get("status", "completed") == "completed" and isinstance(it.get("changes"), dict):
+        for i, fp in enumerate(it["changes"].keys()):
+            ch = it["changes"][fp]; uid = "cx:" + iid + ":" + str(i)
+            if not isinstance(ch, dict):
+                continue
+            path = abs_path(ch["move_path"] if isinstance(ch.get("move_path"), str) and ch["move_path"] else fp, st["cwd"])
+            if ch.get("type") == "add" and isinstance(ch.get("content"), str):
+                add_use(acc, uid, "Write", {"file_path": path, "content": ch["content"]}, ts, sid, st["cwd"], {"type": "create"})
+            elif ch.get("type") == "update" and isinstance(ch.get("unified_diff"), str):
+                old_s, new_s = diff_sides(ch["unified_diff"])
+                add_use(acc, uid, "Edit", {"file_path": path, "old_string": old_s, "new_string": new_s}, ts, sid, st["cwd"], None)
+            elif ch.get("type") == "delete":
+                add_use(acc, uid, "Write", {"file_path": path, "content": ""}, ts, sid, st["cwd"], {"type": "update"})
+
+def gem_rank(path):
+    return 0 if "transcript_full" in path else 2 if "chunks" in path else 1
+
+def handle_gemini(o, acc):
+    path = acc["cur"]["path"]
+    m = re.search(r"brain/([0-9A-Za-z-]{8,})", path)
+    conv = m.group(1) if m else (path or "?")
+    key = (conv, o["step_index"])
+    truncated = isinstance(o.get("truncated_fields"), list) and "tool_calls" in o["truncated_fields"]
+    score = (10 if truncated else 0) + gem_rank(path)
+    prev = acc["gem"].get(key)
+    if prev is None or score < prev["score"]:
+        acc["gem"][key] = {"score": score, "o": o, "conv": conv}
+
+def gem_value(v):
+    if not isinstance(v, str):
+        return None
+    if not v.startswith('"'):
+        return v
+    try:
+        x = json.loads(v)
+    except ValueError:
+        return None
+    return x if isinstance(x, str) else None
+
+def finalize_gemini(acc):
+    for uid in [k for k in acc["uses"] if k.startswith("gm:")]:
+        del acc["uses"][uid]; acc["results"].pop(uid, None)
+    for sid in [k for k in acc["sess"] if k.startswith("gemini:")]:
+        del acc["sess"][sid]
+    acc["gmSkipped"] = 0
+    for g in sorted(acc["gem"].values(), key=lambda g: (g["conv"], g["o"]["step_index"])):
+        o, conv = g["o"], g["conv"]
+        sid = "gemini:" + conv
+        ts = parse_ts(o.get("created_at"))
+        sv = sess_touch(acc, sid, ts, "")
+        if o["type"] == "USER_INPUT" and isinstance(o.get("content"), str):
+            first_prompt(sv, prompt_head(o["content"]), ts)
+        if o["type"] != "PLANNER_RESPONSE":
+            continue
+        sv["msgs"] += 1
+        sv["out"] += pos_num(o.get("output_tokens")); sv["inp"] += pos_num(o.get("input_tokens")); sv["cache"] += pos_num(o.get("cache_read_tokens"))
+        calls = o.get("tool_calls") if isinstance(o.get("tool_calls"), list) else []
+        for i, t in enumerate(calls):
+            if not isinstance(t, dict):
+                continue
+            a = t.get("args")
+            if isinstance(a, str):
+                try:
+                    a = json.loads(a)
+                except ValueError:
+                    a = None
+            if not isinstance(a, dict):
+                continue
+            if t.get("name") == "run_command":
+                sv["bash"] += 1
+                c = gem_value(a.get("Cwd"))
+                if not sv["cwd"] and c:
+                    sv["cwd"] = norm_path(c)
+                continue
+            if t.get("name") not in ("write_to_file", "replace_file_content"):
+                continue
+            f = gem_value(a.get("TargetFile"))
+            uid = "gm:" + conv + ":" + str(o["step_index"]) + ":" + str(i)
+            if t["name"] == "write_to_file":
+                content = gem_value(a.get("CodeContent"))
+                if not f or content is None:
+                    acc["gmSkipped"] += 1; continue
+                add_use(acc, uid, "Write", {"file_path": abs_path(f, sv["cwd"]), "content": content}, ts, sid, sv["cwd"], None)
+            else:
+                old_s, new_s = gem_value(a.get("TargetContent")), gem_value(a.get("ReplacementContent"))
+                if not f or old_s is None or new_s is None:
+                    acc["gmSkipped"] += 1; continue
+                add_use(acc, uid, "Edit", {"file_path": abs_path(f, sv["cwd"]), "old_string": old_s, "new_string": new_s}, ts, sid, sv["cwd"], None)
+
 def read_content(res):
     f = (res["tur"] or {}).get("file") if res["tur"] else None
     if isinstance(f, dict) and isinstance(f.get("content"), str):
@@ -218,7 +411,8 @@ def read_content(res):
         return ""
     return "\n".join(RX_NUMBERED.sub("", l, count=1) for l in t.split("\n"))
 
-def read_log_file(path, acc):
+def read_log_file(path, acc, rel=None):
+    acc["cur"] = new_file_state(rel if rel is not None else str(path))
     text = path.read_bytes().decode("utf-8", errors="replace")
     if text.startswith("﻿"):
         text = text[1:]
@@ -609,7 +803,7 @@ def session_stats(per_sess, sess):
         gone = ps["written"] - ps["alive"]
         out_gone_repo = jround(out_repo * gone / ps["written"])
         out_total += out_repo; out_gone += out_gone_repo
-        rows.append({"sid": sid, "first": sv["first"] or "", "start": date_key(sv["start"]) if sv["start"] is not None else "", "end": date_key(sv["end"]) if sv["end"] is not None else "",
+        rows.append({"sid": sid, "tool": tool_of(sid), "first": sv["first"] or "", "start": date_key(sv["start"]) if sv["start"] is not None else "", "end": date_key(sv["end"]) if sv["end"] is not None else "",
                      "out": sv["out"], "outRepo": out_repo, "share": share, "msgs": sv["msgs"], "bash": sv["bash"], "members": sv.get("members", 1), "edits": ps["edits"],
                      "written": ps["written"], "alive": ps["alive"], "rewritten": ps["rewritten"], "human": ps["human"], "dropped": ps["dropped"],
                      "perAlive": jround(out_repo / ps["alive"]) if ps["alive"] else None})
@@ -621,6 +815,7 @@ def session_stats(per_sess, sess):
             "costly": [r["sid"] for r in costly], "cheap": [r["sid"] for r in cheap]}
 
 def analyze(acc, project, project_name, strict):
+    finalize_gemini(acc)
     evs = build_events(acc)
     claude, applied = apply_events(evs, acc, strict)
     cwds = {}
@@ -634,7 +829,7 @@ def analyze(acc, project, project_name, strict):
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
          "written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "droppedWritten": 0, "aiLines": 0,
          "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched,
-         "habits": {"lines": 0, "matched": 0, "items": []},
+         "habits": {"lines": 0, "matched": 0, "items": []}, "tools": {}, "gmSkipped": acc["gmSkipped"],
          "sessionStats": {"outTotal": 0, "outGone": 0, "goneShare": 0, "rows": [], "costly": [], "cheap": []}}
     if not root:
         return R
@@ -705,6 +900,16 @@ def analyze(acc, project, project_name, strict):
         R["projectLines"] += n
         if rel not in seen_rel:
             R["files"].append({"file": rel, "exists": True, "lines": n, "written": 0, "alive": 0, "rewritten": 0, "human": 0, "ai": 0})
+    # AI ごとの内訳（app.html と同じ）
+    for a in applied:
+        if a["path"].startswith(prefix):
+            R["tools"].setdefault(tool_of(a["sid"]), {"written": 0, "alive": 0, "edits": 0, "sessions": 0})["edits"] += 1
+    for sid in sids:
+        R["tools"].setdefault(tool_of(sid), {"written": 0, "alive": 0, "edits": 0, "sessions": 0})["sessions"] += 1
+    for sid, ps in per_sess.items():
+        v = R["tools"].get(tool_of(sid))
+        if v is not None:
+            v["written"] += ps["written"]; v["alive"] += ps["alive"]
     R["files"].sort(key=lambda f: (-f["written"], -f["lines"], f["file"]))
     R["missingFiles"].sort(key=lambda f: (-f["written"], f["file"]))
     assign_aliases(R)
@@ -760,6 +965,10 @@ def run_texts(log_texts, project, project_name, strict=False):
     """文字列から同じ計算（app.html の analyzeTexts と対）。log_texts: [str]、project: {rel: text}"""
     acc = new_acc()
     for text in log_texts:
+        path = ""
+        if isinstance(text, tuple):
+            path, text = text
+        acc["cur"] = new_file_state(path)
         parts = text.split("\n")
         if parts and parts[-1] == "":
             parts.pop()

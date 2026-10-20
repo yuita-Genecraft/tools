@@ -1033,8 +1033,9 @@ const rate = (a, b) => b > 0 ? a / b : 0;
 /* ---------- 判定と所見 ---------- */
 /* 画面とカードで「誰が書いたか」の呼び名：書いた行のある AI が1つならその名前、2つ以上なら「AI」 */
 let AI = 'Claude';
+const aiSet = R => Object.keys((R && R.tools) || {}).filter(k => R.tools[k].written > 0).sort();
 function aiLabel(R){
-  const ks = Object.keys((R && R.tools) || {}).filter(k => R.tools[k].written > 0);
+  const ks = aiSet(R);
   return ks.length === 1 ? TOOL_NAME[ks[0]] : ks.length > 1 ? 'AI' : 'Claude';
 }
 const titleOf = () => (AI === 'Claude' ? 'Claude Code 生存率' : AI === 'AI' ? 'AI コード生存率' : AI + ' 生存率');
@@ -1398,7 +1399,7 @@ function habitsHTML(R, hide){
 /* 前回と比べる：結果を JSON（数だけ・行の中身は入れない）で保存し、次に測った時に読み込んで差を見る */
 let prevSnap = null;
 function snapshotOf(R){
-  return { tool: 'cc-seizon', v: 1, ai: aiLabel(R), savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
+  return { tool: 'cc-seizon', v: 1, ai: aiLabel(R), ais: aiSet(R), savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
     written: R.written, alive: R.alive, rewritten: R.rewritten, human: R.human, dropped: R.dropped, droppedWritten: R.droppedWritten,
     aiLines: R.aiLines, projectLines: R.projectLines, edits: R.edits, sessions: R.sessions,
     outTotal: R.sessionStats ? R.sessionStats.outTotal : 0, outGone: R.sessionStats ? R.sessionStats.outGone : 0,
@@ -1416,8 +1417,13 @@ function compareHTML(R){
   const per = x => x && x.period ? `${x.period.start}〜${x.period.end}` : '—';
   const r = (a, b) => b > 0 ? a / b : 0;
   const pctN = x => (x * 100).toFixed(1) + '%';
-  // 前回と今回で書いた AI が違う（または前回の記録が無い古い JSON）なら、呼び名は「AI」（Codex の指摘 PR #20）
-  const who = (p.ai || 'Claude') === AI ? AI : 'AI';
+  // 前回と今回で書いた AI の組が違うなら、呼び名は「AI」にして注意する（Codex の指摘 PR #20）。ais の無い JSON は ai の名前から、それも無い古い JSON は Claude とみなす
+  const keyOf = { Claude: 'claude', Codex: 'codex', Antigravity: 'gemini' };
+  const prevSet = Array.isArray(p.ais) ? [...p.ais].sort() : (p.ai && keyOf[p.ai] ? [keyOf[p.ai]] : (p.ai === 'AI' ? null : ['claude']));
+  const curSet = aiSet(R);
+  const sameAI = prevSet !== null && prevSet.join(',') === curSet.join(',');
+  const who = sameAI ? AI : 'AI';
+  const names = xs => xs && xs.length ? xs.map(k => TOOL_NAME[k] || k).join('＋') : '不明';
   const rows = [
     li('期間', `<b>${per(p)} → ${per(R)}</b>`),
     li(`${who} が書いた行`, num(p.written, R.written, fmt)),
@@ -1435,7 +1441,7 @@ function compareHTML(R){
   const habRows = hab.length ? hab.map(o => li(o.label, num(o.a, o.b, fmt, true))).join('') : '<li><span>直しの型</span><b>—</b></li>';
   const warn = p.projectName && R.projectName && p.projectName !== R.projectName ? `<p class="fine"><b>前回は別のプロジェクト（${esc(p.projectName)}）の結果です。</b>同じプロジェクトの JSON を選んでください。</p>` : '';
   const strictWarn = !!p.strict !== !!R.strict ? '<p class="fine"><b>厳密モードの設定が前回と違います。</b>同じ設定で比べてください。</p>' : '';
-  const aiWarn = who === 'AI' && (p.ai || 'Claude') !== AI ? `<p class="fine"><b>前回は ${esc(p.ai || 'Claude')} の結果、今回は ${esc(AI)} の結果です。</b>書いた AI が違うので、数の差は AI の違いも含みます。</p>` : '';
+  const aiWarn = !sameAI ? `<p class="fine"><b>前回は ${esc(names(prevSet))} の結果、今回は ${esc(names(curSet))} の結果です。</b>書いた AI が違うので、数の差は AI の違いも含みます。</p>` : '';
   return sec('前回', '前回と比べる', `${warn}${strictWarn}${aiWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
   <p class="fine">前回＝${esc(p.savedAt || '—')} に保存した JSON（${esc(p.projectName || '—')}）。ログは30日で消えるので、期間は重ならないことがあります。「人が消した・直した」と「直しの型」は減った方が良い＝緑。</p>`, `<button type="button" class="btn small ghost" id="clearPrev">前回を外す</button>`);
 }

@@ -16,6 +16,7 @@
   --alive:#1F9D68;
   --rewrite:#D08A17;
   --human:#D9534A;
+  --drop:#8A94AD;
   --f-gothic:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",system-ui,sans-serif;
   --f-num:"Helvetica Neue","SF Pro Display",Helvetica,Arial,"Hiragino Sans","Noto Sans JP",sans-serif;
   --f-mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono CJK JP",monospace;
@@ -24,14 +25,14 @@
   :root:not([data-theme="light"]){
     --desk:#0B1020; --desk-deep:#141B30; --ink:#E8ECF5; --muted:#97A2BC; --rule:#283251;
     --sheet:#121A2E; --accent:#5EE2A8; --accent-wash:#163228; --on-accent:#0B1020;
-    --alive:#7CF0B2; --rewrite:#FFC86B; --human:#FF8A7A;
+    --alive:#7CF0B2; --rewrite:#FFC86B; --human:#FF8A7A; --drop:#6F7A99;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --desk:#0B1020; --desk-deep:#141B30; --ink:#E8ECF5; --muted:#97A2BC; --rule:#283251;
   --sheet:#121A2E; --accent:#5EE2A8; --accent-wash:#163228; --on-accent:#0B1020;
-  --alive:#7CF0B2; --rewrite:#FFC86B; --human:#FF8A7A;
+  --alive:#7CF0B2; --rewrite:#FFC86B; --human:#FF8A7A; --drop:#6F7A99;
   color-scheme:dark;
 }
 *,*::before,*::after{box-sizing:border-box}
@@ -112,11 +113,11 @@ h1 em{font-style:normal;color:var(--accent)}
 .stack{display:grid;gap:10px}
 .stack .track{display:flex;height:16px;border-radius:6px;overflow:hidden;background:var(--desk-deep)}
 .stack .track span{display:block;height:100%}
-.stack .track .a{background:var(--alive)} .stack .track .r{background:var(--rewrite)} .stack .track .h{background:var(--human)}
+.stack .track .a{background:var(--alive)} .stack .track .r{background:var(--rewrite)} .stack .track .h{background:var(--human)} .stack .track .d{background:var(--drop)}
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:6px 16px;margin:0;padding:0;list-style:none;font-size:14px}
 .legend li{display:flex;align-items:baseline;gap:8px}
 .legend i{flex:none;width:11px;height:11px;border-radius:3px;transform:translateY(1px)}
-.legend .a i{background:var(--alive)} .legend .r i{background:var(--rewrite)} .legend .h i{background:var(--human)}
+.legend .a i{background:var(--alive)} .legend .r i{background:var(--rewrite)} .legend .h i{background:var(--human)} .legend .d i{background:var(--drop)}
 .legend b{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 .legend small{color:var(--muted);font-size:12.5px}
 .table-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--sheet)}
@@ -450,7 +451,7 @@ function analyzeParsed(acc, project, projectName, strict){
     sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous, cwdTop,
     logFiles: acc.files, logLines: acc.lines, logBad: acc.bad, uses: acc.uses.size, edits: 0, sessions: 0,
     projectFiles: project.size, projectLines: 0, otherProjectFiles: 0, missingFiles: [],
-    written: 0, alive: 0, rewritten: 0, human: 0, aiLines: 0,
+    written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, droppedWritten: 0, aiLines: 0,
     period: null, files: [], top: [], examples: { alive: null, human: null }, rootCandidates: candidates, rootMatched: matched,
   };
   if (!root) return R;
@@ -473,12 +474,15 @@ function analyzeParsed(acc, project, projectName, strict){
     for (const [k, rec] of m) {
       if (curSet.has(k)) { row.alive++; aliveC.push({ key: k, file: rel }); }
       else if (rec.removed) row.rewritten++;
-      else { row.human++; humanC.push({ key: k, file: rel }); }
+      else { row.human++; if (text !== undefined) humanC.push({ key: k, file: rel }); }   // 典型的な「人が消した行」は、今もあるファイルから選ぶ
     }
     row.ai = row.alive;
     R.written += row.written; R.alive += row.alive; R.rewritten += row.rewritten; R.human += row.human; R.aiLines += row.ai;
-    if (text === undefined) R.missingFiles.push({ file: rel, exists: false, written: row.written, rewritten: row.rewritten, human: row.human });
-    else R.files.push(row);
+    if (text === undefined) {
+      // ファイルごと消えた：その中の「人が消した」行は dropped に分けて数える（捨てた試作・名前を変えたファイルが、行単位の手入れと混ざらないように）
+      R.dropped += row.human; R.droppedWritten += row.written;
+      R.missingFiles.push({ file: rel, exists: false, written: row.written, rewritten: row.rewritten, human: row.human });
+    } else R.files.push(row);
   }
   for (const [rel, text] of project) {
     const n = new Set(lineKeys(text, strict)).size;
@@ -488,7 +492,8 @@ function analyzeParsed(acc, project, projectName, strict){
   R.files.sort((a, b) => b.written - a.written || b.lines - a.lines || cmpStr(a.file, b.file));
   R.missingFiles.sort((a, b) => b.written - a.written || cmpStr(a.file, b.file));
   assignAliases(R);
-  R.top = [...R.files, ...R.missingFiles].filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written || cmpStr(a.file, b.file)).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: f.exists !== false }));
+  // 急所＝今もあるファイルの中で、人が行単位で消した・直した行が多い順（ファイルごと消えたものは dropped に分けたので、ここには出さない）
+  R.top = R.files.filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written || cmpStr(a.file, b.file)).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: true }));
   R.examples = { alive: pickExample(aliveC), human: pickExample(humanC) };
   return R;
 }
@@ -509,19 +514,25 @@ const rate = (a, b) => b > 0 ? a / b : 0;
 
 /* ---------- 判定と所見 ---------- */
 function judge(R){
-  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human, w);
+  // 4分類：残った／Claude が自分で書き直した／人が消した・直した（行単位）／ファイルごと消えた
+  // 判定の「人が手を入れた」には、ファイルごと消えた分を入れない（捨てた試作や名前の変更は、Claude の行の出来とは別の話）
+  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human - R.dropped, w), sd = rate(R.dropped, w);
   let t;
   if (w < 30) t = 'まだ少ない';
   else if (sh >= 0.35) t = '赤ペン先生';
+  else if (sd >= 0.4) t = '試作型';
   else if (sr >= 0.4) t = '推敲型';
   else if (sa >= 0.8) t = '全面信頼';
   else t = '共同執筆';
   const lines = [];
+  // excl＝ファイルごと消えた分を除いた生存率の1文（カードの所見にも載せる）
+  const excl = (w && R.dropped && w > R.droppedWritten) ? `ファイルごと消えた分を除くと、残った行は${pct(rate(R.alive, w - R.droppedWritten))}。` : '';
   if (w) {
-    lines.push(`Claude が書いた${fmt(w)}行のうち、${fmt(R.alive)}行がそのまま残り、${fmt(R.rewritten)}行は Claude 自身が書き直し、${fmt(R.human)}行は人が消しました。`);
+    lines.push(`Claude が書いた${fmt(w)}行のうち、${fmt(R.alive)}行がそのまま残り、${fmt(R.rewritten)}行は Claude 自身が書き直し、${fmt(R.human - R.dropped)}行は人が消した・直した${R.dropped ? `、${fmt(R.dropped)}行はファイルごと消えた` : ''}行です。`);
+    if (excl) lines.push(excl);
     if (R.top.length) lines.push(`いちばん手が入ったのは ${baseName(R.top[0].file)}（${fmt(R.top[0].human)}行）。`);
   } else lines.push('この期間に Claude が書いた行は見つかりませんでした。');
-  return { title: t, comments: lines };
+  return { title: t, comments: lines, excl };
 }
 
 /* ---------- 見本（架空のデータ） ---------- */
@@ -537,14 +548,14 @@ function sampleResult(){
     sample: true, strict: false, projectName: 'note-app', root: '/Users/you/dev/note-app', rootFrom: 'files', rootAmbiguous: false, cwdTop: '/Users/you/dev/note-app',
     logFiles: 48, logLines: 92140, logBad: 0, uses: 1860, edits: 1204, sessions: 42,
     projectFiles: 86, projectLines: 9860, otherProjectFiles: 12, missingFiles: [{ file: 'src/lib/old-sync.ts', exists: false, written: 140, rewritten: 0, human: 140 }],
-    written: sum('written') + 140, alive: sum('alive'), rewritten: sum('rewritten'), human: sum('human') + 140, aiLines: sum('ai'),
+    written: sum('written') + 140, alive: sum('alive'), rewritten: sum('rewritten'), human: sum('human') + 140, dropped: 140, droppedWritten: 140, aiLines: sum('ai'),
     period: { start: '2026-09-20', end: '2026-10-20', days: 31 }, files, top: [], rootCandidates: 1, rootMatched: 12,
-    examples: { alive: { key: 'export async function listNotes(userId: string) {', file: 'src/lib/db.ts' }, human: { key: 'const notes = await fetchAllNotesWithoutPaging();', file: 'src/lib/old-sync.ts' } },
+    examples: { alive: { key: 'export async function listNotes(userId: string) {', file: 'src/lib/db.ts' }, human: { key: 'const notes = await fetchAllNotesWithoutPaging();', file: 'src/lib/auth.ts' } },
   };
   R.projectLines = files.reduce((a, f) => a + f.lines, 0) + 4312;
   R.files.sort((a, b) => b.written - a.written || b.lines - a.lines);
   assignAliases(R);
-  R.top = [...files, ...R.missingFiles].filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: f.exists !== false }));
+  R.top = files.filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: true }));
   return R;
 }
 
@@ -552,7 +563,7 @@ function sampleResult(){
 const GOTHIC = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",sans-serif';
 const NUM = '"Helvetica Neue","SF Pro Display",Helvetica,Arial,"Hiragino Sans","Noto Sans JP",sans-serif';
 const MONO = 'ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono CJK JP",monospace';
-const P = { bg0: '#0B1020', bg1: '#121B33', panel: '#171F38', hair: '#2B3552', ink: '#F2F5FF', sub: '#98A3BF', alive: '#7CF0B2', rewrite: '#FFC86B', human: '#FF8A7A', glow: 'rgba(124,240,178,0.10)' };
+const P = { bg0: '#0B1020', bg1: '#121B33', panel: '#171F38', hair: '#2B3552', ink: '#F2F5FF', sub: '#98A3BF', alive: '#7CF0B2', rewrite: '#FFC86B', human: '#FF8A7A', drop: '#6F7A99', glow: 'rgba(124,240,178,0.10)' };
 
 function fitFont(x, text, weight, px, fam, maxW, minPx){
   let size = px;
@@ -589,7 +600,7 @@ function drawCard(R, opts){
   cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
   const J = judge(R);
-  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human, w);
+  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human - R.dropped, w), sd = rate(R.dropped, w);
   const ai = rate(R.aiLines, R.projectLines);
 
   // 背景
@@ -621,17 +632,18 @@ function drawCard(R, opts){
   text('生存率', Rr, 440, `700 30px ${GOTHIC}`, P.sub, 'right', 'alphabetic');
   text('そのまま残っている行の割合', Rr, 476, `500 20px ${GOTHIC}`, P.sub, 'right', 'alphabetic');
 
-  // 3分類のバー
+  // 4分類のバー（ファイルごと消えた分は灰色＝「出来が悪くて消された」とは別の色）
   const bY = 516, bH = 40;
   x.save(); rrect(x, L, bY, CW, bH, 12); x.clip();
   x.fillStyle = P.hair; x.fillRect(L, bY, CW, bH);
   if (w) {
     let cx = L;
-    for (const [r, col] of [[sa, P.alive], [sr, P.rewrite], [sh, P.human]]) { const ww = CW * r; x.fillStyle = col; x.fillRect(cx, bY, Math.ceil(ww), bH); cx += ww; }
+    for (const [r, col] of [[sa, P.alive], [sr, P.rewrite], [sh, P.human], [sd, P.drop]]) { const ww = CW * r; x.fillStyle = col; x.fillRect(cx, bY, Math.ceil(ww), bH); cx += ww; }
   }
   x.restore();
-  // 凡例（幅に収まらなければ2段）
-  const legend = [['残った', R.alive, sa, P.alive], ['Claude が自分で書き直した', R.rewritten, sr, P.rewrite], ['人が消した・直した', R.human, sh, P.human]];
+  // 凡例（幅に収まらなければ2段。ファイルごと消えた分は、ある時だけ4つ目）
+  const legend = [['残った', R.alive, sa, P.alive], ['Claude が自分で書き直した', R.rewritten, sr, P.rewrite], ['人が消した・直した', R.human - R.dropped, sh, P.human]];
+  if (R.dropped) legend.push(['ファイルごと消えた', R.dropped, sd, P.drop]);
   const legW = legend.map(([lab, n, r]) => { x.font = `600 22px ${GOTHIC}`; const a = x.measureText(lab + '  ').width; x.font = `600 22px ${NUM}`; return [a, x.measureText(`${fmt(n)}行 ${pct(r)}`).width]; });
   const legTotal = legW.reduce((a, [p, q]) => a + 28 + p + q + 34, 0);
   const twoRows = legTotal > CW + 10;
@@ -681,7 +693,7 @@ function drawCard(R, opts){
   text('人が消した行が多いファイル', L, 950, `700 24px ${GOTHIC}`, P.ink);
   text('＝ 人が書き直した場所', Rr, 950, `500 20px ${GOTHIC}`, P.sub, 'right');
   const rowY0 = 986, rowH = 54;
-  if (!R.top.length) text(w ? '人が消した行はありません。' : '—', L, rowY0 + 24, `500 22px ${GOTHIC}`, P.sub);
+  if (!R.top.length) text(w ? (R.dropped ? '行単位で人が直したファイルはありません（ファイルごと消えた分は上の内訳）。' : '人が消した行はありません。') : '—', L, rowY0 + 24, `500 22px ${GOTHIC}`, P.sub);
   R.top.forEach((f, i) => {
     const yy = rowY0 + i * rowH;
     text(String(i + 1), L, yy + 26, `800 26px ${NUM}`, P.sub);
@@ -696,13 +708,13 @@ function drawCard(R, opts){
   });
 
   // 判定の箱（典型的な行を入れる時は、その2行も同じ箱に）
-  const pY = 1160, pH = 112;
+  const pY = 1160, pH = 124;
   x.fillStyle = P.panel; rrect(x, L, pY, CW, pH, 16); x.fill();
   x.fillStyle = P.alive; rrect(x, L + 22, pY + 24, 10, pH - 48, 4); x.fill();
   const withEx = opts.examples && (R.examples.alive || R.examples.human);
   if (withEx) {
-    text(J.title, L + 50, pY + 30, `800 26px ${GOTHIC}`, P.ink);
-    let ey = pY + 64;
+    text(J.title, L + 50, pY + 32, `800 26px ${GOTHIC}`, P.ink);
+    let ey = pY + 68;
     for (const [tag, ex, col] of [['残った行', R.examples.alive, P.alive], ['消えた行', R.examples.human, P.human]]) {
       if (!ex) continue;
       text(tag, L + 50, ey, `700 15px ${GOTHIC}`, col);
@@ -711,10 +723,12 @@ function drawCard(R, opts){
       ey += 30;
     }
   } else {
-    text(J.title, L + 50, pY + 40, `800 30px ${GOTHIC}`, P.ink);
-    x.font = `500 19px ${GOTHIC}`;
-    const ln = wrapJa(x, J.comments[0], CW - 90).slice(0, 2);
-    ln.forEach((s, i) => text(s, L + 50, pY + 74 + i * 24, `500 19px ${GOTHIC}`, P.sub));
+    // 所見＝内訳の1文＋（ファイルごと消えた分がある時）それを除いた生存率。3行まで
+    text(J.title, L + 50, pY + 34, `800 28px ${GOTHIC}`, P.ink);
+    x.font = `500 18px ${GOTHIC}`;
+    const body = J.comments[0] + J.excl;
+    const ln = wrapJa(x, body, CW - 90).slice(0, 3);
+    ln.forEach((s, i) => text(s, L + 50, pY + 66 + i * 22, `500 18px ${GOTHIC}`, P.sub));
   }
 
   // 足元：測り方
@@ -742,11 +756,13 @@ function drawCard(R, opts){
 /* ---------- 内訳（HTML） ---------- */
 const sec = (kicker, title, body, aside) => `<section class="sec"><header><span class="kicker">${kicker}</span><h2>${title}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</header>${body}</section>`;
 function stackHTML(R){
-  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human, w);
+  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human - R.dropped, w), sd = rate(R.dropped, w);
+  const J = judge(R);
   return `<div class="big-line"><span class="n">${w ? pct1(sa) : '—'}</span><span class="l">Claude が書いた ${fmt(w)} 行のうち、そのまま残っている行</span></div>
-  <div class="stack"><div class="track" role="img" aria-label="残った${pct(sa)}、Claude が書き直した${pct(sr)}、人が消した${pct(sh)}"><span class="a" style="width:${(sa * 100).toFixed(2)}%"></span><span class="r" style="width:${(sr * 100).toFixed(2)}%"></span><span class="h" style="width:${(sh * 100).toFixed(2)}%"></span></div>
-  <ul class="legend"><li class="a"><i></i><span><b>${fmt(R.alive)}</b> 行 ${pct1(sa)}<br><small>残った</small></span></li><li class="r"><i></i><span><b>${fmt(R.rewritten)}</b> 行 ${pct1(sr)}<br><small>Claude が自分で書き直した</small></span></li><li class="h"><i></i><span><b>${fmt(R.human)}</b> 行 ${pct1(sh)}<br><small>人が消した・直した（ファイルごと消えた分を含む）</small></span></li></ul></div>
-  <p class="fine">「Claude が自分で書き直した」は、Claude が書いた行を、後の Edit の old 側や Write の書き換えで Claude 自身が消したもの。「人が消した・直した」は、どちらにも当たらず今のコードに無い行です（Bash のコマンドで消した場合もここに入ります）。</p>`;
+  <div class="stack"><div class="track" role="img" aria-label="残った${pct(sa)}、Claude が書き直した${pct(sr)}、人が消した${pct(sh)}、ファイルごと消えた${pct(sd)}"><span class="a" style="width:${(sa * 100).toFixed(2)}%"></span><span class="r" style="width:${(sr * 100).toFixed(2)}%"></span><span class="h" style="width:${(sh * 100).toFixed(2)}%"></span><span class="d" style="width:${(sd * 100).toFixed(2)}%"></span></div>
+  <ul class="legend"><li class="a"><i></i><span><b>${fmt(R.alive)}</b> 行 ${pct1(sa)}<br><small>残った</small></span></li><li class="r"><i></i><span><b>${fmt(R.rewritten)}</b> 行 ${pct1(sr)}<br><small>Claude が自分で書き直した</small></span></li><li class="h"><i></i><span><b>${fmt(R.human - R.dropped)}</b> 行 ${pct1(sh)}<br><small>人が消した・直した（行単位）</small></span></li><li class="d"><i></i><span><b>${fmt(R.dropped)}</b> 行 ${pct1(sd)}<br><small>ファイルごと消えた（${fmt(R.missingFiles.length)} ファイル）</small></span></li></ul></div>
+  ${J.excl ? `<p class="def">${esc(J.excl)}</p>` : ''}
+  <p class="fine">「Claude が自分で書き直した」は、Claude が書いた行を、後の Edit の old 側や Write の書き換えで Claude 自身が消したもの。「人が消した・直した」は、今もあるファイルの中で、どちらにも当たらず今のコードに無い行（Bash のコマンドで消した場合もここに入ります）。「ファイルごと消えた」は、ファイル自体が今のフォルダに無いもの＝捨てた試作や、名前を変えたファイルが入ります。Claude の行の出来とは別の話なので、判定ではこれを「人が手を入れた」に数えません。</p>`;
 }
 function aiHTML(R){
   const ai = rate(R.aiLines, R.projectLines);
@@ -756,14 +772,14 @@ function aiHTML(R){
 function filesHTML(R, hide){
   const rows = R.files.filter(f => f.written > 0).slice(0, 40);
   const tr = rows.map(f => `<tr><td title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : f.file)}</td><td>${fmt(f.lines)}</td><td>${fmt(f.written)}</td><td>${fmt(f.alive)}</td><td>${fmt(f.rewritten)}</td><td>${fmt(f.human)}</td><td><span class="mini"><span style="width:${(rate(f.ai, f.lines) * 100).toFixed(1)}%"></span></span>${f.lines ? pct(rate(f.ai, f.lines)) : '—'}</td></tr>`).join('');
-  const miss = R.missingFiles.length ? `<h3 style="margin:14px 0 6px;font-size:13.5px;color:var(--muted)">ファイルごと消えた・名前が変わった</h3><ul class="rows">${R.missingFiles.slice(0, 12).map(f => `<li><span><code>${esc(hide ? f.alias : f.file)}</code></span><b>${fmt(f.written)}行</b></li>`).join('')}</ul><p class="fine">これらの行は、Claude が後で消した印があるものを除いて「人が消した」に数えています。名前を変えただけのファイルも、ここに入ります。</p>` : '';
+  const miss = R.missingFiles.length ? `<h3 style="margin:14px 0 6px;font-size:13.5px;color:var(--muted)">ファイルごと消えた・名前が変わった（${fmt(R.missingFiles.length)} ファイル・${fmt(R.droppedWritten)} 行）</h3><ul class="rows">${R.missingFiles.slice(0, 12).map(f => `<li><span><code>${esc(hide ? f.alias : f.file)}</code></span><b>${fmt(f.written)}行</b></li>`).join('')}</ul><p class="fine">これらの行は、Claude が後で消した印があるものを除いて「ファイルごと消えた」に数えています（「人が消した・直した」とは別）。名前を変えただけのファイルも、ここに入ります。</p>` : '';
   return `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>今の行数</th><th>Claude が書いた</th><th>残った</th><th>書き直し</th><th>人が消した</th><th>AI率</th></tr></thead><tbody>${tr || '<tr><td colspan="7">Claude が書いた行があるファイルはありません</td></tr>'}</tbody></table></div>
   <p class="fine">Claude が書いた行が多い順に、${rows.length < R.files.filter(f => f.written > 0).length ? '上位40件' : '全部'}。行数は、4文字未満や記号だけの行を除き、同じ内容の行を1つに数えた数です。</p>${miss}`;
 }
 function topHTML(R, hide){
-  if (!R.top.length) return '<p class="fine">人が消した行はありません。</p>';
+  if (!R.top.length) return `<p class="fine">${R.dropped ? '行単位で人が直したファイルはありません。ファイルごと消えた分は、上の内訳と「ファイルごとの内訳」の末尾に。' : '人が消した行はありません。'}</p>`;
   const max = Math.max(...R.top.map(f => f.human), 1);
-  return '<ul class="bars">' + R.top.map(f => `<li><span class="name" title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : baseName(f.file))}${f.exists ? '' : '（消えた）'}</span><span class="track"><span class="fill" style="width:${Math.max(2, f.human / max * 100).toFixed(1)}%"></span></span><span class="n">${fmt(f.human)} / ${fmt(f.written)}</span></li>`).join('') + '</ul><p class="fine">人が消した行の多い順。右は「人が消した行 / Claude が書いた行」。ここが、人が書き直した場所＝レビューの急所です。</p>';
+  return '<ul class="bars">' + R.top.map(f => `<li><span class="name" title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : baseName(f.file))}</span><span class="track"><span class="fill" style="width:${Math.max(2, f.human / max * 100).toFixed(1)}%"></span></span><span class="n">${fmt(f.human)} / ${fmt(f.written)}</span></li>`).join('') + '</ul><p class="fine">今もあるファイルの中で、人が行単位で消した・直した行の多い順。右は「人が消した行 / Claude が書いた行」。ここが、人が書き直した場所＝レビューの急所です（ファイルごと消えたものは入れていません）。</p>';
 }
 function recordHTML(R){
   const li = (k, v) => `<li><span>${k}</span><b>${v}</b></li>`;
@@ -781,7 +797,7 @@ function recordHTML(R){
     ${li('他のプロジェクトのファイル（除外）', fmt(R.otherProjectFiles))}
     ${li('照合に使ったファイル', fmt(R.rootMatched))}
   </ul></div></div>
-  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方 → ログの作業フォルダ（cwd）と同じ方 → 浅い方、の順に選びます）` : ''}。${R.rootAmbiguous ? '<b>候補が同数で決めきれなかった</b>ので、上の順で選びました。違う場合は、リポジトリの一番上のフォルダを選び直してください。' : ''}${R.rootFrom === 'cwd' ? '<b>Claude が触ったファイルが今のフォルダに1つも無い</b>ので、ログの作業フォルダ（cwd）の名前がフォルダ名と同じことを根拠に場所を決めました。書いた行は全部「消えた」側に入ります。' : ''}</p>`;
+  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方 → ログの作業フォルダ（cwd）と同じ方 → 浅い方、の順に選びます）` : ''}。${R.rootAmbiguous ? '<b>候補が同数で決めきれなかった</b>ので、上の順で選びました。違う場合は、リポジトリの一番上のフォルダを選び直してください。' : ''}${R.rootFrom === 'cwd' ? '<b>Claude が触ったファイルが今のフォルダに1つも無い</b>ので、ログの作業フォルダ（cwd）の名前がフォルダ名と同じことを根拠に場所を決めました。書いた行は全部「ファイルごと消えた」に入ります。' : ''}</p>`;
 }
 function howHTML(R){
   return `<p class="def"><b>測り方</b>：Claude Code の Edit／Write で<b>新しく入った行</b>（Edit の new 側にあって old 側に無い行。Write は、それまでに Read で見えていた行を除いた行）が、今も同じ行として残っている割合。</p>
@@ -821,10 +837,10 @@ function shareText(R){
     `・${R.period ? 'この' + R.period.days + '日間' : 'ログの期間'}に Claude が書いた行：${fmt(w)}`,
     `・そのまま残っている：${pct(rate(R.alive, w))}`,
     `・Claude が自分で書き直した：${pct(rate(R.rewritten, w))}`,
-    `・自分が消した・直した：${pct(rate(R.human, w))}`,
-    `・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`,
-    '#ClaudeCode生存率',
+    `・自分が消した・直した：${pct(rate(R.human - R.dropped, w))}`,
   ];
+  if (R.dropped) lines.push(`・ファイルごと消えた：${pct(rate(R.dropped, w))}`);
+  lines.push(`・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`, '#ClaudeCode生存率');
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');
 }
@@ -961,11 +977,20 @@ async function handleProject(list){
   const all = [...list].map(f => ({ p: normPath(f._path || f.webkitRelativePath || f.name), file: f }));
   const top = topFolder(all.map(a => a.p));
   const items = [];
+  let jsonl = 0, dashDirs = 0;
   for (const { p, file } of all) {
     const segs = p.split('/').filter(Boolean);
-    const rel = (top ? segs.slice(1) : segs).join('/');
+    const relSegs = top ? segs.slice(1) : segs;
+    if (/\.jsonl$/i.test(file.name)) jsonl++;
+    if (relSegs.length > 1 && /^-[A-Za-z]/.test(relSegs[0])) dashDirs++;   // ~/.claude/projects の中は「-Users-…」のフォルダ
+    const rel = relSegs.join('/');
     if (!rel || !projectFilter(rel, file.size)) continue;
     items.push({ rel, file });
+  }
+  // ログのフォルダを右に入れた時（Claude のメモ .md を「コード」として数えてしまう）
+  if (all.length && (jsonl > all.length * 0.3 || dashDirs > all.length * 0.5 || /^-[A-Za-z]/.test(top))) {
+    setError(`これは Claude Code のログのフォルダのようです（${top || 'このフォルダ'}：.jsonl のファイルや「-Users-…」のフォルダがあります）。ログは上の 1 の枠へ。ここには、Claude Code で作業したリポジトリの一番上のフォルダを入れてください。`);
+    return;
   }
   if (!items.length) { setError('読めるテキストファイルが見つかりませんでした。プロジェクトのフォルダ（リポジトリの一番上）を選んでください。'); return; }
   if (busy) return; busy = true;
@@ -1091,7 +1116,7 @@ function analyzeTexts(logs, project, projectName, strict){
   for (const { rel, text } of project) if (projectFilter(rel, String(text).length) && !looksBinary(String(text).slice(0, 4096))) pm.set(normPath(rel), String(text));
   return analyzeParsed(acc, pm, projectName || '', !!strict);
 }
-window.__seizon = { analyzeTexts, lineKeys, normLine, isTrivial, judge, get current(){ return current; }, get inputs(){ return inputs; } };
+window.__seizon = { analyzeTexts, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, get current(){ return current; }, get inputs(){ return inputs; } };
 renderAll();
 })();
 </script>

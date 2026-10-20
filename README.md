@@ -15,6 +15,7 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
 - `build_site.py <公開先URL>` で GitHub Pages 用の `docs/` を作る
 - X などのカード画像は `docs/og/*.png`。`og/*.html` を `render_og.py` で撮って作る。通知表のカードは `--card` で渡した画像を使う（公開中の画像は作者の実際の通知表）。渡さない時は、アプリの見本をその場で描いて使う
 - CSP は `default-src 'none'; connect-src 'none'` ほか。fetch / XHR / WebSocket はブラウザが止める
+- 生存率の見た目（2026-10-21）：暗いチャコール地に罫線で区切る解析票。色は無彩色＋低彩度の青緑（主要な数値・選択状態・主要操作だけ）、分類色は見分けがつく範囲で落とす。数・ファイル名・日付・トークンは等幅＝IBM Plex Mono（SIL OFL 1.1）の Latin 部分を woff2 で `app.html` に埋め込み（3 ウェイトで約 30KB・通信は無し）。埋め込んだページだけ CSP の `font-src` が `data:` になる（`build_standalone.py` が `data:font/` の有無で切り替える）。カード画像も同じ色と書体で描く（`drawCard` の `P`）
 
 ## テスト
 

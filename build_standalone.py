@@ -10,9 +10,10 @@
 import argparse, html, json, pathlib, re
 
 CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-       "img-src data: blob:; connect-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'")
+       "img-src data: blob:; connect-src 'none'; font-src {font}; form-action 'none'; base-uri 'none'")
 
 def build(src: str, url: str = "", og: str = "") -> str:
+    csp = CSP.format(font="data:" if "data:font/" in src else "'none'")   # 書体を埋め込んだページだけ data: の font を許す（通信は変わらず無し）
     cut = src.index("</style>") + len("</style>")
     head_part, body_part = src[:cut], src[cut:]
     title = re.search(r"<title>(.*?)</title>", src, re.S).group(1).strip()
@@ -33,7 +34,7 @@ def build(src: str, url: str = "", og: str = "") -> str:
     return "\n".join(x for x in [
         "<!doctype html>", '<html lang="ja">', "<head>", '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
-        f'<meta http-equiv="Content-Security-Policy" content="{CSP}">',
+        f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
         '<meta name="referrer" content="no-referrer">', og_tags, boot, head_part,
         "</head>", "<body>", body_part, "</body>", "</html>", ""] if x != "")
 

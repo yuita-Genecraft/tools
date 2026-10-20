@@ -1,0 +1,1094 @@
+<title>Claude Code 生存率</title>
+<meta name="description" content="Claude Code が書いた行のうち、今も残っている行はどれだけか。ログと手元のフォルダをブラウザの中だけで突き合わせます。ファイルは外に送信されません。">
+<style>
+/* Layout: 暗い机の上に、光る1枚のカード。となりに検査結果の綴り。
+   カードは画像なのでどちらのテーマでも同じ色。机と綴りだけがテーマで変わる。 */
+:root{
+  --desk:#EEF1F6;
+  --desk-deep:#DFE4EC;
+  --ink:#0F172A;
+  --muted:#5B6478;
+  --rule:#CFD6E2;
+  --sheet:#FFFFFF;
+  --accent:#176B5A;
+  --accent-wash:#D9EFE6;
+  --on-accent:#F4FBF8;
+  --alive:#1F9D68;
+  --rewrite:#D08A17;
+  --human:#D9534A;
+  --f-gothic:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",system-ui,sans-serif;
+  --f-num:"Helvetica Neue","SF Pro Display",Helvetica,Arial,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --f-mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono CJK JP",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --desk:#0B1020; --desk-deep:#141B30; --ink:#E8ECF5; --muted:#97A2BC; --rule:#283251;
+    --sheet:#121A2E; --accent:#5EE2A8; --accent-wash:#163228; --on-accent:#0B1020;
+    --alive:#7CF0B2; --rewrite:#FFC86B; --human:#FF8A7A;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --desk:#0B1020; --desk-deep:#141B30; --ink:#E8ECF5; --muted:#97A2BC; --rule:#283251;
+  --sheet:#121A2E; --accent:#5EE2A8; --accent-wash:#163228; --on-accent:#0B1020;
+  --alive:#7CF0B2; --rewrite:#FFC86B; --human:#FF8A7A;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+img{max-width:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font-family:var(--f-gothic);font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%}
+.page{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px);padding-block:32px 64px}
+
+/* 見出し */
+.masthead{display:grid;gap:10px;max-width:46rem;margin-bottom:28px}
+.eyebrow{margin:0;font-size:12.5px;letter-spacing:.14em;color:var(--accent);font-weight:700}
+h1{margin:0;font-weight:800;font-size:clamp(34px,6vw,58px);line-height:1.12;letter-spacing:-.01em;text-wrap:balance}
+h1 em{font-style:normal;color:var(--accent)}
+.lead{margin:0;color:var(--muted);font-size:15.5px;max-width:42rem}
+
+/* 2カラム */
+.layout{display:grid;grid-template-columns:minmax(0,540px) minmax(0,1fr);gap:clamp(24px,4vw,56px);align-items:start}
+@media (max-width:960px){.layout{grid-template-columns:minmax(0,1fr)}}
+.sheet-col{display:grid;gap:14px;min-width:0}
+
+/* 取り込み（2つ） */
+.intakes{display:grid;gap:10px}
+.intake{position:relative;border:1.5px dashed var(--rule);border-radius:12px;padding:14px 16px;background:var(--sheet);display:grid;gap:8px;transition:border-color .15s,background-color .15s}
+.intake.over{border-color:var(--accent);background:var(--accent-wash)}
+.intake.done{border-style:solid;border-color:var(--accent)}
+.intake-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
+.intake-title{margin:0;font-weight:700;font-size:15.5px;display:flex;align-items:center;gap:10px}
+.step{flex:none;display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--desk);font-family:var(--f-num);font-weight:800;font-size:14px}
+.intake.done .step{background:var(--accent);color:var(--on-accent)}
+.intake-sub{margin:0;font-size:13px;color:var(--muted)}
+.intake-sub code{font-family:var(--f-mono);font-size:12.5px}
+.loaded{margin:0;font-size:13.5px;color:var(--accent);font-weight:700}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:0 16px;border-radius:999px;border:1.5px solid var(--accent);background:transparent;color:var(--accent);font:inherit;font-weight:700;font-size:14px;text-decoration:none;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--accent-wash)}
+.btn.primary{background:var(--accent);color:var(--on-accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{border-color:var(--rule);color:var(--muted)}
+.btn:focus-visible,.copy:focus-visible,summary:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2.5px solid var(--accent);outline-offset:2px}
+.howto summary{cursor:pointer;color:var(--muted);font-size:13.5px}
+.howto ol{margin:8px 0 0;padding-left:1.3em;display:grid;gap:8px;font-size:13.5px}
+.howto li span{display:block}
+.cmd{display:flex;align-items:center;gap:8px;margin-top:4px;min-width:0}
+.cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;font-family:var(--f-mono);font-size:13px;background:var(--desk);border:1px solid var(--rule);border-radius:6px;padding:6px 10px}
+.copy{flex:none;font:inherit;font-size:12.5px;padding:5px 10px;border-radius:6px;border:1px solid var(--rule);background:var(--sheet);color:var(--ink);cursor:pointer}
+.note{margin:6px 0 0;font-size:13px;color:var(--muted)}
+
+/* 進行とステータス */
+.progress{display:grid;gap:6px}
+.bar{height:6px;border-radius:99px;background:var(--desk-deep);overflow:hidden}
+.bar span{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.progress p{margin:0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.status{margin:0;display:flex;gap:10px;align-items:baseline;font-size:13.5px;color:var(--muted)}
+.pill{flex:none;font-size:12px;font-weight:700;letter-spacing:.06em;padding:2px 10px;border-radius:99px;border:1.5px solid var(--human);color:var(--human)}
+.pill.mine{border-color:var(--accent);color:var(--accent)}
+.pill.err{border-color:var(--human);background:var(--human);color:#fff}
+
+/* カード */
+.card{margin:0;position:relative}
+.card img{display:block;width:100%;height:auto;border-radius:14px;box-shadow:0 1px 2px rgba(5,10,30,.3),0 18px 44px -18px rgba(5,10,30,.6)}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:6px 18px;font-size:13.5px}
+.opts label{display:flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer}
+.opts input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+.share{display:flex;flex-wrap:wrap;gap:8px}
+.hint{margin:0;font-size:13px;color:var(--muted)}
+.share-text{width:100%;font:inherit;font-size:14px;line-height:1.7;color:var(--ink);background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:10px 12px;resize:vertical}
+
+/* 綴り（内訳） */
+.notes{display:grid;gap:34px;min-width:0}
+.sec{display:grid;gap:12px;min-width:0;padding-top:18px;border-top:1.5px solid var(--ink)}
+.sec header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.kicker{font-family:var(--f-num);font-weight:800;font-size:12px;letter-spacing:.16em;color:var(--on-accent);background:var(--accent);padding:2px 9px;border-radius:3px}
+.sec h2{margin:0;font-size:22px;font-weight:800;line-height:1.3;text-wrap:balance}
+.sec .aside{margin-left:auto;font-size:13px;color:var(--muted)}
+.fine{margin:0;font-size:12.5px;color:var(--muted)}
+.big-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+.big-line .n{font-family:var(--f-num);font-weight:800;font-size:clamp(36px,5vw,52px);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.big-line .l{font-size:15px;color:var(--muted)}
+.stack{display:grid;gap:10px}
+.stack .track{display:flex;height:16px;border-radius:6px;overflow:hidden;background:var(--desk-deep)}
+.stack .track span{display:block;height:100%}
+.stack .track .a{background:var(--alive)} .stack .track .r{background:var(--rewrite)} .stack .track .h{background:var(--human)}
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:6px 16px;margin:0;padding:0;list-style:none;font-size:14px}
+.legend li{display:flex;align-items:baseline;gap:8px}
+.legend i{flex:none;width:11px;height:11px;border-radius:3px;transform:translateY(1px)}
+.legend .a i{background:var(--alive)} .legend .r i{background:var(--rewrite)} .legend .h i{background:var(--human)}
+.legend b{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.legend small{color:var(--muted);font-size:12.5px}
+.table-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--rule)}
+th:first-child,td:first-child{text-align:left}
+td:first-child{font-family:var(--f-mono);font-size:12.5px;max-width:18rem;overflow:hidden;text-overflow:ellipsis}
+thead th{font-weight:600;color:var(--muted);font-size:12.5px;background:var(--desk);position:sticky;top:0}
+tfoot td{font-weight:700;border-bottom:0}
+td .mini{display:inline-block;vertical-align:middle;width:56px;height:7px;border-radius:3px;background:var(--desk-deep);overflow:hidden;margin-right:6px}
+td .mini span{display:block;height:100%;background:var(--alive)}
+.bars{display:grid;gap:7px;margin:0;padding:0;list-style:none}
+.bars li{display:grid;grid-template-columns:minmax(0,11em) minmax(0,1fr) 5.2em;align-items:center;gap:10px;font-size:13.5px}
+.bars .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--f-mono);font-size:12.5px}
+.bars .track{height:10px;background:var(--desk-deep);border-radius:2px;overflow:hidden}
+.bars .fill{display:block;height:100%;background:var(--human)}
+.bars .n{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.rows{margin:0;padding:0;list-style:none;display:grid}
+.rows li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dotted var(--rule);font-size:14px}
+.rows li b{font-variant-numeric:tabular-nums;font-weight:700;text-align:right}
+.rows li code{font-family:var(--f-mono);font-size:12.5px;word-break:break-all;text-align:right}
+.words{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:18px}
+.words h3{margin:0 0 6px;font-size:13.5px;font-weight:700;color:var(--muted)}
+.def{margin:0;padding:12px 14px;border-left:3px solid var(--accent);background:var(--sheet);border-radius:0 8px 8px 0;font-size:14px}
+.def b{color:var(--accent)}
+.ex{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.ex li{display:grid;gap:2px}
+.ex .tag{font-size:12px;font-weight:700;letter-spacing:.06em}
+.ex .tag.a{color:var(--alive)} .ex .tag.h{color:var(--human)}
+.ex code{font-family:var(--f-mono);font-size:12.5px;background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:6px 10px;white-space:pre-wrap;word-break:break-all}
+.ex small{color:var(--muted);font-size:12px}
+.ul{margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:13.5px}
+
+.colophon{margin-top:56px;padding-top:18px;border-top:1px solid var(--rule);display:grid;gap:8px;font-size:13px;color:var(--muted);max-width:46rem}
+.colophon p{margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">ブラウザの中だけで突き合わせ ・ 通信ゼロ ・ 無料</p>
+    <h1>Claude Code <em>生存率</em></h1>
+    <p class="lead">Claude が書いたコードのうち、今も残っている行はどれだけか。Claude Code のログと、手元のプロジェクトのフォルダを、このページに落とすだけ。「残った」「Claude が自分で書き直した」「人が消した」に分けて、1枚の画像にします。</p>
+  </header>
+
+  <main class="layout">
+    <section class="sheet-col" aria-label="生存率カード">
+      <div class="intakes">
+        <div class="intake" id="zoneLog">
+          <div class="intake-head">
+            <div>
+              <p class="intake-title"><span class="step">1</span>Claude Code のログ</p>
+              <p class="intake-sub"><code>~/.claude/projects</code> のフォルダをここにドロップ</p>
+            </div>
+            <label class="btn primary" for="logInput">フォルダを選ぶ</label>
+            <input type="file" id="logInput" webkitdirectory directory multiple hidden>
+          </div>
+          <p class="loaded" id="logLoaded" hidden></p>
+          <details class="howto">
+            <summary>ログの場所と開き方</summary>
+            <ol>
+              <li><span>Mac は「ターミナル」に貼って Enter。ログのフォルダが Finder で開きます。</span>
+                <span class="cmd"><code id="cmdMac">open ~/.claude/projects</code><button type="button" class="copy" data-copy="cmdMac">コピー</button></span></li>
+              <li><span>Windows はエクスプローラーのアドレス欄に貼って Enter。</span>
+                <span class="cmd"><code id="cmdWin">%USERPROFILE%\.claude\projects</code><button type="button" class="copy" data-copy="cmdWin">コピー</button></span></li>
+              <li><span>開いた projects フォルダを、そのままこのページにドラッグします（「フォルダを選ぶ」で指定しても読めます）。</span></li>
+            </ol>
+            <p class="note">Claude Code は古いログを自動で消します（初期設定は30日）。測れるのは、手元に残っているログの期間に Claude が書いた分だけです。</p>
+          </details>
+        </div>
+        <div class="intake" id="zoneProj">
+          <div class="intake-head">
+            <div>
+              <p class="intake-title"><span class="step">2</span>プロジェクトのフォルダ</p>
+              <p class="intake-sub">Claude Code で作業したリポジトリのフォルダをここにドロップ</p>
+            </div>
+            <label class="btn primary" for="projInput">フォルダを選ぶ</label>
+            <input type="file" id="projInput" webkitdirectory directory multiple hidden>
+          </div>
+          <p class="loaded" id="projLoaded" hidden></p>
+          <p class="note"><code>node_modules</code>・<code>.git</code>・ビルド成果物・画像などは読みません。ファイルの中身は端末の外に出ません。スマホのブラウザではフォルダを選べないので、PC で開いてください。</p>
+        </div>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><span id="progressBar"></span></div>
+        <p id="progressText">読み込み中</p>
+      </div>
+
+      <p class="status" aria-live="polite"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のデータで表示しています。ログとフォルダを入れると、あなたの生存率に変わります。</span></p>
+
+      <figure class="card">
+        <img id="cardImg" width="1080" height="1350" alt="生存率カードの画像">
+      </figure>
+
+      <div class="opts" aria-label="表示の設定">
+        <label><input type="checkbox" id="optStrict">厳密モード（空白の違いも別の行として数える）</label>
+        <label><input type="checkbox" id="optHideFiles">ファイル名を隠す</label>
+        <label><input type="checkbox" id="optHideProject">プロジェクト名を隠す</label>
+        <label><input type="checkbox" id="optExamples">典型的な行を1つずつ載せる</label>
+      </div>
+      <div class="share">
+        <a class="btn primary" id="xLink" href="https://x.com/intent/tweet" target="_blank" rel="noopener">Xに投稿する</a>
+        <button type="button" class="btn" id="copyText">投稿文をコピー</button>
+        <button type="button" class="btn" id="saveImg" hidden>画像を保存</button>
+        <button type="button" class="btn ghost" id="resetBtn" hidden>見本に戻す</button>
+      </div>
+      <p class="hint" id="saveHint">画像は長押し（スマホ）か右クリック（PC）で保存できます。Xには画像を添えて投稿してください。</p>
+      <textarea id="shareText" class="share-text" rows="8" aria-label="投稿文"></textarea>
+    </section>
+
+    <section class="notes" id="details" aria-label="内訳"></section>
+  </main>
+
+  <footer class="colophon">
+    <p>ログとファイルはブラウザの中で読み、数えた結果だけを画面に出します。このページはサーバーと通信しません。</p>
+    <p>「Claude が書いた行」は、Claude Code の Edit・Write で新しく入った行です。Bash のコマンド（ヒアドキュメントなど）で書かれた行や、ログの期間より前に書かれた行は数えません。</p>
+    <p>個人が作った非公式のツールです。Anthropic 社とは関係ありません。</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const STANDALONE = window.__STANDALONE__ === true;
+const TOOL_URL = typeof window.__TOOL_URL__ === 'string' ? window.__TOOL_URL__ : '';
+
+/* ---------- 表示の小道具 ---------- */
+const fmt = n => Math.round(n || 0).toLocaleString('ja-JP');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct = r => Math.round((r || 0) * 100) + '%';
+const pct1 = r => { const v = (r || 0) * 100; return (v >= 10 || v === 0 ? Math.round(v) : v.toFixed(1)) + '%'; };
+const baseName = p => String(p).split('/').pop() || String(p);
+
+/* ---------- 行の正規化（Python の ref_seizon.py と同じ規則） ----------
+   通常モード：タブ→空白、前後の空白を落とし、連続する空白を1つに。
+   厳密モード：行末の \r だけ落として、そのまま。
+   数えない行（どちらのモードでも）：前後の空白を除いて4文字未満、文字・数字を1つも含まない行（括弧や記号だけの行）、
+   記号と予約語1つだけの行（} else { ・ break; ・ return; など）、閉じタグだけの行（</div> など）。 */
+const WS = '[ \\t\\u000b\\f\\r\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]';
+const RX_TRIM = new RegExp('^' + WS + '+|' + WS + '+$', 'g');
+const RX_WS = new RegExp(WS + '+', 'g');
+const RX_ALNUM = /[\p{L}\p{N}]/u;
+const RX_STRUCT = /^(?:[{}()\[\];,.:]|[ \t])*(?:else|try|finally|do|break|continue|return|pass|done|end|fi|esac|endif|default|then|begin|yield|next|catch)?(?:[{}()\[\];,.:]|[ \t])*$/i;
+const RX_CLOSE_TAG = /^<\/[A-Za-z][\w-]*>$/;
+const TRIVIAL_MIN = 4;
+function normLine(raw, strict){
+  let s = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+  if (!strict) s = s.replace(/\t/g, ' ').replace(RX_TRIM, '').replace(RX_WS, ' ');
+  return s;
+}
+function isTrivial(key){
+  const t = key.replace(RX_TRIM, '');
+  return t.length < TRIVIAL_MIN || !RX_ALNUM.test(t) || RX_STRUCT.test(t) || RX_CLOSE_TAG.test(t);
+}
+function lineKeys(text, strict){
+  const out = [];
+  for (const raw of String(text).split('\n')) { const k = normLine(raw, strict); if (!isTrivial(k)) out.push(k); }
+  return out;
+}
+const normPath = p => String(p).replace(/\\/g, '/');
+
+/* ---------- ログを読む（tool_use と tool_result を拾う） ----------
+   Edit / MultiEdit / Write が「Claude が書いた」の元。Read は「元からあった行」を知るために拾う。
+   tool_use の id で重複を除く（再開したセッションは前の行を写すことがある）。 */
+const USE_NAMES = new Set(['Edit', 'MultiEdit', 'Write', 'Read']);
+const RX_NUMBERED = /^\s*\d+(?:→|\t)/;
+const LOG_SKIP_DIRS = new Set(['node_modules', '.git', 'plugins', 'shell-snapshots', 'statsig', 'todos', 'debug', 'file-history', 'session-env', 'backups', 'ide']);
+function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0 }; }
+function toolResultText(content){
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map(x => (x && typeof x.text === 'string') ? x.text : '').join('');
+  return '';
+}
+function handleLogLine(line, acc){
+  acc.lines++;
+  if (line.length < 40) return;
+  if (line.indexOf('tool_use') < 0 && line.indexOf('tool_result') < 0) return;
+  let o;
+  try { o = JSON.parse(line); } catch (e) { acc.bad++; return; }
+  if (!o || typeof o !== 'object' || !o.message || typeof o.message !== 'object') return;
+  const c = o.message.content;
+  if (!Array.isArray(c)) return;
+  if (o.type === 'assistant') {
+    const ts = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
+    for (const b of c) {
+      if (!b || b.type !== 'tool_use' || !USE_NAMES.has(b.name) || typeof b.id !== 'string') continue;
+      if (acc.uses.has(b.id)) continue;
+      const inp = b.input && typeof b.input === 'object' ? b.input : {};
+      acc.uses.set(b.id, { id: b.id, name: b.name, input: inp, ts, sid: typeof o.sessionId === 'string' ? o.sessionId : '', cwd: typeof o.cwd === 'string' ? normPath(o.cwd) : '' });
+    }
+  } else if (o.type === 'user') {
+    for (const b of c) {
+      if (!b || b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') continue;
+      if (acc.results.has(b.tool_use_id)) continue;
+      // 使う所だけ残す（Bash の出力などを全部ためるとログが大きい時に重い）
+      const text = toolResultText(b.content);
+      const t = o.toolUseResult;
+      let tur = null;
+      if (t && typeof t === 'object') {
+        tur = {};
+        if (typeof t.type === 'string') tur.type = t.type;
+        if (typeof t.originalFile === 'string') tur.originalFile = t.originalFile;
+        if (t.file && typeof t.file === 'object' && typeof t.file.content === 'string') tur.file = { content: t.file.content };
+      }
+      acc.results.set(b.tool_use_id, { isError: b.is_error === true, text: RX_NUMBERED.test(text) ? text : '', tur });
+    }
+  }
+}
+
+/* Read の結果から行を取り出す。toolUseResult.file.content があればそれ、無ければ「番号→行」の形から番号を外す。 */
+function readContent(res){
+  const f = res.tur && res.tur.file;
+  if (f && typeof f.content === 'string') return f.content;
+  const t = res.text || '';
+  if (!RX_NUMBERED.test(t)) return '';
+  return t.split('\n').map(l => l.replace(RX_NUMBERED, '')).join('\n');
+}
+
+/* ---------- 突き合わせ（本体） ----------
+   1. Edit/Write/Read を時刻順に適用して、ファイルごとに「Claude が書いた行」を集める
+      Edit：new 側にあって old 側に無い行を足す。old 側にあって new 側に無い行は「Claude が後で消した」印
+      Write：中身の行のうち、それまでに Read で見えていた行（と originalFile の行）を除いて足す。前に書いた行で今回の中身に無いものは「Claude が後で消した」印
+   2. ログの絶対パスと、落としたフォルダの相対パスを末尾一致で照合し、一番多く一致した場所を root にする
+   3. root の下のファイルごとに、残った／Claude が書き直した／人が消した を数える */
+function buildEvents(acc){
+  const evs = [];
+  for (const u of acc.uses.values()) if (Number.isFinite(u.ts)) evs.push(u);
+  evs.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return evs;
+}
+function applyEvents(evs, acc, strict){
+  const claude = new Map(), known = new Map();
+  const knownAdd = (p, keys) => { let s = known.get(p); if (!s) { s = new Set(); known.set(p, s); } for (const k of keys) s.add(k); };
+  const claudeAdd = (p, k, ev) => {
+    let m = claude.get(p); if (!m) { m = new Map(); claude.set(p, m); }
+    const rec = m.get(k);
+    if (rec) rec.removed = false; else m.set(k, { ts: ev.ts, sid: ev.sid, removed: false });
+  };
+  const claudeRemove = (p, k) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) rec.removed = true; };
+  const applyEdit = (p, oldS, newS, ev) => {
+    const oldK = new Set(lineKeys(oldS, strict)), newK = new Set(lineKeys(newS, strict));
+    for (const k of newK) if (!oldK.has(k)) claudeAdd(p, k, ev);
+    for (const k of oldK) if (!newK.has(k)) claudeRemove(p, k);
+    knownAdd(p, newK);
+  };
+  const applied = [];
+  for (const ev of evs) {
+    const res = acc.results.get(ev.id);
+    const p = typeof ev.input.file_path === 'string' ? normPath(ev.input.file_path) : '';
+    if (!p) continue;
+    if (ev.name === 'Read') { if (res && !res.isError) { const t = readContent(res); if (t) knownAdd(p, lineKeys(t, strict)); } continue; }
+    if (!res || res.isError) continue;
+    // Edit の結果に編集前の全文（originalFile）があれば、「元からあった行」として覚えておく（後の Write で Claude の行に数えないため）
+    if ((ev.name === 'Edit' || ev.name === 'MultiEdit') && res.tur && typeof res.tur.originalFile === 'string') knownAdd(p, lineKeys(res.tur.originalFile, strict));
+    if (ev.name === 'Edit') {
+      if (typeof ev.input.new_string !== 'string') continue;
+      applyEdit(p, typeof ev.input.old_string === 'string' ? ev.input.old_string : '', ev.input.new_string, ev);
+    } else if (ev.name === 'MultiEdit') {
+      if (!Array.isArray(ev.input.edits)) continue;
+      for (const e of ev.input.edits) if (e && typeof e.new_string === 'string') applyEdit(p, typeof e.old_string === 'string' ? e.old_string : '', e.new_string, ev);
+    } else if (ev.name === 'Write') {
+      if (typeof ev.input.content !== 'string') continue;
+      const cur = new Set(lineKeys(ev.input.content, strict));
+      let pre = new Set(known.get(p) || []);
+      const tur = res.tur;
+      if (tur && tur.type === 'create') pre = new Set();
+      else if (tur && typeof tur.originalFile === 'string') for (const k of lineKeys(tur.originalFile, strict)) pre.add(k);
+      for (const k of cur) if (!pre.has(k)) claudeAdd(p, k, ev);
+      const m = claude.get(p);
+      if (m) for (const [k, rec] of m) if (!cur.has(k)) rec.removed = true;
+      known.set(p, new Set(cur));
+    } else continue;
+    applied.push({ path: p, ts: ev.ts, sid: ev.sid, name: ev.name, cwd: ev.cwd });
+  }
+  return { claude, applied };
+}
+const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/* ログの絶対パスと、落としたフォルダの相対パスを末尾で照合して root を決める。
+   候補が複数ある時の順＝一致したファイルの数 → ログの作業フォルダ（cwd）そのもの → cwd の上にある場所 → 短い方 → 文字列順。
+   （同数の時に深い方を選ぶと、index.ts と src/index.ts の両方がある時に src 側を root にしてしまう）
+   触ったファイルが今のフォルダに1つも無い時（全部消えた・名前が変わった）は、フォルダ名が cwd の末尾と同じ時だけ cwd を root にする。 */
+function findRoot(claude, project, cwds, projectName){
+  const byBase = new Map();
+  for (const rel of project.keys()) { const b = baseName(rel); let a = byBase.get(b); if (!a) { a = []; byBase.set(b, a); } a.push(rel); }
+  const votes = new Map();
+  for (const p of claude.keys()) {
+    const cands = byBase.get(baseName(p)) || [];
+    for (const rel of cands) {
+      if (p.length > rel.length && p.endsWith('/' + rel)) { const root = p.slice(0, p.length - rel.length - 1); votes.set(root, (votes.get(root) || 0) + 1); }
+    }
+  }
+  const cwdList = [...cwds.keys()];
+  const rank = root => cwds.has(root) ? 2 : (cwdList.some(c => c.startsWith(root + '/')) ? 1 : 0);
+  let best = null, bestN = 0, bestRank = -1;
+  for (const [root, n] of votes) {
+    const r = rank(root);
+    if (best === null || n > bestN || (n === bestN && (r > bestRank || (r === bestRank && (root.length < best.length || (root.length === best.length && root < best)))))) { best = root; bestN = n; bestRank = r; }
+  }
+  let ambiguous = false;
+  for (const [root, n] of votes) if (root !== best && n === bestN && rank(root) === bestRank) ambiguous = true;
+  let from = best ? 'files' : '';
+  if (!best) {
+    const sorted = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0]));
+    for (const [c] of sorted) if (projectName && baseName(c) === projectName) { best = c; from = 'cwd'; break; }
+  }
+  return { root: best, matched: bestN, candidates: votes.size, ambiguous, from };
+}
+
+const RX_SECRET = /(sk|pk|ghp|gho|ghs|xox[abp]|AKIA|AIza)[-_A-Za-z0-9]{8,}|-----BEGIN|api[_-]?key|secret|token|passw|Bearer\s|[A-Za-z0-9+/=]{32,}|[0-9a-f]{32,}/i;
+const utf16len = s => s.length;
+function pickExample(cands){
+  // cands: [{key, file}]。秘密らしい行と極端な長さを除き、長い順→文字列順→ファイル名順で1つ
+  const ok = cands.filter(c => { const n = utf16len(c.key); return n >= 12 && n <= 72 && !RX_SECRET.test(c.key); });
+  ok.sort((a, b) => utf16len(b.key) - utf16len(a.key) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return ok.length ? ok[0] : null;
+}
+
+function analyzeParsed(acc, project, projectName, strict){
+  const evs = buildEvents(acc);
+  const { claude, applied } = applyEvents(evs, acc, strict);
+  const cwds = new Map();
+  for (const a of applied) if (a.cwd) cwds.set(a.cwd, (cwds.get(a.cwd) || 0) + 1);
+  const cwdTop = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).map(e => e[0])[0] || '';
+  const { root, matched, candidates, ambiguous, from } = findRoot(claude, project, cwds, projectName);
+  const R = {
+    sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous, cwdTop,
+    logFiles: acc.files, logLines: acc.lines, logBad: acc.bad, uses: acc.uses.size, edits: 0, sessions: 0,
+    projectFiles: project.size, projectLines: 0, otherProjectFiles: 0, missingFiles: [],
+    written: 0, alive: 0, rewritten: 0, human: 0, aiLines: 0,
+    period: null, files: [], top: [], examples: { alive: null, human: null }, rootCandidates: candidates, rootMatched: matched,
+  };
+  if (!root) return R;
+  const prefix = root + '/';
+  const sids = new Set();
+  let tmin = Infinity, tmax = -Infinity;
+  for (const a of applied) { if (!a.path.startsWith(prefix)) continue; R.edits++; sids.add(a.sid); if (a.ts < tmin) tmin = a.ts; if (a.ts > tmax) tmax = a.ts; }
+  R.sessions = sids.size;
+  if (R.edits) R.period = { start: dateKey(new Date(tmin)), end: dateKey(new Date(tmax)), days: daysBetween(dateKey(new Date(tmin)), dateKey(new Date(tmax))) + 1 };
+  const aliveC = [], humanC = [];
+  const seenRel = new Set();
+  for (const [p, m] of claude) {
+    if (!p.startsWith(prefix)) { R.otherProjectFiles++; continue; }
+    const rel = p.slice(prefix.length);
+    seenRel.add(rel);
+    const text = project.get(rel);
+    // 行は「種類」で数える（同じ内容の行は1つ）。Claude の行も今の行も同じ数え方＝AI率の分子は「残った」と同じ数
+    const curSet = text === undefined ? new Set() : new Set(lineKeys(text, strict));
+    const row = { file: rel, exists: text !== undefined, lines: curSet.size, written: m.size, alive: 0, rewritten: 0, human: 0, ai: 0 };
+    for (const [k, rec] of m) {
+      if (curSet.has(k)) { row.alive++; aliveC.push({ key: k, file: rel }); }
+      else if (rec.removed) row.rewritten++;
+      else { row.human++; humanC.push({ key: k, file: rel }); }
+    }
+    row.ai = row.alive;
+    R.written += row.written; R.alive += row.alive; R.rewritten += row.rewritten; R.human += row.human; R.aiLines += row.ai;
+    if (text === undefined) R.missingFiles.push({ file: rel, exists: false, written: row.written, rewritten: row.rewritten, human: row.human });
+    else R.files.push(row);
+  }
+  for (const [rel, text] of project) {
+    const n = new Set(lineKeys(text, strict)).size;
+    R.projectLines += n;
+    if (!seenRel.has(rel)) R.files.push({ file: rel, exists: true, lines: n, written: 0, alive: 0, rewritten: 0, human: 0, ai: 0 });
+  }
+  R.files.sort((a, b) => b.written - a.written || b.lines - a.lines || cmpStr(a.file, b.file));
+  R.missingFiles.sort((a, b) => b.written - a.written || cmpStr(a.file, b.file));
+  assignAliases(R);
+  R.top = [...R.files, ...R.missingFiles].filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written || cmpStr(a.file, b.file)).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: f.exists !== false }));
+  R.examples = { alive: pickExample(aliveC), human: pickExample(humanC) };
+  return R;
+}
+/* ファイル名を隠す時の呼び名（A, B, … Z, AA, AB …）。Claude が書いた行が多い順に振る＝カードと表で同じ名前になる */
+function aliasOf(i){ let s = ''; i += 1; while (i > 0) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; }
+function assignAliases(R){
+  let i = 0;
+  for (const f of R.files) { if (f.written > 0) { const ext = /\.([A-Za-z0-9]{1,8})$/.exec(f.file); f.alias = 'ファイル' + aliasOf(i++) + (ext ? '.' + ext[1] : ''); } else f.alias = ''; }
+  for (const f of R.missingFiles) { const ext = /\.([A-Za-z0-9]{1,8})$/.exec(f.file); f.alias = 'ファイル' + aliasOf(i++) + (ext ? '.' + ext[1] : ''); }
+}
+const pad2 = n => String(n).padStart(2, '0');
+const dateKey = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+function daysBetween(a, b){
+  const [y1, m1, d1] = a.split('-').map(Number), [y2, m2, d2] = b.split('-').map(Number);
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+}
+const rate = (a, b) => b > 0 ? a / b : 0;
+
+/* ---------- 判定と所見 ---------- */
+function judge(R){
+  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human, w);
+  let t;
+  if (w < 30) t = 'まだ少ない';
+  else if (sh >= 0.35) t = '赤ペン先生';
+  else if (sr >= 0.4) t = '推敲型';
+  else if (sa >= 0.8) t = '全面信頼';
+  else t = '共同執筆';
+  const lines = [];
+  if (w) {
+    lines.push(`Claude が書いた${fmt(w)}行のうち、${fmt(R.alive)}行がそのまま残り、${fmt(R.rewritten)}行は Claude 自身が書き直し、${fmt(R.human)}行は人が消しました。`);
+    if (R.top.length) lines.push(`いちばん手が入ったのは ${baseName(R.top[0].file)}（${fmt(R.top[0].human)}行）。`);
+  } else lines.push('この期間に Claude が書いた行は見つかりませんでした。');
+  return { title: t, comments: lines };
+}
+
+/* ---------- 見本（架空のデータ） ---------- */
+function sampleResult(){
+  const files = [
+    ['src/app/api/notes/route.ts', 412, 388, 236, 92, 60], ['src/components/Editor.tsx', 866, 812, 512, 230, 70],
+    ['src/lib/db.ts', 210, 198, 140, 40, 18], ['src/lib/auth.ts', 188, 150, 61, 20, 69], ['src/app/page.tsx', 240, 221, 170, 31, 20],
+    ['src/components/Sidebar.tsx', 302, 260, 180, 70, 10], ['src/hooks/useNotes.ts', 144, 144, 120, 24, 0], ['src/styles/globals.css', 390, 120, 96, 12, 12],
+    ['README.md', 96, 70, 52, 8, 10], ['src/lib/search.ts', 230, 210, 128, 72, 10], ['scripts/seed.ts', 88, 88, 60, 20, 8], ['src/app/layout.tsx', 72, 40, 31, 9, 0],
+  ].map(([file, lines, written, alive, rewritten, human]) => ({ file, exists: true, lines, written, alive, rewritten, human, ai: alive }));
+  const sum = k => files.reduce((a, f) => a + f[k], 0);
+  const R = {
+    sample: true, strict: false, projectName: 'note-app', root: '/Users/you/dev/note-app', rootFrom: 'files', rootAmbiguous: false, cwdTop: '/Users/you/dev/note-app',
+    logFiles: 48, logLines: 92140, logBad: 0, uses: 1860, edits: 1204, sessions: 42,
+    projectFiles: 86, projectLines: 9860, otherProjectFiles: 12, missingFiles: [{ file: 'src/lib/old-sync.ts', exists: false, written: 140, rewritten: 0, human: 140 }],
+    written: sum('written') + 140, alive: sum('alive'), rewritten: sum('rewritten'), human: sum('human') + 140, aiLines: sum('ai'),
+    period: { start: '2026-09-20', end: '2026-10-20', days: 31 }, files, top: [], rootCandidates: 1, rootMatched: 12,
+    examples: { alive: { key: 'export async function listNotes(userId: string) {', file: 'src/lib/db.ts' }, human: { key: 'const notes = await fetchAllNotesWithoutPaging();', file: 'src/lib/old-sync.ts' } },
+  };
+  R.projectLines = files.reduce((a, f) => a + f.lines, 0) + 4312;
+  R.files.sort((a, b) => b.written - a.written || b.lines - a.lines);
+  assignAliases(R);
+  R.top = [...files, ...R.missingFiles].filter(f => f.human > 0).sort((a, b) => b.human - a.human || b.written - a.written).slice(0, 3).map(f => ({ file: f.file, alias: f.alias, human: f.human, written: f.written, exists: f.exists !== false }));
+  return R;
+}
+
+/* ---------- カード（Canvas） ---------- */
+const GOTHIC = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Noto Sans JP","Noto Sans CJK JP","Meiryo",sans-serif';
+const NUM = '"Helvetica Neue","SF Pro Display",Helvetica,Arial,"Hiragino Sans","Noto Sans JP",sans-serif';
+const MONO = 'ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono CJK JP",monospace';
+const P = { bg0: '#0B1020', bg1: '#121B33', panel: '#171F38', hair: '#2B3552', ink: '#F2F5FF', sub: '#98A3BF', alive: '#7CF0B2', rewrite: '#FFC86B', human: '#FF8A7A', glow: 'rgba(124,240,178,0.10)' };
+
+function fitFont(x, text, weight, px, fam, maxW, minPx){
+  let size = px;
+  x.font = `${weight} ${size}px ${fam}`;
+  while (size > (minPx || 10) && x.measureText(text).width > maxW) { size -= 1; x.font = `${weight} ${size}px ${fam}`; }
+  return size;
+}
+function wrapJa(x, text, maxW){
+  const out = [];
+  let line = '';
+  const noStart = '、。，．・：；！？」』）】〕〉》ー々ぁぃぅぇぉっゃゅょァィゥェォッャュョ%）';
+  for (const ch of text) {
+    const test = line + ch;
+    if (x.measureText(test).width > maxW && line) {
+      if (noStart.includes(ch)) { out.push(test); line = ''; continue; }
+      out.push(line); line = ch;
+    } else line = test;
+  }
+  if (line) out.push(line);
+  return out;
+}
+function ellipsize(x, text, maxW){
+  if (x.measureText(text).width <= maxW) return text;
+  let s = text;
+  while (s.length > 1 && x.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+  return s + '…';
+}
+function rrect(x, x0, y0, w, h, r){
+  x.beginPath(); x.moveTo(x0 + r, y0); x.arcTo(x0 + w, y0, x0 + w, y0 + h, r); x.arcTo(x0 + w, y0 + h, x0, y0 + h, r); x.arcTo(x0, y0 + h, x0, y0, r); x.arcTo(x0, y0, x0 + w, y0, r); x.closePath();
+}
+function drawCard(R, opts){
+  const W = 1080, H = 1350;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  const J = judge(R);
+  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human, w);
+  const ai = rate(R.aiLines, R.projectLines);
+
+  // 背景
+  const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, P.bg0); g.addColorStop(1, P.bg1);
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const rg = x.createRadialGradient(140, 420, 10, 140, 420, 720); rg.addColorStop(0, P.glow); rg.addColorStop(1, 'rgba(124,240,178,0)');
+  x.fillStyle = rg; x.fillRect(0, 0, W, H);
+  x.strokeStyle = P.hair; x.lineWidth = 1.5; rrect(x, 28, 28, W - 56, H - 56, 26); x.stroke();
+
+  const text = (s, tx, ty, font, color, align = 'left', base = 'middle') => { x.font = font; x.fillStyle = color; x.textAlign = align; x.textBaseline = base; x.fillText(s, tx, ty); };
+  const L = 64, Rr = W - 64, CW = Rr - L;
+
+  // 見出し行
+  text('C L A U D E   C O D E   生 存 率', L, 88, `700 20px ${GOTHIC}`, P.sub);
+  const per = R.period ? `${R.period.start.replace(/-/g, '.')} – ${R.period.end.replace(/-/g, '.')} ・ ${R.period.days}日` : '記録なし';
+  text(per, Rr, 88, `600 20px ${NUM}`, P.sub, 'right');
+  if (!opts.hideProject && R.projectName) {
+    const nm = ellipsize(x, R.projectName, 600);
+    text(nm, L, 132, `700 30px ${GOTHIC}`, P.ink);
+  }
+
+  // 主役の数字
+  text(w ? `Claude が書いた ${fmt(w)} 行のうち、今も残っている行` : 'この期間に Claude が書いた行は見つかりませんでした', L, 214, `600 30px ${GOTHIC}`, P.ink);
+  const bigStr = w ? String(Math.round(sa * 100)) : '—';
+  x.font = `800 300px ${NUM}`;
+  const bigW = x.measureText(bigStr).width;
+  text(bigStr, L - 6, 468, `800 300px ${NUM}`, P.alive, 'left', 'alphabetic');
+  if (w) text('%', L + bigW + 10, 468, `700 120px ${NUM}`, P.alive, 'left', 'alphabetic');
+  text('生存率', Rr, 440, `700 30px ${GOTHIC}`, P.sub, 'right', 'alphabetic');
+  text('そのまま残っている行の割合', Rr, 476, `500 20px ${GOTHIC}`, P.sub, 'right', 'alphabetic');
+
+  // 3分類のバー
+  const bY = 516, bH = 40;
+  x.save(); rrect(x, L, bY, CW, bH, 12); x.clip();
+  x.fillStyle = P.hair; x.fillRect(L, bY, CW, bH);
+  if (w) {
+    let cx = L;
+    for (const [r, col] of [[sa, P.alive], [sr, P.rewrite], [sh, P.human]]) { const ww = CW * r; x.fillStyle = col; x.fillRect(cx, bY, Math.ceil(ww), bH); cx += ww; }
+  }
+  x.restore();
+  // 凡例（幅に収まらなければ2段）
+  const legend = [['残った', R.alive, sa, P.alive], ['Claude が自分で書き直した', R.rewritten, sr, P.rewrite], ['人が消した・直した', R.human, sh, P.human]];
+  const legW = legend.map(([lab, n, r]) => { x.font = `600 22px ${GOTHIC}`; const a = x.measureText(lab + '  ').width; x.font = `600 22px ${NUM}`; return [a, x.measureText(`${fmt(n)}行 ${pct(r)}`).width]; });
+  const legTotal = legW.reduce((a, [p, q]) => a + 28 + p + q + 34, 0);
+  const twoRows = legTotal > CW + 10;
+  let lx = L, ly = 596;
+  legend.forEach(([lab, n, r, col], i) => {
+    if (twoRows && i === 2) { lx = L; ly += 36; }
+    x.fillStyle = col; rrect(x, lx, ly - 9, 18, 18, 5); x.fill();
+    text(lab + '  ', lx + 28, ly, `600 22px ${GOTHIC}`, P.ink);
+    text(`${fmt(n)}行 ${pct(r)}`, lx + 28 + legW[i][0], ly, `600 22px ${NUM}`, P.sub);
+    lx += 28 + legW[i][0] + legW[i][1] + 34;
+  });
+
+  // 2つのタイル
+  const tY = 678, tH = 150, tW = (CW - 20) / 2;
+  const tile = (x0, title, big, unit, sub1) => {
+    x.fillStyle = P.panel; rrect(x, x0, tY, tW, tH, 18); x.fill();
+    text(title, x0 + 24, tY + 34, `600 19px ${GOTHIC}`, P.sub);
+    text(big, x0 + 22, tY + 104, `800 58px ${NUM}`, P.ink, 'left', 'alphabetic');
+    if (unit) { x.font = `800 58px ${NUM}`; const bw = x.measureText(big).width; text(unit, x0 + 22 + bw + 8, tY + 104, `600 24px ${GOTHIC}`, P.sub, 'left', 'alphabetic'); }
+    const s1 = fitFont(x, sub1, 500, 17, GOTHIC, tW - 48, 12);
+    text(sub1, x0 + 24, tY + 130, `500 ${s1}px ${GOTHIC}`, P.sub);
+  };
+  const touched = R.files.filter(f => f.written > 0).length + R.missingFiles.length;
+  tile(L, 'AI率（この期間に Claude が書いた分）', R.projectLines ? pct(ai) : '—', '', `今のコード ${fmt(R.projectLines)} 行のうち ${fmt(R.aiLines)} 行`);
+  tile(L + tW + 20, 'ログの記録', fmt(R.edits), '回の編集', `${fmt(R.sessions)} セッション ・ ${fmt(touched)} ファイル ・ ${R.period ? R.period.days + '日' : '—'}`);
+
+  // ファイルの地層（今の行数に比例した幅・AI率で明るさ）
+  const sY = 852, sH = 18;
+  const rows = R.files.filter(f => f.lines > 0).slice(0, 240);
+  const totalL = rows.reduce((a, f) => a + f.lines, 0);
+  x.save(); rrect(x, L, sY, CW, sH, 6); x.clip();
+  x.fillStyle = P.hair; x.fillRect(L, sY, CW, sH);
+  if (totalL) {
+    let cx = L;
+    const sorted = [...rows].sort((a, b) => rate(b.ai, b.lines) - rate(a.ai, a.lines) || b.lines - a.lines);
+    for (const f of sorted) {
+      const ww = Math.max(2, CW * f.lines / totalL);
+      const t = rate(f.ai, f.lines);
+      x.fillStyle = t === 0 ? P.hair : `rgba(124,240,178,${(0.18 + 0.82 * t).toFixed(3)})`;
+      x.fillRect(cx, sY, ww - 1, sH); cx += ww;
+    }
+  }
+  x.restore();
+  text(`今のコードをファイルごとに並べた図 ・ 明るいほど Claude の行が多い（${fmt(rows.length)} ファイル）`, L, 892, `500 16px ${GOTHIC}`, P.sub);
+
+  // 人が消した行が多いファイル
+  text('人が消した行が多いファイル', L, 950, `700 24px ${GOTHIC}`, P.ink);
+  text('＝ 人が書き直した場所', Rr, 950, `500 20px ${GOTHIC}`, P.sub, 'right');
+  const rowY0 = 986, rowH = 54;
+  if (!R.top.length) text(w ? '人が消した行はありません。' : '—', L, rowY0 + 24, `500 22px ${GOTHIC}`, P.sub);
+  R.top.forEach((f, i) => {
+    const yy = rowY0 + i * rowH;
+    text(String(i + 1), L, yy + 26, `800 26px ${NUM}`, P.sub);
+    x.font = `600 24px ${MONO}`;
+    const nm = ellipsize(x, (opts.hideFiles ? f.alias : baseName(f.file)) + (f.exists ? '' : '（ファイルごと消えた）'), 470);
+    text(nm, L + 36, yy + 26, `600 24px ${MONO}`, P.ink);
+    const trackX = L + 540, trackW = CW - 540 - 170;
+    x.fillStyle = P.hair; rrect(x, trackX, yy + 18, trackW, 16, 5); x.fill();
+    const r = rate(f.human, f.written);
+    x.fillStyle = P.human; rrect(x, trackX, yy + 18, Math.max(6, trackW * r), 16, 5); x.fill();
+    text(`${fmt(f.human)} / ${fmt(f.written)}行`, Rr, yy + 26, `600 22px ${NUM}`, P.sub, 'right');
+  });
+
+  // 判定の箱（典型的な行を入れる時は、その2行も同じ箱に）
+  const pY = 1160, pH = 112;
+  x.fillStyle = P.panel; rrect(x, L, pY, CW, pH, 16); x.fill();
+  x.fillStyle = P.alive; rrect(x, L + 22, pY + 24, 10, pH - 48, 4); x.fill();
+  const withEx = opts.examples && (R.examples.alive || R.examples.human);
+  if (withEx) {
+    text(J.title, L + 50, pY + 30, `800 26px ${GOTHIC}`, P.ink);
+    let ey = pY + 64;
+    for (const [tag, ex, col] of [['残った行', R.examples.alive, P.alive], ['消えた行', R.examples.human, P.human]]) {
+      if (!ex) continue;
+      text(tag, L + 50, ey, `700 15px ${GOTHIC}`, col);
+      x.font = `500 18px ${MONO}`;
+      text(ellipsize(x, ex.key, CW - 190), L + 136, ey, `500 18px ${MONO}`, P.ink);
+      ey += 30;
+    }
+  } else {
+    text(J.title, L + 50, pY + 40, `800 30px ${GOTHIC}`, P.ink);
+    x.font = `500 19px ${GOTHIC}`;
+    const ln = wrapJa(x, J.comments[0], CW - 90).slice(0, 2);
+    ln.forEach((s, i) => text(s, L + 50, pY + 74 + i * 24, `500 19px ${GOTHIC}`, P.sub));
+  }
+
+  // 足元：測り方
+  const how = `測り方：Edit/Write で新しく入った行が、今も同じ行で残っている割合（${R.strict ? '空白もそのまま' : '空白違いは同じ'}・4文字未満は数えない・人が少し直した行は数えない＝下限）`;
+  const hs = fitFont(x, how, 500, 15, GOTHIC, CW, 11);
+  text(how, L, 1296, `500 ${hs}px ${GOTHIC}`, P.sub);
+  text('ログもコードも端末の外に出ていません', L, 1320, `500 15px ${GOTHIC}`, P.sub);
+  text('#ClaudeCode生存率', Rr, 1320, `700 19px ${NUM}`, P.sub, 'right');
+
+  if (R.sample) {
+    x.save();
+    x.translate(W / 2, H / 2 + 40); x.rotate(-0.32);
+    x.globalAlpha = 0.12;
+    text('見本', 0, 0, `900 250px ${GOTHIC}`, P.ink, 'center');
+    x.restore();
+    x.save();
+    x.translate(Rr - 188, 132);
+    x.strokeStyle = P.human; x.lineWidth = 2; rrect(x, 0, -18, 188, 34, 6); x.stroke();
+    text('見本（架空のデータ）', 94, 0, `700 17px ${GOTHIC}`, P.human, 'center');
+    x.restore();
+  }
+  return { canvas: cv, title: J.title, comments: J.comments };
+}
+
+/* ---------- 内訳（HTML） ---------- */
+const sec = (kicker, title, body, aside) => `<section class="sec"><header><span class="kicker">${kicker}</span><h2>${title}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</header>${body}</section>`;
+function stackHTML(R){
+  const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human, w);
+  return `<div class="big-line"><span class="n">${w ? pct1(sa) : '—'}</span><span class="l">Claude が書いた ${fmt(w)} 行のうち、そのまま残っている行</span></div>
+  <div class="stack"><div class="track" role="img" aria-label="残った${pct(sa)}、Claude が書き直した${pct(sr)}、人が消した${pct(sh)}"><span class="a" style="width:${(sa * 100).toFixed(2)}%"></span><span class="r" style="width:${(sr * 100).toFixed(2)}%"></span><span class="h" style="width:${(sh * 100).toFixed(2)}%"></span></div>
+  <ul class="legend"><li class="a"><i></i><span><b>${fmt(R.alive)}</b> 行 ${pct1(sa)}<br><small>残った</small></span></li><li class="r"><i></i><span><b>${fmt(R.rewritten)}</b> 行 ${pct1(sr)}<br><small>Claude が自分で書き直した</small></span></li><li class="h"><i></i><span><b>${fmt(R.human)}</b> 行 ${pct1(sh)}<br><small>人が消した・直した（ファイルごと消えた分を含む）</small></span></li></ul></div>
+  <p class="fine">「Claude が自分で書き直した」は、Claude が書いた行を、後の Edit の old 側や Write の書き換えで Claude 自身が消したもの。「人が消した・直した」は、どちらにも当たらず今のコードに無い行です（Bash のコマンドで消した場合もここに入ります）。</p>`;
+}
+function aiHTML(R){
+  const ai = rate(R.aiLines, R.projectLines);
+  return `<div class="big-line"><span class="n">${R.projectLines ? pct1(ai) : '—'}</span><span class="l">今のコード ${fmt(R.projectLines)} 行のうち、Claude が書いたまま残っている ${fmt(R.aiLines)} 行</span></div>
+  <p class="fine">${R.period ? `${R.period.start} 〜 ${R.period.end}（${R.period.days}日）のログにある分だけです。` : ''}それより前に Claude が書いた行や、人が少し直した行は「人の行」として数えています＝下限の値です。Anthropic が公表した「約9割」は自社製品のコードベースについての数字で、ここで出す行単位の下限値とは測り方が違います。</p>`;
+}
+function filesHTML(R, hide){
+  const rows = R.files.filter(f => f.written > 0).slice(0, 40);
+  const tr = rows.map(f => `<tr><td title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : f.file)}</td><td>${fmt(f.lines)}</td><td>${fmt(f.written)}</td><td>${fmt(f.alive)}</td><td>${fmt(f.rewritten)}</td><td>${fmt(f.human)}</td><td><span class="mini"><span style="width:${(rate(f.ai, f.lines) * 100).toFixed(1)}%"></span></span>${f.lines ? pct(rate(f.ai, f.lines)) : '—'}</td></tr>`).join('');
+  const miss = R.missingFiles.length ? `<h3 style="margin:14px 0 6px;font-size:13.5px;color:var(--muted)">ファイルごと消えた・名前が変わった</h3><ul class="rows">${R.missingFiles.slice(0, 12).map(f => `<li><span><code>${esc(hide ? f.alias : f.file)}</code></span><b>${fmt(f.written)}行</b></li>`).join('')}</ul><p class="fine">これらの行は、Claude が後で消した印があるものを除いて「人が消した」に数えています。名前を変えただけのファイルも、ここに入ります。</p>` : '';
+  return `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>今の行数</th><th>Claude が書いた</th><th>残った</th><th>書き直し</th><th>人が消した</th><th>AI率</th></tr></thead><tbody>${tr || '<tr><td colspan="7">Claude が書いた行があるファイルはありません</td></tr>'}</tbody></table></div>
+  <p class="fine">Claude が書いた行が多い順に、${rows.length < R.files.filter(f => f.written > 0).length ? '上位40件' : '全部'}。行数は、4文字未満や記号だけの行を除き、同じ内容の行を1つに数えた数です。</p>${miss}`;
+}
+function topHTML(R, hide){
+  if (!R.top.length) return '<p class="fine">人が消した行はありません。</p>';
+  const max = Math.max(...R.top.map(f => f.human), 1);
+  return '<ul class="bars">' + R.top.map(f => `<li><span class="name" title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : baseName(f.file))}${f.exists ? '' : '（消えた）'}</span><span class="track"><span class="fill" style="width:${Math.max(2, f.human / max * 100).toFixed(1)}%"></span></span><span class="n">${fmt(f.human)} / ${fmt(f.written)}</span></li>`).join('') + '</ul><p class="fine">人が消した行の多い順。右は「人が消した行 / Claude が書いた行」。ここが、人が書き直した場所＝レビューの急所です。</p>';
+}
+function recordHTML(R){
+  const li = (k, v) => `<li><span>${k}</span><b>${v}</b></li>`;
+  return `<div class="words"><div><ul class="rows">
+    ${li('ログのファイル', fmt(R.logFiles))}
+    ${li('読んだ行', fmt(R.logLines) + (R.logBad ? `（読めなかった行 ${fmt(R.logBad)}）` : ''))}
+    ${li('Edit・Write・Read の記録', fmt(R.uses))}
+    ${li('このプロジェクトへの編集', fmt(R.edits) + '回')}
+    ${li('セッション', fmt(R.sessions))}
+    ${li('期間', R.period ? `${R.period.start} 〜 ${R.period.end}（${R.period.days}日）` : '—')}
+  </ul></div><div><ul class="rows">
+    ${li('フォルダのファイル', fmt(R.projectFiles))}
+    ${li('今のコードの行数', fmt(R.projectLines))}
+    <li><span>ログ側の場所</span><code>${esc(R.root || '—')}</code></li>
+    ${li('他のプロジェクトのファイル（除外）', fmt(R.otherProjectFiles))}
+    ${li('照合に使ったファイル', fmt(R.rootMatched))}
+  </ul></div></div>
+  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方 → ログの作業フォルダ（cwd）と同じ方 → 浅い方、の順に選びます）` : ''}。${R.rootAmbiguous ? '<b>候補が同数で決めきれなかった</b>ので、上の順で選びました。違う場合は、リポジトリの一番上のフォルダを選び直してください。' : ''}${R.rootFrom === 'cwd' ? '<b>Claude が触ったファイルが今のフォルダに1つも無い</b>ので、ログの作業フォルダ（cwd）の名前がフォルダ名と同じことを根拠に場所を決めました。書いた行は全部「消えた」側に入ります。' : ''}</p>`;
+}
+function howHTML(R){
+  return `<p class="def"><b>測り方</b>：Claude Code の Edit／Write で<b>新しく入った行</b>（Edit の new 側にあって old 側に無い行。Write は、それまでに Read で見えていた行を除いた行）が、今も同じ行として残っている割合。</p>
+  <ul class="ul">
+    <li>行の比べ方：${R.strict ? '<b>厳密モード</b>＝行末の改行コードだけ除いて、そのまま比べます。' : '前後の空白を落とし、タブと連続する空白を1つの空白にそろえて比べます（厳密モードで切り替え）。'}</li>
+    <li>数えない行：前後の空白を除いて4文字未満の行、文字と数字を1つも含まない行（<code>}</code> や <code>);</code> など）、記号と予約語1つだけの行（<code>} else {</code>・<code>break;</code>・<code>return;</code> など）、閉じタグだけの行（<code>&lt;/div&gt;</code> など）。</li>
+    <li>行は「種類」で数えます＝同じ内容の行はファイルの中で1つに数え、Claude が書いた行も今の行も同じ数え方です（AI率の分子は「残った」と同じ数）。人が少し直した行は「残った」に入りません＝生存率も AI率も<b>下限</b>です。</li>
+    <li>拾わないもの：Bash のコマンドで書いたファイル（ヒアドキュメントなど）、NotebookEdit、ログの期間より前に書かれた行、結果がエラーになった Edit、結果の記録が無い Edit／Write。</li>
+    <li>Write で既存のファイルを丸ごと書き直した場合、それより前に Read していない行は Claude の行として数えます（過大になることがあります）。</li>
+    <li>ログは初期設定で30日より古いものが消えます。カードの期間は、手元に残っているログの範囲です。</li>
+  </ul>`;
+}
+function examplesHTML(R, hide){
+  const a = R.examples.alive, h = R.examples.human;
+  if (!a && !h) return '<p class="fine">載せられる行がありませんでした。</p>';
+  const li = (tag, cls, ex) => ex ? `<li><span class="tag ${cls}">${tag}</span><code>${esc(ex.key)}</code><small>${esc(hide ? '（ファイル名は隠しています）' : ex.file)}</small></li>` : '';
+  return `<ul class="ex">${li('残った行', 'a', a)}${li('人が消した行', 'h', h)}</ul><p class="fine">鍵や秘密らしい行は除いて、12〜72文字の中から長いものを1つ選んでいます。カードに載せるのは「典型的な行を1つずつ載せる」をオンにした時だけです。</p>`;
+}
+function renderDetails(R, opts){
+  const html = [
+    sec('生存率', '残った・書き直した・消した', stackHTML(R)),
+    sec('AI率', '今のコードのうち Claude の行', aiHTML(R)),
+    sec('急所', '人が消した行が多いファイル', topHTML(R, opts.hideFiles)),
+    sec('ファイル', 'ファイルごとの内訳', filesHTML(R, opts.hideFiles)),
+    sec('典型', '典型的な行', examplesHTML(R, opts.hideFiles)),
+    sec('記録', '読み込んだものと照合', recordHTML(R)),
+    sec('測り方', '何を数えて、何を数えないか', howHTML(R)),
+  ].join('');
+  $('#details').innerHTML = html;
+}
+
+/* ---------- 共有 ---------- */
+function shareText(R){
+  const w = R.written;
+  const lines = [
+    'Claude Code のログと手元のコードを突き合わせました',
+    `・${R.period ? 'この' + R.period.days + '日間' : 'ログの期間'}に Claude が書いた行：${fmt(w)}`,
+    `・そのまま残っている：${pct(rate(R.alive, w))}`,
+    `・Claude が自分で書き直した：${pct(rate(R.rewritten, w))}`,
+    `・自分が消した・直した：${pct(rate(R.human, w))}`,
+    `・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`,
+    '#ClaudeCode生存率',
+  ];
+  if (TOOL_URL) lines.push(TOOL_URL);
+  return lines.join('\n');
+}
+
+/* ---------- 画面 ---------- */
+let current = sampleResult();
+let lastCanvas = null;
+let inputs = { acc: null, project: null, projectName: '' };   // 読み込み済みの生データ（厳密モードの切り替えで再計算する）
+const opts = () => ({ strict: $('#optStrict').checked, hideFiles: $('#optHideFiles').checked, hideProject: $('#optHideProject').checked, examples: $('#optExamples').checked });
+
+function renderCard(){
+  const o = opts();
+  const out = drawCard(current, o);
+  lastCanvas = out.canvas;
+  const img = $('#cardImg');
+  img.src = out.canvas.toDataURL('image/png');
+  img.alt = `生存率カード：Claude が書いた${fmt(current.written)}行のうち${pct(rate(current.alive, current.written))}が残っている。判定「${out.title}」。` + (current.sample ? '（見本・架空のデータ）' : '');
+  const txt = shareText(current);
+  $('#shareText').value = txt;
+  $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent(txt);
+}
+function renderAll(){
+  renderCard();
+  renderDetails(current, opts());
+  const pill = $('#statusPill'), st = $('#statusText');
+  if (current.sample) {
+    pill.textContent = '見本'; pill.className = 'pill';
+    st.textContent = '架空のデータで表示しています。ログとフォルダを入れると、あなたの生存率に変わります。';
+    $('#resetBtn').hidden = true;
+  } else {
+    pill.textContent = 'あなたのコード'; pill.className = 'pill mine';
+    st.textContent = `${fmt(current.edits)}回の編集と${fmt(current.projectFiles)}個のファイルから作りました。`;
+    $('#resetBtn').hidden = false;
+  }
+}
+function setError(msg){
+  const pill = $('#statusPill');
+  pill.textContent = '読めませんでした'; pill.className = 'pill err';
+  $('#statusText').textContent = msg;
+}
+function showProgress(label, i, n, ratio){
+  const box = $('#progress');
+  box.hidden = false;
+  $('#progressBar').style.width = Math.round(Math.min(1, ratio) * 100) + '%';
+  $('#progressText').textContent = `${label}　${fmt(i)} / ${fmt(n)} ファイル（${Math.round(Math.min(1, ratio) * 100)}%）`;
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+/* ログのフォルダ */
+async function readLogFile(file, acc, onChunk){
+  if (file.stream && typeof TextDecoderStream !== 'undefined') {
+    const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+    let buf = '', seen = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += value.length; buf += value;
+      const parts = buf.split('\n'); buf = parts.pop();
+      for (const line of parts) handleLogLine(line, acc);
+      onChunk(Math.min(seen, file.size));
+    }
+    if (buf) handleLogLine(buf, acc);
+  } else {
+    const text = await file.text();
+    for (const line of text.split('\n')) handleLogLine(line, acc);
+  }
+}
+async function loadLogs(files){
+  const acc = newLogAcc();
+  const total = files.reduce((a, f) => a + f.size, 0) || 1;
+  let doneBytes = 0, lastTick = performance.now();
+  for (let i = 0; i < files.length; i++) {
+    await readLogFile(files[i], acc, b => showProgress('ログを読み込み中', i, files.length, (doneBytes + b) / total));
+    doneBytes += files[i].size; acc.files++;
+    if (performance.now() - lastTick > 60) { await tick(); lastTick = performance.now(); }
+  }
+  return acc;
+}
+
+/* プロジェクトのフォルダ */
+const PROJ_SKIP_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', '.next', '.nuxt', '.output', '.svelte-kit', '.turbo', '.cache', 'coverage', 'vendor', '__pycache__', '.venv', 'venv', 'target', 'Pods', 'DerivedData', '.idea', '.vscode', '.claude', '.pytest_cache', '.mypy_cache', '.parcel-cache', '.gradle', 'bin', 'obj']);
+const SKIP_FILES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'Cargo.lock', 'poetry.lock', 'Pipfile.lock', 'Gemfile.lock', 'composer.lock', 'go.sum', '.DS_Store', 'Thumbs.db']);
+const BIN_EXT = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|psd|svg|woff2?|ttf|otf|eot|mp[34]|m4a|wav|ogg|webm|mov|avi|zip|gz|tgz|bz2|xz|7z|rar|jar|war|pdf|wasm|exe|dll|so|dylib|class|pyc|pyo|o|a|lib|bin|dat|db|sqlite3?|lock|map|min\.js|min\.css|ipynb|pb|onnx|safetensors|ckpt|pt|npy|npz|parquet|keynote|numbers|pages|docx?|xlsx?|pptx?)$/i;
+const MAX_TEXT = 1.5 * 1024 * 1024;
+function projectFilter(rel, size){
+  const segs = rel.split('/');
+  const name = segs[segs.length - 1];
+  if (segs.slice(0, -1).some(s => PROJ_SKIP_DIRS.has(s))) return false;
+  if (SKIP_FILES.has(name) || BIN_EXT.test(name)) return false;
+  if (size > MAX_TEXT) return false;
+  return true;
+}
+function looksBinary(text){ return text.indexOf('\u0000') >= 0; }
+async function loadProject(files){
+  // files: [{rel, file}]
+  const project = new Map();
+  let lastTick = performance.now();
+  for (let i = 0; i < files.length; i++) {
+    const { rel, file } = files[i];
+    showProgress('フォルダを読み込み中', i, files.length, (i + 1) / files.length);
+    let text;
+    try { text = await file.text(); } catch (e) { continue; }
+    if (looksBinary(text.slice(0, 4096))) continue;
+    project.set(rel, text);
+    if (performance.now() - lastTick > 60) { await tick(); lastTick = performance.now(); }
+  }
+  return project;
+}
+/* 落とされたのが1つのフォルダなら、その名前を外して相対パスにする。中身を選んで落とした時（先頭が揃わない）は外さない */
+function topFolder(paths){
+  const firsts = new Set();
+  let deep = false;
+  for (const p of paths) { const segs = p.split('/').filter(Boolean); if (!segs.length) continue; firsts.add(segs[0]); if (segs.length >= 2) deep = true; }
+  return (firsts.size === 1 && deep) ? [...firsts][0] : '';
+}
+
+let busy = false;
+async function handleLogs(list){
+  const files = [...list].filter(f => /\.jsonl$/i.test(f.name) && !(f._path || f.webkitRelativePath || '').split('/').some(seg => LOG_SKIP_DIRS.has(seg)));
+  if (!files.length) { setError('JSONL ファイルが見つかりませんでした。~/.claude/projects フォルダか、その中身を選んでください。'); return; }
+  if (busy) return; busy = true;
+  try {
+    const acc = await loadLogs(files);
+    if (!acc.uses.size) { setError(`${fmt(files.length)}個のログを読みましたが、Edit・Write の記録が見つかりませんでした。`); return; }
+    inputs.acc = acc;
+    const z = $('#zoneLog'); z.classList.add('done');
+    const lo = $('#logLoaded'); lo.hidden = false;
+    lo.textContent = `読み込み済み：${fmt(acc.files)}ファイル・Edit／Write／Read の記録 ${fmt(acc.uses.size)}件`;
+    await maybeAnalyze();
+  } catch (e) { setError('ログの読み込みの途中で止まりました：' + (e && e.message ? e.message : String(e))); }
+  finally { busy = false; $('#progress').hidden = true; }
+}
+async function handleProject(list){
+  const all = [...list].map(f => ({ p: normPath(f._path || f.webkitRelativePath || f.name), file: f }));
+  const top = topFolder(all.map(a => a.p));
+  const items = [];
+  for (const { p, file } of all) {
+    const segs = p.split('/').filter(Boolean);
+    const rel = (top ? segs.slice(1) : segs).join('/');
+    if (!rel || !projectFilter(rel, file.size)) continue;
+    items.push({ rel, file });
+  }
+  if (!items.length) { setError('読めるテキストファイルが見つかりませんでした。プロジェクトのフォルダ（リポジトリの一番上）を選んでください。'); return; }
+  if (busy) return; busy = true;
+  try {
+    const project = await loadProject(items);
+    inputs.project = project; inputs.projectName = top;
+    const z = $('#zoneProj'); z.classList.add('done');
+    const lo = $('#projLoaded'); lo.hidden = false;
+    lo.textContent = `読み込み済み：${top ? top + '・' : ''}${fmt(project.size)}ファイル`;
+    await maybeAnalyze();
+  } catch (e) { setError('フォルダの読み込みの途中で止まりました：' + (e && e.message ? e.message : String(e))); }
+  finally { busy = false; $('#progress').hidden = true; }
+}
+async function maybeAnalyze(){
+  if (!inputs.acc || !inputs.project) {
+    const pill = $('#statusPill'); pill.textContent = 'あと1つ'; pill.className = 'pill mine';
+    $('#statusText').textContent = inputs.acc ? 'ログを読みました。次にプロジェクトのフォルダを入れてください。' : 'フォルダを読みました。次に Claude Code のログを入れてください。';
+    return;
+  }
+  showProgress('突き合わせ中', 1, 1, 1);
+  await tick();
+  const R = analyzeParsed(inputs.acc, inputs.project, inputs.projectName, $('#optStrict').checked);
+  if (!R.root) {
+    setError(`ログに記録されたファイルがこのフォルダに1つも無く、フォルダ名（${inputs.projectName || '—'}）もログの作業フォルダ${R.cwdTop ? `（${baseName(R.cwdTop)}）` : ''}と合いませんでした。Claude Code で作業したリポジトリの一番上のフォルダを選んでください。`);
+    return;
+  }
+  current = R; renderAll();
+}
+
+/* ドロップ・選択 */
+async function collectEntries(entries){
+  const out = [];
+  const walk = async (entry, path) => {
+    if (entry.isFile) {
+      const f = await new Promise((res, rej) => entry.file(res, rej));
+      try { Object.defineProperty(f, '_path', { value: path + entry.name }); } catch (e) {}
+      out.push(f);
+    } else if (entry.isDirectory) {
+      if (LOG_SKIP_DIRS.has(entry.name) || PROJ_SKIP_DIRS.has(entry.name)) return;
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e, path + entry.name + '/');
+      }
+    }
+  };
+  for (const e of entries) await walk(e, '');
+  return out;
+}
+const zones = [$('#zoneLog'), $('#zoneProj')];
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { dragDepth++; zones.forEach(z => z.classList.add('over')); } });
+document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) zones.forEach(z => z.classList.remove('over')); });
+document.addEventListener('dragover', e => { e.preventDefault(); });
+document.addEventListener('drop', async e => {
+  e.preventDefault();
+  dragDepth = 0; zones.forEach(z => z.classList.remove('over'));
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  let files = [];
+  const items = dt.items ? [...dt.items] : [];
+  const entries = items.map(it => (it.kind === 'file' && it.webkitGetAsEntry) ? it.webkitGetAsEntry() : null).filter(Boolean);
+  if (entries.length) { try { files = await collectEntries(entries); } catch (err) { files = [...dt.files]; } }
+  else files = [...dt.files];
+  const onProj = e.target && e.target.closest && e.target.closest('#zoneProj');
+  const onLog = e.target && e.target.closest && e.target.closest('#zoneLog');
+  const hasJsonl = files.some(f => /\.jsonl$/i.test(f.name));
+  if (onLog || (!onProj && hasJsonl)) handleLogs(files); else handleProject(files);
+});
+$('#logInput').addEventListener('change', e => { handleLogs(e.target.files); e.target.value = ''; });
+$('#projInput').addEventListener('change', e => { handleProject(e.target.files); e.target.value = ''; });
+
+$('#optStrict').addEventListener('change', async () => {
+  if (current.sample) { current.strict = $('#optStrict').checked; renderAll(); return; }
+  if (inputs.acc && inputs.project) await maybeAnalyze();
+});
+for (const id of ['#optHideFiles', '#optHideProject', '#optExamples']) $(id).addEventListener('change', () => { renderCard(); renderDetails(current, opts()); });
+$('#resetBtn').addEventListener('click', () => { current = sampleResult(); renderAll(); });
+
+async function copyText(text, btn){
+  const done = () => { const o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(() => { btn.textContent = o; }, 1600); };
+  try { await navigator.clipboard.writeText(text); done(); }
+  catch (e) {
+    const ta = $('#shareText');
+    if (btn.id === 'copyText') { ta.focus(); ta.select(); btn.textContent = '選択しました。コピーしてください'; setTimeout(() => { btn.textContent = '投稿文をコピー'; }, 2400); }
+  }
+}
+$('#copyText').addEventListener('click', e => copyText($('#shareText').value, e.currentTarget));
+$('#shareText').addEventListener('input', () => { $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent($('#shareText').value); });
+document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+  const src = document.getElementById(b.dataset.copy);
+  navigator.clipboard.writeText(src.textContent).then(() => { b.textContent = 'コピー済み'; setTimeout(() => { b.textContent = 'コピー'; }, 1500); })
+    .catch(() => { const r = document.createRange(); r.selectNodeContents(src); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+}));
+
+if (STANDALONE) {
+  const btn = $('#saveImg');
+  btn.hidden = false;
+  $('#saveHint').textContent = '画像を保存して、Xの投稿に添えてください。スマホは画像の長押しでも保存できます。';
+  btn.addEventListener('click', () => {
+    if (!lastCanvas) return;
+    lastCanvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'claude-code-seizon.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
+  });
+}
+
+/* テストと再利用のための入口：文字列から同じ計算をする */
+function analyzeTexts(logs, project, projectName, strict){
+  const acc = newLogAcc();
+  for (const { text } of logs) {
+    const parts = String(text).split('\n');
+    if (parts.length && parts[parts.length - 1] === '') parts.pop();   // 末尾の改行の後ろは行に数えない（stream で読む時と同じ）
+    for (const line of parts) handleLogLine(line, acc);
+    acc.files++;
+  }
+  const pm = new Map();
+  for (const { rel, text } of project) if (projectFilter(rel, String(text).length) && !looksBinary(String(text).slice(0, 4096))) pm.set(normPath(rel), String(text));
+  return analyzeParsed(acc, pm, projectName || '', !!strict);
+}
+window.__seizon = { analyzeTexts, lineKeys, normLine, isTrivial, judge, get current(){ return current; }, get inputs(){ return inputs; } };
+renderAll();
+})();
+</script>

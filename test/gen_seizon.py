@@ -28,8 +28,8 @@ def asst(block, ts, sid="s1", cwd=ALPHA, mid="msg", out=100, **kw):
     return o
 
 def user_text(text, ts, sid="s1", cwd=ALPHA, as_list=False):
-    """最初の指示（頼み方の節で使う）。content は文字列か text ブロックの配列"""
-    content = [{"type": "text", "text": text}] if as_list else text
+    """最初の指示（頼み方の節で使う）。content は文字列か text ブロックの配列（text をリストで渡すと複数ブロック）"""
+    content = [{"type": "text", "text": t} for t in (text if isinstance(text, list) else [text])] if as_list or isinstance(text, list) else text
     return {"parentUuid": None, "isSidechain": False, "userType": "external", "cwd": cwd, "sessionId": sid, "version": "2.1.0", "type": "user",
             "message": {"role": "user", "content": content}, "uuid": U(), "timestamp": ts}
 
@@ -81,9 +81,14 @@ D_V1 = "const d1 = 1;\nconst d2 = 2;\nconst d3 = 3;\n"
 # ---------- ログ s1（alpha・2026-09-01 JST 23:00〜） ----------
 S1 = []
 # 最初の指示（s1）。s1 の assistant は 12 通・出力 100 ずつ＝1,200 トークン
+# /clear の記録とその出力は指示ではない＝最初の指示は次の行（頼み方の節の first）
+S1.append(user_text("<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>", "2026-09-01T13:58:00.000Z"))
+S1.append(user_text("<local-command-stdout></local-command-stdout>", "2026-09-01T13:58:01.000Z"))
 S1.append(user_text("a.ts に listNotes を足して、並びは updatedAt にして", "2026-09-01T13:59:00.000Z"))
 S1.append(asst(use("Write", "w_a", {"file_path": f"{ALPHA}/src/a.ts", "content": A_V1}), "2026-09-01T14:00:00.000Z", mid="m1"))
 S1.append(result("w_a", "2026-09-01T14:00:10.000Z", f"File created successfully at: {ALPHA}/src/a.ts", {"type": "create", "filePath": f"{ALPHA}/src/a.ts", "content": A_V1, "structuredPatch": []}))
+# 1つの応答（message.id＝m2）が content block ごとに別の行＝thinking の行と tool_use の行。usage は同じ（100）＝応答ごとに1回だけ数える（Codex の指摘・PR #17）
+S1.append(asst({"type": "thinking", "thinking": "a.ts を直す", "signature": "x"}, "2026-09-01T14:00:59.000Z", mid="m2"))
 S1.append(asst(use("Edit", "e_a1", {"file_path": f"{ALPHA}/src/a.ts", "old_string": A_OLD, "new_string": A_NEW}), "2026-09-01T14:01:00.000Z", mid="m2"))
 S1.append(result("e_a1", "2026-09-01T14:01:05.000Z", "The file has been updated.", {"filePath": f"{ALPHA}/src/a.ts", "oldString": A_OLD, "newString": A_NEW, "originalFile": A_V1, "structuredPatch": [], "userModified": False, "replaceAll": False}))
 # 失敗した Edit（old_string が無い）＝数えない
@@ -92,6 +97,8 @@ S1.append(result("e_a2", "2026-09-01T14:02:05.000Z", "<tool_use_error>String to 
 # b.ts：Read（toolUseResult に中身）→ old 側に元からある行を含む Edit
 S1.append(asst(use("Read", "r_b", {"file_path": f"{ALPHA}/src/b.ts"}), "2026-09-01T14:03:00.000Z", mid="m4"))
 S1.append(result("r_b", "2026-09-01T14:03:05.000Z", numbered(B_V0.rstrip("\n")), {"type": "text", "file": {"filePath": f"{ALPHA}/src/b.ts", "content": B_V0, "numLines": 4, "startLine": 1, "totalLines": 4}}))
+# 流れている途中の行＝先の text の行は output_tokens が小さい（3）・後の tool_use の行が最終（100）＝応答の最大を取る
+S1.append(asst({"type": "text", "text": "b.ts を直します"}, "2026-09-01T14:03:59.000Z", mid="m5", out=3))
 S1.append(asst(use("Edit", "e_b", {"file_path": f"{ALPHA}/src/b.ts", "old_string": B_OLD, "new_string": B_NEW}), "2026-09-01T14:04:00.000Z", mid="m5"))
 S1.append(result("e_b", "2026-09-01T14:04:05.000Z", "The file has been updated.", {"filePath": f"{ALPHA}/src/b.ts", "oldString": B_OLD, "newString": B_NEW, "originalFile": B_V0, "structuredPatch": []}))
 # c.ts：Read 無しの Write（update）＝originalFile の行は元からある
@@ -121,8 +128,10 @@ S1.append({"type": "summary", "summary": "x", "leafUuid": "x"})
 S1.append("")
 
 # ---------- ログ s2（alpha・再開で s1 の先頭3行が写っている） ----------
-S2 = S1[1:4]   # 再開で s1 の先頭3行（w_a とその結果・e_a1）が写っている＝tool_use の id で重複を除く
-S2 = list(S2)
+# 再開で s1 の先頭（w_a とその結果・e_a1 の2行）が写っている＝uuid で重複を除く（sessionId は s1 のまま＝別の会話のまま）
+i_wa = next(i for i, o in enumerate(S1) if isinstance(o, dict) and o["type"] == "assistant" and o["message"]["id"] == "m1")
+i_ea = max(i for i, o in enumerate(S1) if isinstance(o, dict) and o["type"] == "assistant" and o["message"]["id"] == "m2")
+S2 = list(S1[i_wa:i_ea + 1])
 # 最初の指示（s2・<pasted_content> の中身＝タグを外して読む）。s2 の assistant は 6 通・出力 300 ずつ＝1,800 トークン（うち1通は別の場所 alpha-copy・1通は NotebookEdit）
 S2.append(user_text('<pasted_content id="7e4d">引き継ぎ：win.ts・sec.ts・d.ts を足す。範囲外は触らない</pasted_content>', "2026-09-03T00:59:00.000Z", sid="s2", as_list=True))
 S2.append(asst(use("Write", "w_win", {"file_path": f"{ALPHA}/src/win.ts", "content": WIN_V1}), "2026-09-03T01:00:00.000Z", sid="s2", mid="m13", out=300))
@@ -272,7 +281,8 @@ write_log(LOGS2 / "-Users-t-dev-habits" / "h3.jsonl", [user_text("キャッシ�
 #     4 print(VALUE)                    残った
 TOOL_V1 = "from oldpkg.utils import foo\nVALUE = 1\nfrom pkg import a\nprint(VALUE)\n"
 TOOL_NOW = "from newpkg.utils import foo\nVALUE = 1\nfrom pkg import a, b\nprint(VALUE)\n"
-H4 = [user_text("tool.py を作って", "2026-09-14T09:59:00.000Z", sid="h4", cwd=HAB)] + hw("hw_tool", f"{HAB}/src/tool.py", TOOL_V1, "2026-09-14T10:00:00.000Z", "h4", "hm4")
+# system-reminder のブロックが先にあっても、指示は次のブロック
+H4 = [user_text(["<system-reminder>\nCLAUDE.md を読みました\n</system-reminder>", "tool.py を作って"], "2026-09-14T09:59:00.000Z", sid="h4", cwd=HAB)] + hw("hw_tool", f"{HAB}/src/tool.py", TOOL_V1, "2026-09-14T10:00:00.000Z", "h4", "hm4")
 write_log(LOGS2 / "-Users-t-dev-habits" / "h4.jsonl", H4)
 #   h5：h4 を --resume した会話。本物のログと同じく、h4 の message が同じ uuid・新しい sessionId（h5）で写っている → 同じ会話にまとめ、写った分は1回だけ数える
 #     その後 extra.py を Write（1行・残存）。→ 会話 h4＋h5＝書いた 5（tool 4＋extra 1）・残った 3・出力 100＋100＝200・再開 1 回

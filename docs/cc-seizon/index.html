@@ -351,7 +351,7 @@ const normPath = p => String(p).replace(/\\/g, '/');
 const USE_NAMES = new Set(['Edit', 'MultiEdit', 'Write', 'Read']);
 const RX_NUMBERED = /^\s*\d+(?:→|\t)/;
 const LOG_SKIP_DIRS = new Set(['node_modules', '.git', 'plugins', 'shell-snapshots', 'statsig', 'todos', 'debug', 'file-history', 'session-env', 'backups', 'ide']);
-function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), sessLink: [] }; }
+function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), resp: new Map(), sessLink: [] }; }
 /* 再開したセッション（--resume）のログは、前のセッションの message を同じ uuid・新しい sessionId で写している。
    同じ uuid が別の sessionId で出たら「同じ会話」として後でまとめる（sessLink）。使用量は最初に見た方に足し、まとめる時に移す */
 function resolveSessions(acc){
@@ -384,8 +384,11 @@ function sessOf(acc, sid){
   return s;
 }
 const RX_TAG = /<[^<>]{1,80}>/g;
+/* Claude Code 自身の記録（/clear などのコマンド・その出力・system-reminder）は指示ではない */
+const RX_RECORD = /^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|system-reminder)\b/;
 /* 指示の冒頭：タグ（<pasted_content …> など）を外し、空白をそろえて 100 字。空なら無し */
 function promptHead(text){
+  if (RX_RECORD.test(text)) return '';
   const t = String(text).replace(RX_TAG, ' ').replace(/\s+/g, ' ').trim();
   return t.length > 100 ? t.slice(0, 100) + '…' : t;
 }
@@ -407,26 +410,36 @@ function handleLogLine(line, acc){
   if (sid && Number.isFinite(tsRaw)) { const sv = sessOf(acc, sid); if (tsRaw < sv.start) sv.start = tsRaw; if (tsRaw > sv.end) sv.end = tsRaw; if (!sv.cwd && typeof o.cwd === 'string') sv.cwd = normPath(o.cwd); }
   const c = o.message.content;
   if (o.type === 'user' && sid && !o.isSidechain) {
-    // 最初の指示の冒頭（文字列の content か、text ブロック。tool_result だけの message は飛ばす）
+    // 最初の指示の冒頭（文字列の content か、text ブロックのうち最初の指示らしいもの。tool_result だけの message・Claude Code 自身の記録は飛ばす）
     const sv = sessOf(acc, sid);
-    let txt = '';
-    if (typeof c === 'string') txt = c;
-    else if (Array.isArray(c)) for (const b of c) { if (b && b.type === 'text' && typeof b.text === 'string') { txt = b.text; break; } }
-    if (txt && Number.isFinite(tsRaw) && tsRaw < sv.firstTs) { const h = promptHead(txt); if (h) { sv.first = h; sv.firstTs = tsRaw; } }
+    let h = '';
+    if (typeof c === 'string') h = promptHead(c);
+    else if (Array.isArray(c)) for (const b of c) { if (b && b.type === 'text' && typeof b.text === 'string') { h = promptHead(b.text); if (h) break; } }
+    if (h && Number.isFinite(tsRaw) && tsRaw < sv.firstTs) { sv.first = h; sv.firstTs = tsRaw; }
   }
   if (!Array.isArray(c)) return;
   if (o.type === 'assistant') {
     const ts = tsRaw;
-    // 再開したセッションのログには前の message が写っているので、uuid（無ければ message.id）で1回だけ数える。別の sessionId で写っていれば同じ会話として後でまとめる
-    const mid = typeof o.uuid === 'string' ? o.uuid : (typeof o.message.id === 'string' ? 'm:' + o.message.id : '');
-    const seenSid = mid ? acc.msgSid.get(mid) : undefined;
-    if (sid && mid && seenSid !== undefined && seenSid !== sid) acc.sessLink.push([seenSid, sid]);
+    // 使用トークンは「応答」ごとに1回。1つの応答（message.id）は content block ごとに別の行に分かれて書かれ、usage は同じ（流れている途中の行は output_tokens が小さい）＝応答の最大を取る。
+    // 再開したセッションのログには前の行が写っている（同じ uuid・別の sessionId）＝uuid で1回だけ数え、別の sessionId で出たら同じ会話として後でまとめる
+    const uid = typeof o.uuid === 'string' ? o.uuid : '';
+    const mid = typeof o.message.id === 'string' ? o.message.id : (uid ? 'u:' + uid : '');
+    const seenSid = uid ? acc.msgSid.get(uid) : undefined;
+    if (sid && seenSid !== undefined && seenSid !== sid) acc.sessLink.push([seenSid, sid]);
     if (sid && mid && seenSid === undefined) {
-      acc.msgSid.set(mid, sid);
-      const u = o.message.usage, sv = sessOf(acc, sid);
-      if (u && typeof u === 'object') { sv.out += u.output_tokens || 0; sv.inp += u.input_tokens || 0; sv.cache += (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); }
-      sv.msgs++;
-      for (const b of c) if (b && b.type === 'tool_use' && b.name === 'Bash') sv.bash++;
+      if (uid) acc.msgSid.set(uid, sid);
+      let r = acc.resp.get(mid);
+      if (r && r.sid !== sid) { acc.sessLink.push([r.sid, sid]); r = null; }   // 同じ応答が別の sessionId で出た＝写し。足さない
+      else {
+        const sv = sessOf(acc, sid);
+        if (!r) { r = { sid, out: 0, inp: 0, cache: 0 }; acc.resp.set(mid, r); sv.msgs++; }
+        const u = o.message.usage;
+        if (u && typeof u === 'object') for (const [k, v] of [['out', u.output_tokens], ['inp', u.input_tokens], ['cache', (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)]]) {
+          const n = typeof v === 'number' && v > 0 ? v : 0;
+          if (n > r[k]) { sv[k] += n - r[k]; r[k] = n; }
+        }
+        for (const b of c) if (b && b.type === 'tool_use' && b.name === 'Bash') sv.bash++;
+      }
     }
     for (const b of c) {
       if (!b || b.type !== 'tool_use' || !USE_NAMES.has(b.name) || typeof b.id !== 'string') continue;
@@ -1260,7 +1273,7 @@ function sessionsHTML(R, hidePrompts){
   const cols = S.outTotal ? `<div class="sesscols">${card('高くて消えた', S.costly, 'costly')}${card('安くて残った', S.cheap, 'cheap')}</div>` : '';
   const tr = S.rows.map(r => `<tr><td>${esc(r.start)}${r.members > 1 ? `<br><small class="dim">再開 ${fmt(r.members - 1)} 回を含む</small>` : ''}</td><td class="q">${q(r)}</td><td>${S.outTotal ? fmtTok(r.outRepo) : '—'}</td><td>${fmt(r.written)}</td><td>${fmt(r.alive)}</td><td>${fmt(r.rewritten)}</td><td>${fmt(r.human)}</td><td>${fmt(r.dropped)}</td><td>${S.outTotal ? (r.perAlive === null ? '—' : fmtTok(r.perAlive)) : '—'}</td><td>${fmt(r.edits)}</td></tr>`).join('');
   const table = `<div class="table-wrap"><table><thead><tr><th>開始</th><th>最初の指示（冒頭）</th><th>出力トークン（按分）</th><th>書いた</th><th>残った</th><th>自分で書き直し</th><th>人が直した</th><th>ファイルごと消えた</th><th>残った1行あたり</th><th>編集</th></tr></thead><tbody>${tr}</tbody></table></div>`;
-  return head + lead + cols + table + `<p class="fine">1行＝1つの会話。--resume で再開したセッションは、前の記録が写っているので同じ会話にまとめ、写った分は1回だけ数えます。出力トークンは assistant の usage（output_tokens）を会話ごとに足し、そのセッションで Claude が書いた行のうち、このリポジトリの行の割合で按分しています（別のリポジトリにも触ったセッションの分は、その割合だけ）。「今は無いコードに使った」は、按分した出力トークン × 残っていない行の割合。入力トークン（キャッシュ読みを含む）は数えていません＝費用そのものではなく、Claude が書いた量の目安です。試作を捨てるのは悪いことではありません。この表は「どの頼み方が高くついたか」を自分のログで見るためのものです。指示の冒頭は端末の外に出ません（カード・共有文にも載りません）。</p>`;
+  return head + lead + cols + table + `<p class="fine">1行＝1つの会話。--resume で再開したセッションは、前の記録が写っているので同じ会話にまとめ、写った分は1回だけ数えます。出力トークンは assistant の usage（output_tokens）を応答ごとに1回数えて会話ごとに足し（1つの応答が複数の行に分かれて書かれている分は1回）、そのセッションで Claude が書いた行のうち、このリポジトリの行の割合で按分しています（別のリポジトリにも触ったセッションの分は、その割合だけ）。「今は無いコードに使った」は、按分した出力トークン × 残っていない行の割合。入力トークン（キャッシュ読みを含む）は数えていません＝費用そのものではなく、Claude が書いた量の目安です。試作を捨てるのは悪いことではありません。この表は「どの頼み方が高くついたか」を自分のログで見るためのものです。指示の冒頭は端末の外に出ません（カード・共有文にも載りません）。</p>`;
 }
 function renderDetails(R, opts){
   const html = [

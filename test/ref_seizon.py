@@ -61,7 +61,7 @@ def parse_ts(s):
         return None
 
 def new_acc():
-    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "sessLink": []}
+    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "resp": {}, "sessLink": []}
 
 def resolve_sessions(acc):
     """app.html の resolveSessions と同じ：同じ uuid が別の sessionId で出たセッションを1つの会話にまとめる。代表＝いちばん早く始まった方（同時なら sid の文字列順）"""
@@ -97,8 +97,11 @@ def resolve_sessions(acc):
     return rep_of, merged
 
 RX_TAG = re.compile(r"<[^<>]{1,80}>")
+RX_RECORD = re.compile(r"^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|system-reminder)\b")
 
 def prompt_head(text):
+    if RX_RECORD.match(text):
+        return ""
     t = re.sub(r"\s+", " ", RX_TAG.sub(" ", str(text))).strip()
     return t[:100] + "…" if len(t) > 100 else t
 
@@ -135,35 +138,47 @@ def handle_line(line, acc):
     c = o["message"].get("content")
     if o.get("type") == "user" and sid and not o.get("isSidechain"):
         sv = sess_of(acc, sid)
-        txt = ""
+        h = ""
         if isinstance(c, str):
-            txt = c
+            h = prompt_head(c)
         elif isinstance(c, list):
             for b in c:
                 if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str):
-                    txt = b["text"]; break
-        if txt and ts_raw is not None and (sv["firstTs"] is None or ts_raw < sv["firstTs"]):
-            h = prompt_head(txt)
-            if h:
-                sv["first"] = h; sv["firstTs"] = ts_raw
+                    h = prompt_head(b["text"])
+                    if h:
+                        break
+        if h and ts_raw is not None and (sv["firstTs"] is None or ts_raw < sv["firstTs"]):
+            sv["first"] = h; sv["firstTs"] = ts_raw
     if not isinstance(c, list):
         return
     if o.get("type") == "assistant":
         ts = ts_raw
-        mid = o["uuid"] if isinstance(o.get("uuid"), str) else ("m:" + o["message"]["id"] if isinstance(o["message"].get("id"), str) else "")
-        seen_sid = acc["msgSid"].get(mid) if mid else None
-        if sid and mid and seen_sid is not None and seen_sid != sid:
+        # 使用トークンは応答（message.id）ごとに1回＝block ごとに分かれた行は最大を取る。写し（同じ uuid・別の sessionId）は数えず、会話をつなぐ
+        uid = o["uuid"] if isinstance(o.get("uuid"), str) else ""
+        mid = o["message"]["id"] if isinstance(o["message"].get("id"), str) else ("u:" + uid if uid else "")
+        seen_sid = acc["msgSid"].get(uid) if uid else None
+        if sid and seen_sid is not None and seen_sid != sid:
             acc["sessLink"].append((seen_sid, sid))
         if sid and mid and seen_sid is None:
-            acc["msgSid"][mid] = sid
-            u = o["message"].get("usage"); sv = sess_of(acc, sid)
-            if isinstance(u, dict):
-                sv["out"] += u.get("output_tokens") or 0; sv["inp"] += u.get("input_tokens") or 0
-                sv["cache"] += (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
-            sv["msgs"] += 1
-            for b in c:
-                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash":
-                    sv["bash"] += 1
+            if uid:
+                acc["msgSid"][uid] = sid
+            r = acc["resp"].get(mid)
+            if r is not None and r["sid"] != sid:
+                acc["sessLink"].append((r["sid"], sid))
+            else:
+                sv = sess_of(acc, sid)
+                if r is None:
+                    r = {"sid": sid, "out": 0, "inp": 0, "cache": 0}; acc["resp"][mid] = r; sv["msgs"] += 1
+                u = o["message"].get("usage")
+                if isinstance(u, dict):
+                    for k, v in (("out", u.get("output_tokens")), ("inp", u.get("input_tokens")),
+                                 ("cache", (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0))):
+                        n = v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 0
+                        if n > r[k]:
+                            sv[k] += n - r[k]; r[k] = n
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash":
+                        sv["bash"] += 1
         for b in c:
             if not isinstance(b, dict) or b.get("type") != "tool_use" or b.get("name") not in USE_NAMES or not isinstance(b.get("id"), str):
                 continue

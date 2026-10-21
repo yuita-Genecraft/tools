@@ -6,7 +6,7 @@ import json, pathlib, shutil
 HERE = pathlib.Path(__file__).parent / "seizon"
 LOGS = HERE / "logs" / "projects"
 PROJ = HERE / "proj" / "alpha"
-for d in (HERE / "logs", HERE / "logs2", HERE / "logs3", HERE / "proj"):
+for d in (HERE / "logs", HERE / "logs2", HERE / "logs3", HERE / "logs4", HERE / "proj"):
     if d.exists():
         shutil.rmtree(d)
 
@@ -381,3 +381,30 @@ put3("src/x.ts", X_NOW)
 put3("src/y.py", G_NOW)
 put3("src/z.js", Z_NOW)
 put3("README.md", "# multi\n")
+
+
+# ---------- 文脈とトークン（logs4・プロジェクトは要らない） ----------
+# 手で数えた期待値は e2e_seizon.py の HAND_TOKENS。文脈＝入力＋キャッシュ読み＋キャッシュ書き込み
+LOGS4 = HERE / "logs4"
+def tk(ts, mid, inp, cr, cw, out=100, sid="t1", side=False, cw1h=None):
+    u = {"input_tokens": inp, "output_tokens": out, "cache_read_input_tokens": cr, "cache_creation_input_tokens": cw}
+    if cw1h is not None:
+        u["cache_creation"] = {"ephemeral_5m_input_tokens": cw - cw1h, "ephemeral_1h_input_tokens": cw1h}
+    return {"parentUuid": None, "isSidechain": side, "userType": "external", "cwd": "/Users/t/dev/tok", "sessionId": sid, "version": "2.1.0", "type": "assistant",
+            "message": {"id": mid, "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [{"type": "text", "text": "ok"}], "usage": u},
+            "uuid": U(), "timestamp": ts}
+T1 = [tk("2026-09-20T09:00:00.000Z", "tm1", 3, 0, 30000),            # 文脈 30,003（〜5万）
+      tk("2026-09-20T09:05:00.000Z", "tm2", 3, 30000, 140000),       # 170,003（15〜20万）
+      tk("2026-09-20T09:05:01.000Z", "tm2", 3, 30000, 140000, out=40),   # 同じ応答の途中の行＝1回
+      tk("2026-09-20T09:10:00.000Z", "tm3", 3, 170000, 50000),       # 220,003（20〜40万）
+      tk("2026-09-20T10:00:00.000Z", "tm6", 3, 0, 100, out=10, side=True),   # サブエージェント（103・〜5万）＝再開の判定には入れない
+      #   2時間あけて再開：読めたのは 1万（前の文脈 220,003 の 2割未満）・書き込み 20万（半分超）＝検出条件に一致
+      tk("2026-09-20T11:10:00.000Z", "tm4", 3, 10000, 200000, cw1h=200000),   # 210,003（20〜40万）
+      #   3時間あけて再開：キャッシュが読めている＝一致しない
+      tk("2026-09-20T14:10:00.000Z", "tm5", 3, 200000, 5000)]        # 205,003（20〜40万）
+write_log(LOGS4 / "projects" / "-Users-t-dev-tok" / "t1.jsonl", T1)
+CX4 = [cx("2026-09-21T09:00:00.000Z", "session_meta", {"id": "cx-t", "cwd": "/Users/t/dev/tok"}),
+       cx("2026-09-21T09:00:05.000Z", "token_usage_record", {"response_id": "tr1", "usage": {"input_tokens": 160000, "cached_input_tokens": 150000, "cache_write_input_tokens": 0, "output_tokens": 50}}),   # 160,000
+       #   2時間あけて、キャッシュが読めていない（Codex はキャッシュ書き込みが記録に無い＝一致しない。再開としては数える）
+       cx("2026-09-21T11:00:05.000Z", "token_usage_record", {"response_id": "tr2", "usage": {"input_tokens": 170000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 60}})]   # 170,000
+write_log(LOGS4 / "codex" / "sessions" / "2026" / "09" / "21" / "rollout-2026-09-21T09-00-00-cx-t.jsonl", CX4)

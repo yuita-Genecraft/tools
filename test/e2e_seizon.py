@@ -52,6 +52,16 @@ PROJ3 = HERE / "seizon" / "proj" / "multi"
 HAND_MULTI = dict(written=12, alive=9, rewritten=2, human=1, edits=5, sessions=2, uses=5, gmSkipped=1, root="/Users/t/dev/multi",
                   tools={"codex": {"written": 5, "alive": 3, "edits": 2, "sessions": 1}, "gemini": {"written": 7, "alive": 6, "edits": 3, "sessions": 1}},
                   rows=[("codex:cx-1", "codex", "x.ts を作って", 120, 2, 1, 5, 3, 40), ("gemini:11111111-2222-4333-8444-555555555555", "gemini", "y.py を作って", 80, 5, 1, 7, 6, 13)])
+# 文脈とトークン（logs4・フォルダ無し）：Claude 6 応答（tm2 の2行は1応答）＋ Codex 2 応答＝8。15万超＝tm2・tm3・tm4・tm5・tr1・tr2＝6
+# 再開（1時間以上あけた・サブエージェントは除く）＝t1 の 09:10→11:10・11:10→14:10、cx-t の 09:00→11:00＝3。一致＝tm4 だけ（前 220,003・読めた 1万＜2割・書いた 20万＞半分）
+HAND_TOKENS = dict(n=8, over=6, bins=[2, 0, 0, 3, 3, 0, 0], resumes=3, matched=1, matchedMedianCw=200000,
+                   by={"claude": {"n": 6, "over": 4, "resumes": 2, "matched": 1}, "codex": {"n": 2, "over": 2, "resumes": 1, "matched": 0}},
+                   latest={"sid": "t1", "tool": "claude", "ts": "2026-09-20T11:10:00.000Z", "gapMin": 120, "prevCtx": 220003, "cr": 10000, "cw": 200000})
+LOGS4 = HERE / "seizon" / "logs4"
+# 書き直し（alpha）：a.ts の toArray の行・gone.ts の LEGACY の行・multi.ts の exponential の行・re.ts の RE2 の行＝4か所・4行・4ファイル
+HAND_REWRITE = dict(total={"events": 4, "lines": 4, "files": 4}, files=["src/a.ts", "src/gone.ts", "src/multi.ts", "src/re.ts"],
+                    first=("src/a.ts", "return db.notes.where({ userId }).toArray();", "a.ts に listNotes を足して、並びは updatedAt にして", True))
+SINCE = 1788393600000   # 2026-09-03T00:00Z：s1（9/1）の行は数えない＝s2 の 6 行だけ・書き直しは 0
 failures = 0
 
 def check(name, got, want):
@@ -70,7 +80,7 @@ ROW_KEYS = ("file", "exists", "lines", "written", "alive", "rewritten", "human",
 def compare(label, cur, exp):
     ok = True
     for k in ("written", "alive", "rewritten", "human", "dropped", "droppedWritten", "aiLines", "projectLines", "projectFiles", "otherProjectFiles", "edits", "sessions",
-              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples", "habits", "sessionStats"):
+              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples", "habits", "sessionStats", "since", "rewriteTotal", "rewriteFiles", "rewriteEvents"):
         ok &= check(f"{label} {k}", cur[k], exp[k])
     ok &= check(f"{label} files", [[r[k] for k in ROW_KEYS] for r in cur["files"]], [[r[k] for k in ROW_KEYS] for r in exp["files"]])
     ok &= check(f"{label} missingFiles", cur["missingFiles"], exp["missingFiles"])
@@ -137,13 +147,41 @@ with sync_playwright() as p:
         page.goto(URL)
         page.wait_for_function("document.getElementById('cardImg').src.startsWith('data:image/png')")
         page.screenshot(path=str(SHOTS / f"seizon-sample-{label}.png"), full_page=True)
+        check(f"{label} default tab tokens", (page.evaluate("window.__seizon.tab"), page.text_content("#statusPill")), ("tokens", "見本"))
+        page.click(".tab[data-tab=rework]"); page.wait_for_timeout(200)
+        page.screenshot(path=str(SHOTS / f"seizon-sample-rework-{label}.png"), full_page=True)
+        check(f"{label} rework sample rewrites shown", page.evaluate("document.querySelectorAll('#details .rwev').length > 0"), True)
+        check(f"{label} rework overflow", page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth"), False)
+        page.click(".tab[data-tab=tokens]"); page.wait_for_timeout(200)
         overflow = page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth")
         check(f"{label} horizontal overflow", overflow, False)
         if label == "desktop-light":
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "seizon-card-sample.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
-            # 1) ログだけ → 「あと1つ」
+            # 0) 文脈とトークン：ログだけで数字が出る＝手計算 HAND_TOKENS ＝ Python ＝ Chromium
+            page.set_input_files("#logInput", str(LOGS4))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
+            curT = page.evaluate("JSON.parse(JSON.stringify(window.__seizon.currentT))")
+            expT = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")))
+            ok = True
+            for k in ("n", "over", "bins", "by", "period", "resumes", "matched", "matchedMedianCw", "latest", "weighted"):
+                ok &= check(f"tokens js=py {k}", curT[k], expT[k])
+            for k, v in HAND_TOKENS.items():
+                ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else curT[k], v)
+            ok &= check("tokens weighted sums to 1", round(sum(curT["weighted"].values()), 6), 1.0)
+            tok_txt = page.input_value("#shareText")
+            ok &= check("tokens share text", ("75%" in tok_txt, "#AI開発ログマップ" in tok_txt, "t1" in tok_txt), (True, True, False))
+            ok &= check("tokens details latest", page.evaluate("(t => t.includes('2時間') && t.includes('20:10'))(document.querySelector('#details .latest').textContent)"), True)
+            page.screenshot(path=str(SHOTS / "seizon-tokens-mine.png"), full_page=True)
+            src = page.get_attribute("#cardImg", "src")
+            (SHOTS / "seizon-card-tokens.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
+            print("tokens share text:\n" + tok_txt)
+            page.click("#logClear")
+            ok &= check("tokens cleared to sample", page.text_content("#statusPill"), "見本")
+            # 1) ログだけ → 文脈とトークンは出る・手直しのタブは「あと1つ」
             page.set_input_files("#logInput", str(LOGS))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
+            page.click(".tab[data-tab=rework]")
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あと1つ'", timeout=20000)
             print("after logs:", page.locator("#logLoaded").text_content())
             # 2) フォルダ → 突き合わせ
@@ -151,7 +189,13 @@ with sync_playwright() as p:
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード'", timeout=20000)
             print("after project:", page.locator("#projLoaded").text_content(), "|", page.locator("#statusText").text_content())
             cur = page.evaluate(CURRENT)
-            ok = compare("normal", cur, expect[False]) & compare_hand("normal", cur, False)
+            ok &= compare("normal", cur, expect[False]) & compare_hand("normal", cur, False)
+            ok &= check("rewrite hand total", cur["rewriteTotal"], HAND_REWRITE["total"])
+            ok &= check("rewrite hand files", [f["file"] for f in cur["rewriteFiles"]], HAND_REWRITE["files"])
+            e0 = cur["rewriteEvents"][0]
+            ok &= check("rewrite hand first", (e0["file"], e0["gone"][0], e0["prompt"]["text"], e0["prompt"]["first"]), HAND_REWRITE["first"])
+            ok &= check("rewrite prompt on screen", page.evaluate("document.querySelector('#details .rwev') !== null && document.getElementById('details').textContent.includes('並びは updatedAt にして')"), True)
+            ok &= check("rewrite prompt not in share", "updatedAt" in page.input_value("#shareText"), False)
             page.screenshot(path=str(SHOTS / "seizon-mine-desktop-light.png"), full_page=True)
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "seizon-card-mine.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
@@ -176,6 +220,19 @@ with sync_playwright() as p:
             cur3 = page.evaluate("([l, p]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'alpha', false)))", [logs_js, proj_js])
             ok &= check("analyzeTexts written/alive/human", (cur3["written"], cur3["alive"], cur3["human"], cur3["aiLines"], cur3["projectFiles"]),
                         (expect[False]["written"], expect[False]["alive"], expect[False]["human"], expect[False]["aiLines"], expect[False]["projectFiles"]))
+            cur_s = page.evaluate("([l, p, t]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'alpha', false, t)))", [logs_js, proj_js, SINCE])
+            exp_s = ref_seizon.run(log_files, PROJ, strict=False, since=SINCE)
+            for k in ("written", "alive", "rewritten", "human", "since", "rewriteTotal", "files"):
+                ok &= check(f"since js=py {k}", cur_s[k], exp_s[k])
+            ok &= check("since hand", (cur_s["written"], cur_s["rewriteTotal"]["events"], cur_s["since"]), (6, 0, "2026-09-03T00:00:00.000Z"))
+            page.fill("#optSince", "2026-09-03T09:00")   # 東京の 9/3 9:00 ＝ SINCE
+            page.dispatch_event("#optSince", "change")
+            page.wait_for_function("window.__seizon.current.since === '2026-09-03T00:00:00.000Z'", timeout=20000)
+            ok &= check("since ui written", page.evaluate("window.__seizon.current.written"), 6)
+            ok &= check("since status note", "以降に入った行だけ" in page.text_content("#statusText"), True)
+            page.click("#clearSince")
+            page.wait_for_function("window.__seizon.current.since === null", timeout=20000)
+            ok &= check("since cleared written", page.evaluate("window.__seizon.current.written"), expect[False]["written"])
             # 6) 文字列だけの小さな場面（root の決め方）＝JS・Python・手の3つが一致
             for name, sc in SCENES.items():
                 js = page.evaluate("([l, p, n]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, n, false)))",
@@ -211,6 +268,10 @@ with sync_playwright() as p:
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])
             ok &= check("habits cards rendered", page.evaluate("document.querySelectorAll('#details .habit').length"), 1)
+            ok &= check("habits guard shown", page.evaluate("document.querySelector('#details .habit').textContent.includes('機械で防ぐ')"), True)
+            page.select_option("#details select[data-mark=debug]", index=1)
+            mark_v = page.evaluate("document.querySelector('#details select[data-mark=debug]').value")
+            ok &= check("habits mark saved", page.evaluate("window.__seizon.snapshotOf(window.__seizon.current).marks"), {"debug": mark_v})
             # import の型の境界（Codex の指摘 #15・#16）：引用符の無い import・別名つきの一覧
             PAIRS = [("import foo as f, bar", "import foobar", "import"), ("import foo as f, bar", "import foo, bar", "other"), ("import os", "import os, sys", "import"),
                      ("from oldpkg.utils import foo", "from newpkg.utils import foo", "import"), ("from pkg import a", "from pkg import a, b", "other"),
@@ -261,8 +322,8 @@ with sync_playwright() as p:
             page.evaluate("s => window.__seizon.loadPrev(s)", prev_c)
             ok &= check("compare same AI keeps name", page.evaluate("[...document.querySelectorAll('#details .rows li')].some(li => li.textContent.includes('Codex が書いた行'))"), True)
             page.click("#clearPrev")
-            # 頼み方の節：最初に出る・指示の冒頭が見える・隠すと消える・共有文に1行
-            ok &= check("sessions section first", page.evaluate("document.querySelector('#details .sec h2').textContent"), "頼み方と、残った1行あたりの出力トークン")
+            # 会話の節：出る・指示の冒頭が見える・隠すと消える・共有文に1行
+            ok &= check("sessions section present", page.evaluate("[...document.querySelectorAll('#details .sec h2')].some(h => h.textContent === '出力が大きかった会話と、残った1行あたりの出力トークン')"), True)
             ok &= check("sessions prompt shown", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), False)  # habits プロジェクトには user text が無い
             page.set_input_files("#logInput", str(LOGS)); page.set_input_files("#projInput", str(PROJ))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'alpha'", timeout=20000)

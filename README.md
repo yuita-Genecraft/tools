@@ -6,7 +6,7 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
 |---|---|---|
 | Claude Code 通知表 | `~/.claude/projects` のログを集計し、推定作業時間・使った日数・よく使ったツール・APIトークン料金の換算を通知表の画像にする（「ありがとう」などの回数と称号はおまけ） | `cc-tsuchihyo/app.html` |
 | Firebase 公開前チェック | [fbcheck](https://github.com/yuita-Genecraft/fbcheck)（Node版）と同じ判定をブラウザで。フォルダをドロップするだけ | `fbcheck-web/app.html` |
-| Claude Code 生存率 | `~/.claude/projects`（Claude Code）・`~/.codex/sessions`（Codex）・`~/.gemini/antigravity*`（Antigravity）のログと、手元のプロジェクトのフォルダを突き合わせて、AI が書いた行のうち今も残っている割合を「残った・Claude が自分で書き直した・人が消した・ファイルごと消えた」に分けて1枚の画像にする。会話ごとに最初の指示と「残った1行あたりの出力トークン」を並べ、今は無いコードに使った出力トークンの割合を出す（どの頼み方が高くついて消えたか）。人が直した行から直し癖（直しの型）を数え、CLAUDE.md に足す1行の案を出す。結果を JSON で保存して次回と比べられる。期間つきの AI率、人が消した行が多いファイルも | `cc-seizon/app.html` |
+| AI 開発ログマップ（旧 Claude Code 生存率） | `~/.claude/projects`（Claude Code）・`~/.codex/sessions`（Codex）・`~/.gemini/antigravity*`（Antigravity）のログを読む。タブは2つ。**文脈とトークン**（ログだけ）＝応答ごとの文脈の大きさの分布（15万超の割合）、1時間以上あけた再開と、その時の大量のキャッシュ作成（直近の1件の時刻つき）、使い道の内訳（料金比の推定）。**コードの手直し**（ログ＋手元のフォルダ）＝AI が書いた行のうち今も残っている割合を「残った・AI が自分で書き直した・ログの外で変わった・ファイルごと消えた」に分け、書き直しが集中したファイルと、書き直す前の本人の指示（画面だけ）を出す。繰り返した直しの型には、まず機械で防ぐ手（lint・formatter・型の検査）と、それでも残れば CLAUDE.md の1行。出力が大きく残らなかった会話も。日時で区切って「この日時以降に入った行だけ」でも数えられる。結果を JSON で保存して次回と比べられる（型ごとの印も保存） | `cc-seizon/app.html` |
 
 ## 仕組み
 
@@ -20,7 +20,7 @@ AIで開発する人向けの、ページの中だけで動く小さな道具で
 ## テスト
 
 - 通知表：`test/gen.py`（境界ケース入りの合成ログ）→ `test/ref.py`（Python で書いた別実装）→ `test/e2e.py`（Chromium で開いて集計値を突き合わせ）
-- 生存率：`test/gen_seizon.py`（Edit／Write／MultiEdit・old 側に元からある行・Claude 自身の書き直し・人が直した行・ファイルごと消えた・失敗した Edit・結果の無い Write・再開で写った行・別プロジェクト・同名の別フォルダ・数えない行・空白違い・CRLF・鍵らしい行・読まないファイルを混ぜた合成ログとフォルダ）→ `test/ref_seizon.py`（Python の別実装）→ `test/e2e_seizon.py`（Chromium で2つのフォルダを入れ、通常と厳密の両モードで別実装と、手で数えた期待値の両方に突き合わせ。直し癖は別のログとプロジェクト（`logs2`・`proj/habits`＝残った行を目印にした窓の中の削除・順番で組にする改名3行・丸ごと書き直した5行＝まとまった削除、など）で、Chromium＝Python＝手計算を確かめ、JSON の保存と前回比較も通す。頼み方は alpha（s2 が別の場所にも1行書く＝按分 5/6・s1 は 21行中 9行が今は無い＝1,200×9/21）と habits（h5 が h4 を --resume＝同じ uuid・別の sessionId＝1つの会話に・写った分は1回）で手計算と突き合わせ）。Codex と Gemini は `logs3`・`proj/multi`（Codex＝新規作成と unified diff・同じ response_id の重複・失敗した変更、Gemini＝3か所に重なった step・切られた写し・JSON で包まれた値・ほどけない値）で、Codex を入れてから Gemini を足す・Codex を入れ直すと置き換わる、までを Chromium＝Python＝手計算で確かめる
+- 生存率：`test/gen_seizon.py`（Edit／Write／MultiEdit・old 側に元からある行・Claude 自身の書き直し・人が直した行・ファイルごと消えた・失敗した Edit・結果の無い Write・再開で写った行・別プロジェクト・同名の別フォルダ・数えない行・空白違い・CRLF・鍵らしい行・読まないファイルを混ぜた合成ログとフォルダ）→ `test/ref_seizon.py`（Python の別実装）→ `test/e2e_seizon.py`（Chromium で2つのフォルダを入れ、通常と厳密の両モードで別実装と、手で数えた期待値の両方に突き合わせ。直し癖は別のログとプロジェクト（`logs2`・`proj/habits`＝残った行を目印にした窓の中の削除・順番で組にする改名3行・丸ごと書き直した5行＝まとまった削除、など）で、Chromium＝Python＝手計算を確かめ、JSON の保存と前回比較も通す。頼み方は alpha（s2 が別の場所にも1行書く＝按分 5/6・s1 は 21行中 9行が今は無い＝1,200×9/21）と habits（h5 が h4 を --resume＝同じ uuid・別の sessionId＝1つの会話に・写った分は1回）で手計算と突き合わせ）。文脈とトークンは `logs4`（フォルダ無し・同じ応答の途中の行・サブエージェント・一致する再開と一致しない再開・Codex の再開）で Chromium＝Python＝手計算、書き直しは alpha の4か所と直前の指示、日時の区切りは 9/3 以降＝s2 の6行だけ、までを確かめる。Codex と Gemini は `logs3`・`proj/multi`（Codex＝新規作成と unified diff・同じ response_id の重複・失敗した変更、Gemini＝3か所に重なった step・切られた写し・JSON で包まれた値・ほどけない値）で、Codex を入れてから Gemini を足す・Codex を入れ直すと置き換わる、までを Chromium＝Python＝手計算で確かめる
 - 公開前チェック：判定の本体は `fbcheck-web/engine.js`。`fbcheck-web/sync_engine.py <出力先>` で、ブラウザ版と CLI（`fbcheck.mjs`）に同じ文字列で入れる
   - `test/e2e_fb.py`：テスト用プロジェクト8種（`test/gen_fbproj.py` が作る）。git の外の5種はブラウザ版と CLI の結果が一致するか、本物の git リポジトリの3種は CLI が git の答えどおりに出すか・ブラウザ版が「未確認」で出すか。あわせて言い過ぎ・偽PASSが出ないか
   - `test/unit_engine.mjs`：.gitignore の読み・ルールの読み・文言（言い過ぎ）の単体テスト
@@ -44,7 +44,7 @@ python -u test/e2e.py
 python -u test/test_overlap.py
 ```
 
-## 集計で気をつけたこと（生存率）
+## 集計で気をつけたこと（AI 開発ログマップ）
 
 - 「Claude が書いた行」＝Edit の new 側にあって old 側に無い行、Write は Read で見えていた行（と `toolUseResult.originalFile`）を除いた行。行は前後の空白を落として空白をそろえて比べ、4文字未満と記号だけの行は数えない（厳密モードで切り替え）
 - 4分類＝今も同じ行で残っている／Claude が後の Edit の old 側か Write の書き換えで自分で消した／今もあるファイルの中で、それ以外に無くなった（人が消した・直した・Bash で消した）／ファイル自体が今のフォルダに無い（ファイルごと消えた＝捨てた試作・名前を変えたファイル）。人が少し直した行は「残った」に入らない＝下限の値
@@ -62,6 +62,9 @@ python -u test/test_overlap.py
 - Antigravity（ログは `~/.gemini` の下。Gemini CLI のログは形式を確かめていないので対象外）：`~/.gemini/antigravity（-cli）/brain/〈会話〉/.system_generated/logs/` の下。同じ step が `transcript.jsonl`・`chunks/transcript`・`chunks/transcript_full` に重ねて残り、中身が切られた写し（`truncated_fields`）もある＝step ごとに「切られていない → full → 本体 → chunks」の順で1つだけ選んでから数える（全部読んだ後）。`write_to_file` は Write、`replace_file_content`（`TargetContent` → `ReplacementContent`）は Edit。値が JSON の文字列でもう一段包まれた写しはほどき、ほどけない値（途中で切れた）は数えずに件数だけ出す。Antigravity は書いた前に読んだ行の記録（Read）が無いので、既存のファイルを丸ごと書き直すと、元からあった行も AI の行に数える（過大になりうる）。書き込みが成功したかの記録は見ていない
 - 同じ AI のログを入れ直すと置き換え、別の AI のログなら足す（Claude Code と Codex を両方入れられる）。会話の ID の頭（`codex:`・`gemini:`）で AI を分け、内訳と会話の表に出す。書いた行がある AI が1つならその名前（Claude／Codex／Gemini）、2つ以上なら「AI」と書く
 - 本物のログでの確認（2026-10-21・本人の Mac）：Codex（1会話・変更 305 回・17,733 行）と Antigravity（1会話・31 回・1,331 行）で、Chromium と Python の別実装が全項目一致。Codex はログの変更を当て直すと 157 ファイル中 142 で今の中身と完全に一致した（残り 15 はシェルのリダイレクトや `sed -i` での書き換えが多いファイル＝数えない経路）
+- 文脈とトークン（2026-10-21）：文脈＝応答ごとの 入力＋キャッシュ読み＋キャッシュ書き込み（Claude は `message.id` ごとに最大の行・Codex は `input_tokens`（キャッシュ読みを含む）＋キャッシュ書き込み・Antigravity は step ごと）。再開＝同じ会話（サブエージェントは除く）で前の応答から1時間より長くあいた次の応答。検出条件＝前の文脈が2万超・次の応答でキャッシュから読めた分が前の文脈の2割未満・キャッシュに書き込んだ分が前の文脈の半分超。キャッシュの有効期間はキャッシュを読み書きしたリクエストから数えるので、操作の間隔と同じではない＝キャッシュ切れとは断定しない。Codex はキャッシュ書き込みが記録に無いので、再開には数えるが一致には入れない。使い道の内訳は API の料金比（入力 1・キャッシュ書き込み 5分 1.25／1時間 2・キャッシュ読み 0.1・出力 5）で重みをつけた推定で、利用枠の消費量ではない。フォルダは要らない
+- AI の書き直し＝AI が前に書いた行を、後の Edit／Write で AI 自身が消した記録（Edit・Write の1回×ファイルで1回）。書き直しが多いファイル上位5つと、上位3ファイルの書き直しを時刻順に、消えた行・入った行（3行まで）と、その前に本人が打った最後の指示（同じ会話・時刻がその編集以前・タスク通知やコマンドの記録は除く＝「最初の依頼」は印をつける）を並べる。指示の文は画面だけで、カード・投稿文・保存する JSON には入れない。書き直し＝失敗とは限らない（試作・仕様の変更）＝「直すべき場所」ではなく「振り返る候補」と書く
+- 日時で区切る：入った時刻（ログの記録の時刻）がその日時以降の行だけで、書いた・残った・書き直し・ファイルを数える。CLAUDE.md や lint を入れた日で区切ると、その後に入った行だけを見られる
 
 ## 集計で気をつけたこと（通知表）
 

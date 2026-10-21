@@ -172,6 +172,15 @@ with sync_playwright() as p:
         if label == "desktop-light":
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "seizon-card-sample.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
+            # 0a) 書いた記録はあるが応答のトークンの記録が無いログ＝見本の数を出さない（Codex の指摘 PR #21）
+            NOUSE = HERE / "seizon" / "nousage"; NOUSE.mkdir(parents=True, exist_ok=True)
+            (NOUSE / "x.jsonl").write_text(mk_write("/repo/a.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "nu1"), encoding="utf-8")
+            page.set_input_files("#logInput", str(NOUSE))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
+            t0 = page.evaluate("JSON.parse(JSON.stringify(window.__seizon.currentT))")
+            check("no usage tokens zero", (t0["n"], t0["over"], t0["resumes"], t0["matched"], t0.get("sample"), page.input_value("#shareText")), (0, 0, 0, 0, None, ""))
+            check("no usage status", "トークンの記録がありませんでした" in page.text_content("#statusText"), True)
+            page.click("#logClear")
             # 0) 文脈とトークン：ログだけで数字が出る＝手計算 HAND_TOKENS ＝ Python ＝ Chromium
             page.set_input_files("#logInput", str(LOGS4))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
@@ -346,6 +355,9 @@ with sync_playwright() as p:
             page.click("#clearPrev")
             page.evaluate("s => window.__seizon.loadPrev(s)", dict(snap_m, savedAt="2026-09-01"))
             ok &= check("multi compare same AI set no warn", page.evaluate("document.getElementById('details').textContent.includes('書いた AI が違うので')"), False)
+            page.click("#clearPrev")
+            page.evaluate("s => window.__seizon.loadPrev(s)", dict(snap_m, savedAt="2026-09-01", since="2026-09-03T00:00:00.000Z"))
+            ok &= check("compare warns other since", page.evaluate("document.getElementById('details').textContent.includes('区切りが前回と違います')"), True)
             page.click("#clearPrev")
             ok &= check("multi card title", page.evaluate("document.getElementById('details').textContent.includes('Antigravity が書いた行')"), True)
             ok &= check("multi label AI", "AI が書いた" in page.input_value("#shareText"), True)

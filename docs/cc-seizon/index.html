@@ -532,9 +532,10 @@ function handleLogLine(line, acc){
       if (r && r.sid !== sid) { acc.sessLink.push([r.sid, sid]); r = null; }   // 同じ応答が別の sessionId で出た＝写し。足さない
       else {
         const sv = sessOf(acc, sid);
-        if (!r) { r = { sid, out: 0, inp: 0, cache: 0, cr: 0, cw: 0, cw1h: 0, ts, side: !!o.isSidechain }; acc.resp.set(mid, r); sv.msgs++; }
+        if (!r) { r = { sid, out: 0, inp: 0, cache: 0, cr: 0, cw: 0, cw1h: 0, ts, side: !!o.isSidechain, u: false }; acc.resp.set(mid, r); sv.msgs++; }
         const u = o.message.usage;
         if (u && typeof u === 'object') {
+          r.u = true;
           for (const [k, v] of [['out', u.output_tokens], ['inp', u.input_tokens], ['cache', (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)]]) {
             const n = typeof v === 'number' && v > 0 ? v : 0;
             if (n > r[k]) { sv[k] += n - r[k]; r[k] = n; }
@@ -971,7 +972,7 @@ const CTX_LABELS = ['〜5万', '5〜10万', '10〜15万', '15〜20万', '20〜40
 const GAP_MS = 3600 * 1000;
 const r6 = x => Math.floor(x * 1e6 + 0.5) / 1e6;
 function tokenStats(acc){
-  const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts));
+  const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts) && r.u !== false);   // usage の無い応答（記録の行だけ）は数えない
   const ctxOf = r => (r.inp || 0) + (r.cr || 0) + (r.cw || 0);
   const bins = CTX_LABELS.map(label => ({ label, n: 0 }));
   const by = {};
@@ -1338,7 +1339,7 @@ function drawTokenCard(T){
   text(big, L - 8, 432, `500 230px ${NUM}`, P.accent);
   if (T.n) text('%', L - 8 + bw + 8, 432, `400 84px ${NUM}`, P.accent);
   x.font = `500 36px ${GOTHIC}`;
-  const lead = wrapJa(x, `応答の ${Math.round(share * 100)}% が、15万トークンを超える文脈で動いていた`, CW).slice(0, 2);
+  const lead = wrapJa(x, T.n ? `応答の ${Math.round(share * 100)}% が、15万トークンを超える文脈で動いていた` : 'ログに、応答ごとのトークンの記録がありません', CW).slice(0, 2);
   lead.forEach((ln, i) => text(ln, L, 506 + i * 52, `500 36px ${GOTHIC}`, P.ink));
   const tools = Object.keys(T.by || {}).sort();
   text(`全 ${fmt(T.n)} 応答${tools.length > 1 ? `（${tools.map(k => TOOL_NAME[k] + ' ' + fmt(T.by[k].n)).join('・')}）` : ''}`, L, 506 + lead.length * 52 + 8, `400 22px ${GOTHIC}`, P.ink2);
@@ -1563,6 +1564,7 @@ function tokenDetailsHTML(T){
     sec('測り方', '何を数えて、何を数えないか', `<p class="fine">ログ（Claude Code の usage・Codex の token_usage_record・Antigravity の step）の応答ごとの使用量を、同じ応答の重複は1回にして数えています。プロジェクトのフォルダは使いません。ログはブラウザの中で読み、外に出しません。</p>`);
 }
 function tokenShareText(T){
+  if (!T.n) return '';
   const lines = ['自分の AI コーディングのログで、応答ごとの文脈の大きさを数えました',
     `・15万トークンを超える文脈での応答：${pctOf(T.over, T.n)}（全 ${fmt(T.n)} 応答）`,
     `・1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で、大量のキャッシュ作成${T.matched ? `（中央値 ${fmtTok(T.matchedMedianCw)} トークン）` : ''}`,
@@ -1727,8 +1729,9 @@ function compareHTML(R){
   const habRows = hab.length ? hab.map(o => li(esc(o.label) + markLabel(o.id), num(o.a, o.b, fmt, true))).join('') : '<li><span>直しの型</span><b>—</b></li>';
   const warn = p.projectName && R.projectName && p.projectName !== R.projectName ? `<p class="fine"><b>前回は別のプロジェクト（${esc(p.projectName)}）の結果です。</b>同じプロジェクトの JSON を選んでください。</p>` : '';
   const strictWarn = !!p.strict !== !!R.strict ? '<p class="fine"><b>厳密モードの設定が前回と違います。</b>同じ設定で比べてください。</p>' : '';
+  const sinceWarn = (p.since || null) !== (R.since || null) ? `<p class="fine"><b>「この日時以降」の区切りが前回と違います</b>（前回 ${p.since ? esc(localTime(p.since)) + ' 以降' : '区切りなし'}・今回 ${R.since ? esc(localTime(R.since)) + ' 以降' : '区切りなし'}）。数えた行の範囲が違うので、同じ区切りで比べてください。</p>` : '';   // Codex の指摘 PR #21
   const aiWarn = !sameAI ? `<p class="fine"><b>前回は ${esc(names(prevSet))} の結果、今回は ${esc(names(curSet))} の結果です。</b>書いた AI が違うので、数の差は AI の違いも含みます。</p>` : '';
-  return sec('前回', '前回と比べる', `${warn}${strictWarn}${aiWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
+  return sec('前回', '前回と比べる', `${warn}${strictWarn}${sinceWarn}${aiWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
   <p class="fine">前回＝${esc(p.savedAt || '—')} に保存した JSON（${esc(p.projectName || '—')}）。ログは30日で消えるので、期間は重ならないことがあります。「ログの外で変わった・消えた」と「直しの型」は減った方が良い＝緑。</p>`, `<button type="button" class="btn small ghost" id="clearPrev">前回を外す</button>`);
 }
 /* 頼み方 × 残った1行あたりの出力トークン：どの頼み方が高くついて消えたか、安くて残ったか */
@@ -1826,7 +1829,7 @@ function renderAll(){
   if (tab === 'tokens') {
     $('#details').innerHTML = tokenDetailsHTML(currentT);
     if (currentT.sample) { pill.textContent = '見本'; pill.className = 'pill'; st.textContent = '架空のデータで表示しています。AI のログを入れると、あなたの数字に変わります（プロジェクトのフォルダは要りません）。'; }
-    else { pill.textContent = 'あなたのログ'; pill.className = 'pill mine'; st.textContent = `${fmt(currentT.n)} 応答のログから作りました。`; }
+    else { pill.textContent = 'あなたのログ'; pill.className = 'pill mine'; st.textContent = currentT.n ? `${fmt(currentT.n)} 応答のログから作りました。` : 'ログを読みましたが、応答ごとのトークンの記録がありませんでした。「コードの手直し」は使えます。'; }
     $('#resetBtn').hidden = !!currentT.sample;
     $('#snapRow').hidden = true;
     return;
@@ -2025,7 +2028,7 @@ async function handleProject(list){
 }
 function sinceMs(){ const v = $('#optSince').value; const t = v ? new Date(v).getTime() : NaN; return Number.isFinite(t) ? t : undefined; }
 async function maybeAnalyze(){
-  if (inputs.acc) { finalizeGemini(inputs.acc); currentT = tokenStats(inputs.acc); if (!currentT.n) currentT = Object.assign(sampleTokens(), { sample: false, n: 0 }); }
+  if (inputs.acc) { finalizeGemini(inputs.acc); currentT = tokenStats(inputs.acc); }   // 応答の記録が無くても見本の数は使わない（0 のまま・Codex の指摘 PR #21）
   if (!inputs.acc || !inputs.project) { renderAll(); return; }
   showProgress('突き合わせ中', 1, 1, 1);
   await tick();

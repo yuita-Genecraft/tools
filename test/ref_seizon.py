@@ -199,9 +199,10 @@ def handle_line(line, acc):
             else:
                 sv = sess_of(acc, sid)
                 if r is None:
-                    r = {"sid": sid, "out": 0, "inp": 0, "cache": 0, "cr": 0, "cw": 0, "cw1h": 0, "ts": ts, "side": bool(o.get("isSidechain"))}; acc["resp"][mid] = r; sv["msgs"] += 1
+                    r = {"sid": sid, "out": 0, "inp": 0, "cache": 0, "cr": 0, "cw": 0, "cw1h": 0, "ts": ts, "side": bool(o.get("isSidechain")), "u": False}; acc["resp"][mid] = r; sv["msgs"] += 1
                 u = o["message"].get("usage")
                 if isinstance(u, dict):
+                    r["u"] = True
                     for k, v in (("out", u.get("output_tokens")), ("inp", u.get("input_tokens")),
                                  ("cache", (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0))):
                         n = v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 0
@@ -871,7 +872,7 @@ GAP_MS = 3600 * 1000
 
 def token_stats(acc):
     """app.html の tokenStats と同じ（文脈とトークン・ログだけ）"""
-    rs = [r for r in acc["resp"].values() if r.get("ts") is not None]
+    rs = [r for r in acc["resp"].values() if r.get("ts") is not None and r.get("u") is not False]   # usage の無い応答は数えない
     ctx_of = lambda r: (r.get("inp") or 0) + (r.get("cr") or 0) + (r.get("cw") or 0)
     bins = [{"label": l, "n": 0} for l in CTX_LABELS]
     by = {}; w = {"out": 0, "inp": 0, "cw": 0, "cr": 0}

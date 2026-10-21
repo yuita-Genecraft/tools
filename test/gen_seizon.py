@@ -403,6 +403,8 @@ T1 = [tk("2026-09-20T09:00:00.000Z", "tm1", 3, 0, 30000),            # 文脈 30
       #   3時間あけて再開：キャッシュが読めている＝一致しない
       tk("2026-09-20T14:10:00.000Z", "tm5", 3, 200000, 5000)]        # 205,003（20〜40万）
 write_log(LOGS4 / "projects" / "-Users-t-dev-tok" / "t1.jsonl", T1)
+#   別の会話 t2：文脈 450,003（40〜70万）の応答が1つだけ＝40万超（再開は無い）
+write_log(LOGS4 / "projects" / "-Users-t-dev-tok" / "t2.jsonl", [tk("2026-09-20T12:00:00.000Z", "tm7", 3, 400000, 50000, sid="t2")])
 CX4 = [cx("2026-09-21T09:00:00.000Z", "session_meta", {"id": "cx-t", "cwd": "/Users/t/dev/tok"}),
        cx("2026-09-21T09:00:05.000Z", "token_usage_record", {"response_id": "tr1", "usage": {"input_tokens": 160000, "cached_input_tokens": 150000, "cache_write_input_tokens": 0, "output_tokens": 50}}),   # 160,000
        #   2時間あけて、キャッシュが読めていない（Codex はキャッシュ書き込みが記録に無い＝一致しない。再開としては数える）

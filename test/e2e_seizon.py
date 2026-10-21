@@ -54,8 +54,12 @@ HAND_MULTI = dict(written=12, alive=9, rewritten=2, human=1, edits=5, sessions=2
                   rows=[("codex:cx-1", "codex", "x.ts を作って", 120, 2, 1, 5, 3, 40), ("gemini:11111111-2222-4333-8444-555555555555", "gemini", "y.py を作って", 80, 5, 1, 7, 6, 13)])
 # 文脈とトークン（logs4・フォルダ無し）：Claude 6 応答（tm2 の2行は1応答）＋ Codex 2 応答＝8。15万超＝tm2・tm3・tm4・tm5・tr1・tr2＝6
 # 再開（1時間以上あけた・サブエージェントは除く）＝t1 の 09:10→11:10・11:10→14:10、cx-t の 09:00→11:00＝3。一致＝tm4 だけ（前 220,003・読めた 1万＜2割・書いた 20万＞半分）
-HAND_TOKENS = dict(n=8, over=6, bins=[2, 0, 0, 3, 3, 0, 0], resumes=3, matched=1, matchedMedianCw=200000,
-                   by={"claude": {"n": 6, "over": 4, "resumes": 2, "matched": 1}, "codex": {"n": 2, "over": 2, "resumes": 1, "matched": 0}},
+# t2 の tm7（文脈 450,003）だけが 40万超＝数では 1/9。使用量の重み（料金比・出力 5・入力 1・書き込み 1.25（1時間 2）・読み 0.1）を手で足すと
+#   tm1 38,003・tm2 178,503・tm3 80,003・tm6 178・tm4 401,503（1時間の書き込み）・tm5 26,753・tm7 103,003・tr1 25,250・tr2 170,300＝計 1,023,496
+#   40万超＝103,003／1,023,496＝0.100638・一致した再開（tm4）＝401,503／1,023,496＝0.392286
+HAND_TOKENS = dict(n=9, over=7, bins=[2, 0, 0, 3, 3, 1, 0], resumes=3, matched=1, matchedMedianCw=200000,
+                   heavy={"n": 1, "w": 0.100638}, matchedW=0.392286, binsW=[0.037304, 0.0, 0.0, 0.365466, 0.496591, 0.100638, 0.0],
+                   by={"claude": {"n": 7, "over": 5, "resumes": 2, "matched": 1}, "codex": {"n": 2, "over": 2, "resumes": 1, "matched": 0}},
                    latest={"sid": "t1", "tool": "claude", "ts": "2026-09-20T11:10:00.000Z", "gapMin": 120, "prevCtx": 220003, "cr": 10000, "cw": 200000})
 LOGS4 = HERE / "seizon" / "logs4"
 # 書き直し（alpha）：a.ts の toArray の行・gone.ts の LEGACY の行・multi.ts の exponential の行・re.ts の RE2 の行＝4か所・4行・4ファイル
@@ -187,13 +191,38 @@ with sync_playwright() as p:
             curT = page.evaluate("JSON.parse(JSON.stringify(window.__seizon.currentT))")
             expT = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")))
             ok = True
-            for k in ("n", "over", "bins", "by", "period", "resumes", "matched", "matchedMedianCw", "latest", "weighted"):
+            for k in ("n", "over", "bins", "by", "period", "resumes", "matched", "matchedMedianCw", "latest", "weighted", "heavy", "matchedW", "since"):
                 ok &= check(f"tokens js=py {k}", curT[k], expT[k])
             for k, v in HAND_TOKENS.items():
-                ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else curT[k], v)
-            ok &= check("tokens weighted sums to 1", round(sum(curT["weighted"].values()), 6), 1.0)
+                ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else [b["w"] for b in curT["bins"]] if k == "binsW" else curT[k], v)
+            ok &= check("tokens weighted sums to 1", abs(sum(curT["weighted"].values()) - 1) < 1e-5, True)
             tok_txt = page.input_value("#shareText")
-            ok &= check("tokens share text", ("75%" in tok_txt, "#AI開発ログマップ" in tok_txt, "t1" in tok_txt), (True, True, False))
+            ok &= check("tokens share text", ("使用量の 10% は" in tok_txt, "数では 11%" in tok_txt, "#AI開発ログマップ" in tok_txt, "t1" in tok_txt), (True, True, True, False))
+            # 日時で区切る（文脈とトークン）：9/21 以降＝Codex の2応答だけ・再開 1・40万超 0
+            L4 = [{"path": str(f), "text": f.read_text(encoding="utf-8")} for f in sorted(LOGS4.rglob("*.jsonl"))]
+            T_SINCE = 1789948800000   # 2026-09-21T00:00Z
+            ts_js = page.evaluate("([l, t]) => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l, t)))", [L4, T_SINCE])
+            ts_py = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")), since=T_SINCE)
+            ok &= check("tokens since js=py", ts_js, ts_py)
+            ok &= check("tokens since hand", (ts_js["n"], ts_js["resumes"], ts_js["heavy"]["n"], ts_js["since"]), (2, 1, 0, "2026-09-21T00:00:00.000Z"))
+            # 区切りが再開の間に入る（tm3 09:10 と tm4 11:10 の間の 10:00）＝tm4 の再開は数える（相手の tm3 は区切りの前でも使う・Codex の指摘 PR #22）
+            T_MID = 1789898400000   # 2026-09-20T10:00Z
+            tm_js = page.evaluate("([l, t]) => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l, t)))", [L4, T_MID])
+            tm_py = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")), since=T_MID)
+            ok &= check("tokens since mid js=py", tm_js, tm_py)
+            ok &= check("tokens since mid hand", (tm_js["n"], tm_js["resumes"], tm_js["matched"], tm_js["matchedW"] > 0), (6, 3, 1, True))
+            # 区切りちょうど（文脈 400,000・150,000）は「超」に入れない
+            def tkb(mid, cr, ts):
+                return json.dumps({"type": "assistant", "sessionId": "bd", "uuid": "u" + mid, "timestamp": ts, "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 0, "output_tokens": 1, "cache_read_input_tokens": cr, "cache_creation_input_tokens": 0}}})
+            tb = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", [{"path": "b.jsonl", "text": tkb("b1", 400000, "2026-09-22T00:00:00.000Z") + "\n" + tkb("b2", 150000, "2026-09-22T00:01:00.000Z") + "\n"}])
+            ok &= check("tokens boundary", (tb["heavy"]["n"], tb["over"], [b["n"] for b in tb["bins"]]), (0, 1, [0, 0, 1, 0, 1, 0, 0]))
+            # 2行目の言い回し：使用量の方が小さい時は「しかないのに」と書かない
+            ok &= check("token lead neutral", page.evaluate("window.__seizon.tokenLead({n: 10, heavy: {n: 5, w: 0.3}})"), "応答の数では 50%、使用量では 30%")
+            ok &= check("token lead contrast", page.evaluate("window.__seizon.tokenLead({n: 100, heavy: {n: 28, w: 0.53}})"), "応答の数では 28% しかないのに、使用量では 53%")
+            page.fill("#optSince", "2026-09-21T09:00"); page.dispatch_event("#optSince", "change")
+            page.wait_for_function("window.__seizon.currentT.since === '2026-09-21T00:00:00.000Z'", timeout=20000)
+            ok &= check("tokens since ui", page.evaluate("window.__seizon.currentT.n"), 2)
+            page.click("#clearSince"); page.wait_for_function("window.__seizon.currentT.since === null", timeout=20000)
             ok &= check("tokens details latest", page.evaluate("(t => t.includes('2時間') && t.includes('20:10'))(document.querySelector('#details .latest').textContent)"), True)
             page.screenshot(path=str(SHOTS / "seizon-tokens-mine.png"), full_page=True)
             src = page.get_attribute("#cardImg", "src")

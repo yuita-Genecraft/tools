@@ -211,6 +211,11 @@ with sync_playwright() as p:
             tm_py = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")), since=T_MID)
             ok &= check("tokens since mid js=py", tm_js, tm_py)
             ok &= check("tokens since mid hand", (tm_js["n"], tm_js["resumes"], tm_js["matched"], tm_js["matchedW"] > 0), (6, 3, 1, True))
+            # 区切りちょうど（文脈 400,000・150,000）は「超」に入れない
+            def tkb(mid, cr, ts):
+                return json.dumps({"type": "assistant", "sessionId": "bd", "uuid": "u" + mid, "timestamp": ts, "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 0, "output_tokens": 1, "cache_read_input_tokens": cr, "cache_creation_input_tokens": 0}}})
+            tb = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", [{"path": "b.jsonl", "text": tkb("b1", 400000, "2026-09-22T00:00:00.000Z") + "\n" + tkb("b2", 150000, "2026-09-22T00:01:00.000Z") + "\n"}])
+            ok &= check("tokens boundary", (tb["heavy"]["n"], tb["over"], [b["n"] for b in tb["bins"]]), (0, 1, [0, 0, 1, 0, 1, 0, 0]))
             # 2行目の言い回し：使用量の方が小さい時は「しかないのに」と書かない
             ok &= check("token lead neutral", page.evaluate("window.__seizon.tokenLead({n: 10, heavy: {n: 5, w: 0.3}})"), "応答の数では 50%、使用量では 30%")
             ok &= check("token lead contrast", page.evaluate("window.__seizon.tokenLead({n: 100, heavy: {n: 28, w: 0.53}})"), "応答の数では 28% しかないのに、使用量では 53%")

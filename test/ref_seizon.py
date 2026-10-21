@@ -887,19 +887,19 @@ def token_stats(acc, since=None):
     over = 0; heavy_n = 0; heavy_w = 0; tmin = None; tmax = None
     for r in rs:
         c = ctx_of(r); i = 0
-        while i < len(CTX_EDGES) and c >= CTX_EDGES[i]:
+        while i < len(CTX_EDGES) and c > CTX_EDGES[i]:
             i += 1
         bins[i]["n"] += 1
         v = by.setdefault(tool_of(r["sid"]), {"n": 0, "over": 0, "resumes": 0, "matched": 0})
         v["n"] += 1
-        if c >= 150000:
+        if c > 150000:
             v["over"] += 1; over += 1
         wo = (r.get("out") or 0) * 5; wi = r.get("inp") or 0
         wc = ((r.get("cw") or 0) - (r.get("cw1h") or 0)) * 1.25 + (r.get("cw1h") or 0) * 2; wr = (r.get("cr") or 0) * 0.1
         w["out"] += wo; w["inp"] += wi; w["cw"] += wc; w["cr"] += wr
         wr1 = w_of(r)
         bins[i]["w"] += wr1
-        if c >= HEAVY:
+        if c > HEAVY:
             heavy_n += 1; heavy_w += wr1
         tmin = r["ts"] if tmin is None or r["ts"] < tmin else tmin
         tmax = r["ts"] if tmax is None or r["ts"] > tmax else tmax

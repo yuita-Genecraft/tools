@@ -116,6 +116,20 @@ def mk_write(path, content, ts, cwd, tid):
     return json.dumps(use) + "\n" + json.dumps(res) + "\n"
 
 IDX = "export const idx = 1;\nexport const idy = 2;\n"
+def mk_edit(path, old, new, orig, ts, cwd, tid):
+    use = {"type": "assistant", "cwd": cwd, "sessionId": "sx", "timestamp": ts, "uuid": "u-" + tid,
+           "message": {"role": "assistant", "content": [{"type": "tool_use", "id": tid, "name": "Edit", "input": {"file_path": path, "old_string": old, "new_string": new}}]}}
+    res = {"type": "user", "cwd": cwd, "sessionId": "sx", "timestamp": ts, "uuid": "r-" + tid,
+           "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "content": "The file has been updated."}]},
+           "toolUseResult": {"filePath": path, "oldString": old, "newString": new, "originalFile": orig, "structuredPatch": []}}
+    return json.dumps(use) + "\n" + json.dumps(res) + "\n"
+# 日時で区切った書き直し（Codex の指摘 PR #21）：9/1 に2行書き、9/5 に1行目を書き換え（区切りより前に入った行を消す）、9/6 に 9/5 の行を書き換え（区切りより後に入った行を消す）
+RW_V1 = "export const one = 1;\nexport const two = 2;\n"
+RW_V2 = "export const uno = 1;\nexport const two = 2;\n"
+RW_LOGS = (mk_write("/rw/x.ts", RW_V1, "2026-09-01T00:00:00.000Z", "/rw", "w1")
+           + mk_edit("/rw/x.ts", "export const one = 1;", "export const uno = 1;", RW_V1, "2026-09-05T00:00:00.000Z", "/rw", "w2")
+           + mk_edit("/rw/x.ts", "export const uno = 1;", "export const ichi = 1;", RW_V2, "2026-09-06T00:00:00.000Z", "/rw", "w3"))
+RW_PROJ = {"x.ts": "export const ichi = 1;\nexport const two = 2;\n"}
 SCENES = {
     # 同数の候補（/repo と /repo/src）＝cwd と同じ /repo を選ぶ
     "tie-cwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t1")],
@@ -240,6 +254,11 @@ with sync_playwright() as p:
                 py = ref_seizon.run_texts(sc["logs"], sc["project"], sc["name"])
                 for k, v in sc["want"].items():
                     ok &= check(f"scene {name} {k}", (js[k], py[k]), (v, v))
+            for since, want in ((None, (2, 2)), (SINCE, (1, 1))):
+                js = page.evaluate("([l, p, t]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'rw', false, t)))", [[{"path": "x.jsonl", "text": RW_LOGS}], [{"rel": k, "text": v} for k, v in RW_PROJ.items()], since])
+                py = ref_seizon.run_texts([RW_LOGS], RW_PROJ, "rw", since=since)
+                ok &= check(f"rewrite since={since} js", (js["rewriteTotal"]["events"], js["rewriteTotal"]["lines"]), want)
+                ok &= check(f"rewrite since={since} py=js", (py["rewriteTotal"], py["rewriteEvents"], py["written"]), (js["rewriteTotal"], js["rewriteEvents"], js["written"]))
             # 7) ログのフォルダを右（プロジェクト）に入れた時＝「ログのフォルダのようです」で止まり、前の結果は残る（2026-10-20 に本人が踏んだ）
             page.set_input_files("#projInput", str(LOGS / "projects"))
             page.wait_for_function("document.getElementById('statusPill').textContent === '読めませんでした'", timeout=20000)

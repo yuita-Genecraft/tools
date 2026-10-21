@@ -742,7 +742,7 @@ function applyEvents(evs, acc, strict){
   // 書き直し＝AI が前に書いた行を、後の Edit／Write で AI 自身が消した。編集（seq）とファイルごとに1件
   const rw = new Map(), addedBy = new Map();
   const evKey = (p, ev) => ev.seq + '\u0000' + p;
-  const noteGone = (p, k, ev) => { const key = evKey(p, ev); let e = rw.get(key); if (!e) { e = { path: p, ts: ev.ts, sid: ev.sid, seq: ev.seq, gone: [] }; rw.set(key, e); } e.gone.push(k); };
+  const noteGone = (p, k, ev, rec) => { const key = evKey(p, ev); let e = rw.get(key); if (!e) { e = { path: p, ts: ev.ts, sid: ev.sid, seq: ev.seq, gone: [], goneTs: [] }; rw.set(key, e); } e.gone.push(k); e.goneTs.push(rec.ts); };   // goneTs＝消えた行が入った時刻（日時で区切る時に、区切りより前に入った行を外す）
   const knownAdd = (p, keys) => { let s = known.get(p); if (!s) { s = new Set(); known.set(p, s); } for (const k of keys) s.add(k); };
   const claudeAdd = (p, k, ev) => {
     let m = claude.get(p); if (!m) { m = new Map(); claude.set(p, m); }
@@ -752,7 +752,7 @@ function applyEvents(evs, acc, strict){
     if (rec) { if (rec.removed) { rec.ts = ev.ts; rec.sid = ev.sid; rec.seq = ev.seq; } rec.removed = false; }
     else m.set(k, { ts: ev.ts, sid: ev.sid, seq: ev.seq, removed: false });
   };
-  const claudeRemove = (p, k, ev) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) { if (!rec.removed) noteGone(p, k, ev); rec.removed = true; } };
+  const claudeRemove = (p, k, ev) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) { if (!rec.removed) noteGone(p, k, ev, rec); rec.removed = true; } };
   const applyEdit = (p, oldS, newS, ev) => {
     const oldK = new Set(lineKeys(oldS, strict)), newK = new Set(lineKeys(newS, strict));
     for (const k of newK) if (!oldK.has(k)) claudeAdd(p, k, ev);
@@ -783,7 +783,7 @@ function applyEvents(evs, acc, strict){
       else if (tur && typeof tur.originalFile === 'string') for (const k of lineKeys(tur.originalFile, strict)) pre.add(k);
       for (const k of cur) if (!pre.has(k)) claudeAdd(p, k, ev);
       const m = claude.get(p);
-      if (m) for (const [k, rec] of m) if (!cur.has(k)) { if (!rec.removed) noteGone(p, k, ev); rec.removed = true; }
+      if (m) for (const [k, rec] of m) if (!cur.has(k)) { if (!rec.removed) noteGone(p, k, ev, rec); rec.removed = true; }
       known.set(p, new Set(cur));
     } else continue;
     applied.push({ path: p, ts: ev.ts, sid: ev.sid, name: ev.name, cwd: ev.cwd });
@@ -917,7 +917,9 @@ function analyzeParsed(acc, project, projectName, strict, since){
   // 頼み方：セッション全体の出力トークンを「そのセッションで Claude が書いた行のうち、このリポジトリの行の割合」で按分し、今は無い行の分を見積もる
   for (const m of claude.values()) for (const rec of m.values()) { if (rec.ts < sinceMs) continue; const ps = perSess.get(repSid(rec.sid)); if (ps) ps.writtenAll++; }
   // 書き直しの集中：このリポジトリの書き直しをファイルごとに数え、上位3ファイルの各回に「書き直す前の本人の指示」を添える（理由は決めない）
-  const rwIn = rewrites.filter(e => e.path.startsWith(prefix) && e.ts >= sinceMs);
+  // 日時で区切った時は、区切りより後に入った行の書き直しだけ（区切りより前に入った行を後で消した分は数えない・Codex の指摘 PR #21）
+  const rwIn = rewrites.filter(e => e.path.startsWith(prefix) && e.ts >= sinceMs)
+    .map(e => sinceMs === -Infinity ? e : Object.assign({}, e, { gone: e.gone.filter((_, i) => e.goneTs[i] >= sinceMs) })).filter(e => e.gone.length);
   const byFile = new Map();
   for (const e of rwIn) { const f = e.path.slice(prefix.length); let v = byFile.get(f); if (!v) { v = { file: f, events: 0, lines: 0, sids: new Set() }; byFile.set(f, v); } v.events++; v.lines += e.gone.length; v.sids.add(repSid(e.sid)); }
   const aliasOfFile = new Map([...R.files, ...R.missingFiles].map(f => [f.file, f.alias]));

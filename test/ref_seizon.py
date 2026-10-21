@@ -472,12 +472,12 @@ def build_events(acc):
 def apply_events(evs, acc, strict):
     claude, known = {}, {}
     rw, added_by = {}, {}   # 書き直し（app.html の applyEvents と同じ）
-    def note_gone(p, k, ev):
+    def note_gone(p, k, ev, rec):
         key = (ev["seq"], p)
         e = rw.get(key)
         if e is None:
-            e = {"path": p, "ts": ev["ts"], "sid": ev["sid"], "seq": ev["seq"], "gone": []}; rw[key] = e
-        e["gone"].append(k)
+            e = {"path": p, "ts": ev["ts"], "sid": ev["sid"], "seq": ev["seq"], "gone": [], "goneTs": []}; rw[key] = e
+        e["gone"].append(k); e["goneTs"].append(rec["ts"])
     def known_add(p, keys):
         known.setdefault(p, set()).update(keys)
     def claude_add(p, k, ev):
@@ -494,7 +494,7 @@ def apply_events(evs, acc, strict):
         rec = claude.get(p, {}).get(k)
         if rec:
             if not rec["removed"]:
-                note_gone(p, k, ev)
+                note_gone(p, k, ev, rec)
             rec["removed"] = True
     def apply_edit(p, old_s, new_s, ev):
         # 並びを保つ（JS の Set と同じ挿入順）＝直し癖の hunk は Claude が書いた順に依存する。set() だと PYTHONHASHSEED で順が変わる
@@ -549,7 +549,7 @@ def apply_events(evs, acc, strict):
             for k, rec in claude.get(p, {}).items():
                 if k not in cur:
                     if not rec["removed"]:
-                        note_gone(p, k, ev)
+                        note_gone(p, k, ev, rec)
                     rec["removed"] = True
             known[p] = set(cur)
         else:
@@ -1036,6 +1036,9 @@ def analyze(acc, project, project_name, strict, since=None):
                 ps["writtenAll"] += 1
     # 書き直しの集中（app.html と同じ）
     rw_in = [e for e in rewrites if e["path"].startswith(prefix) and e["ts"] >= frm]
+    if frm != float("-inf"):   # 区切りより前に入った行の書き直しは数えない（app.html と同じ）
+        rw_in = [dict(e, gone=[k for k, t in zip(e["gone"], e["goneTs"]) if t >= frm]) for e in rw_in]
+        rw_in = [e for e in rw_in if e["gone"]]
     by_file = {}
     for e in rw_in:
         f = e["path"][len(prefix):]
@@ -1098,7 +1101,7 @@ def load_project(project_dir):
         project[rel] = text
     return project
 
-def run_texts(log_texts, project, project_name, strict=False):
+def run_texts(log_texts, project, project_name, strict=False, since=None):
     """文字列から同じ計算（app.html の analyzeTexts と対）。log_texts: [str]、project: {rel: text}"""
     acc = new_acc()
     for text in log_texts:
@@ -1116,7 +1119,7 @@ def run_texts(log_texts, project, project_name, strict=False):
     for rel, text in project.items():
         if project_filter(rel, utf16len(text)) and "\x00" not in text[:4096]:
             pm[norm_path(rel)] = text
-    return analyze(acc, pm, project_name or "", strict)
+    return analyze(acc, pm, project_name or "", strict, since)
 
 def load_acc(log_paths):
     acc = new_acc()

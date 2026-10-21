@@ -2,7 +2,7 @@
 """生存率（cc-seizon/app.html）の別実装。ブラウザ版と同じ規則で、同じ数字が出るかを突き合わせるためのもの。
 規則の正本は app.html のコメント。ここは写し（違いが出たらどちらかが間違い）。
 使い方: run(log_paths, project_dir, strict=False) -> dict"""
-import json, math, os, pathlib, re
+import math, json, os, pathlib, re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -889,10 +889,11 @@ def token_stats(acc):
         w["cw"] += ((r.get("cw") or 0) - (r.get("cw1h") or 0)) * 1.25 + (r.get("cw1h") or 0) * 2; w["cr"] += (r.get("cr") or 0) * 0.1
         tmin = r["ts"] if tmin is None or r["ts"] < tmin else tmin
         tmax = r["ts"] if tmax is None or r["ts"] > tmax else tmax
+    rep_of = resolve_sessions(acc)[0]   # 再開で写った応答は読む順で sid が変わる＝つないだ会話の代表でまとめる
     by_sid = {}
     for r in rs:
         if not r.get("side"):
-            by_sid.setdefault(r["sid"], []).append(r)
+            by_sid.setdefault(rep_of.get(r["sid"], r["sid"]), []).append(r)
     resumes = 0; matched = []
     for sid in sorted(by_sid):
         a = sorted(by_sid[sid], key=lambda x: (x["ts"], ctx_of(x)))
@@ -913,7 +914,7 @@ def token_stats(acc):
             "period": {"start": date_key(tmin), "end": date_key(tmax)} if rs else None,
             "resumes": resumes, "matched": len(matched), "matchedMedianCw": cws[len(cws) // 2] if cws else 0,
             "latest": {"sid": latest["sid"], "tool": tool_of(latest["sid"]), "ts": iso(latest["ts"]), "gapMin": latest["gapMin"], "prevCtx": latest["prevCtx"], "cr": latest["cr"], "cw": latest["cw"]} if latest else None,
-            "weighted": {"out": w["out"] / wt, "inp": w["inp"] / wt, "cw": w["cw"] / wt, "cr": w["cr"] / wt} if wt else None}
+            "weighted": {k: math.floor(w[k] / wt * 1e6 + 0.5) / 1e6 for k in ("out", "inp", "cw", "cr")} if wt else None}   # 足す順で末尾の桁が揺れる＝6桁に丸める（app.html と同じ式）
 
 def analyze(acc, project, project_name, strict, since=None):
     finalize_gemini(acc)
@@ -1084,7 +1085,7 @@ def load_project(project_dir):
     project_dir = pathlib.Path(project_dir)
     project = {}
     for p in sorted(project_dir.rglob("*")):
-        if not p.is_file():
+        if p.is_symlink() or not p.is_file():   # ブラウザのフォルダ選択はシンボリックリンクを渡さない（実データ：AGENTS.md → GEMINI.md）
             continue
         rel = p.relative_to(project_dir).as_posix()
         if not project_filter(rel, p.stat().st_size):

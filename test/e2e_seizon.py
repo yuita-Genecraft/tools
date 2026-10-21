@@ -264,6 +264,22 @@ with sync_playwright() as p:
             ok &= check("habits sessionStats totals", (Sh["outTotal"], Sh["outGone"], Sh["costly"], Sh["cheap"], cur_h["sessions"]), (500, 307, [], [], 4))
             ok &= check("habits sessionStats rows", [(r["sid"], r["first"], r["out"], r["outRepo"], r["msgs"], r["members"], r["edits"], r["written"], r["alive"], r["perAlive"]) for r in Sh["rows"]],
                         [("h4", "tool.py を作って", 200, 200, 2, 2, 2, 5, 3, 67), ("h1", "app.ts を書いて", 100, 100, 1, 1, 1, 10, 3, 33), ("h2", "util.ts を書いて", 100, 100, 1, 1, 1, 7, 3, 33), ("h3", "キャッシュをとりあえず作って", 100, 100, 1, 1, 1, 5, 0, None)])
+            # 文脈とトークンは、ログを読む順に左右されない（h5 が h4 を --resume で写す＝どちらを先に読むかで応答の sid が変わる。実データで再開の数が 2 ずれた）
+            L2 = [{"path": str(f), "text": f.read_text(encoding="utf-8")} for f in sorted(LOGS2.rglob("*.jsonl"))]
+            t_fwd = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", L2)
+            t_rev = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", L2[::-1])
+            ok &= check("tokens order independent", {k: t_rev[k] for k in ("n", "resumes", "matched", "by", "latest")}, {k: t_fwd[k] for k in ("n", "resumes", "matched", "by", "latest")})
+            ok &= check("tokens py reversed", {k: ref_seizon.run_tokens(sorted(LOGS2.rglob("*.jsonl"))[::-1])[k] for k in ("n", "resumes", "matched", "by")}, {k: t_fwd[k] for k in ("n", "resumes", "matched", "by")})
+            # 写しの場面：a が 9:00・9:05 に応答、--resume した b が同じ2行（同じ uuid・message.id）を写して 11:00 に応答＝つないだ会話で 115 分あいた再開 1 回。
+            # 直す前は a を先に読むと 0 回・b を先に読むと 1 回だった
+            def tkl(sid, uid, mid, ts, cr, cw):
+                return json.dumps({"type": "assistant", "sessionId": sid, "uuid": uid, "timestamp": ts, "isSidechain": False,
+                                   "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 3, "output_tokens": 10, "cache_read_input_tokens": cr, "cache_creation_input_tokens": cw}}})
+            fa = "\n".join([tkl("ra", "u1", "m1", "2026-09-22T00:00:00.000Z", 0, 30000), tkl("ra", "u2", "m2", "2026-09-22T00:05:00.000Z", 30000, 1000)]) + "\n"
+            fb = "\n".join([tkl("rb", "u1", "m1", "2026-09-22T00:00:00.000Z", 0, 30000), tkl("rb", "u2", "m2", "2026-09-22T00:05:00.000Z", 30000, 1000), tkl("rb", "u3", "m3", "2026-09-22T02:00:00.000Z", 0, 31000)]) + "\n"
+            for nm, order in (("a→b", [fa, fb]), ("b→a", [fb, fa])):
+                tj = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", [{"path": f"{i}.jsonl", "text": t} for i, t in enumerate(order)])
+                ok &= check(f"resume copy {nm}", (tj["n"], tj["resumes"], tj["matched"], tj["latest"]["gapMin"] if tj["latest"] else None), (3, 1, 1, 115))
             ok &= check("habits resume shown", page.evaluate("document.getElementById('details').textContent.includes('再開 1 回を含む')"), True)
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])

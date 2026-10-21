@@ -950,6 +950,7 @@ function sessionStats(perSess, sess){
 const CTX_EDGES = [50000, 100000, 150000, 200000, 400000, 700000];
 const CTX_LABELS = ['〜5万', '5〜10万', '10〜15万', '15〜20万', '20〜40万', '40〜70万', '70万〜'];
 const GAP_MS = 3600 * 1000;
+const r6 = x => Math.floor(x * 1e6 + 0.5) / 1e6;
 function tokenStats(acc){
   const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts));
   const ctxOf = r => (r.inp || 0) + (r.cr || 0) + (r.cw || 0);
@@ -967,8 +968,10 @@ function tokenStats(acc){
     if (r.ts < tmin) tmin = r.ts; if (r.ts > tmax) tmax = r.ts;
   }
   // 再開：会話ごと・サブエージェントを除いて時刻順
+  // 再開（--resume）で写った応答は、どちらのファイルを先に読んだかで r.sid が変わる＝つないだ会話の代表でまとめる（読む順に左右されない）
+  const { repOf } = resolveSessions(acc);
   const bySid = new Map();
-  for (const r of rs) { if (r.side) continue; let a = bySid.get(r.sid); if (!a) { a = []; bySid.set(r.sid, a); } a.push(r); }
+  for (const r of rs) { if (r.side) continue; const k = repOf.get(r.sid) || r.sid; let a = bySid.get(k); if (!a) { a = []; bySid.set(k, a); } a.push(r); }
   let resumes = 0; const matched = [];
   for (const [sid, a] of [...bySid.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
     a.sort((x, y) => x.ts - y.ts || ctxOf(x) - ctxOf(y));
@@ -991,7 +994,7 @@ function tokenStats(acc){
     period: rs.length ? { start: dateKey(new Date(tmin)), end: dateKey(new Date(tmax)) } : null,
     resumes, matched: matched.length, matchedMedianCw: cws.length ? cws[Math.floor(cws.length / 2)] : 0,
     latest: latest ? { sid: latest.sid, tool: toolOf(latest.sid), ts: new Date(latest.ts).toISOString(), gapMin: latest.gapMin, prevCtx: latest.prevCtx, cr: latest.cr, cw: latest.cw } : null,
-    weighted: wt ? { out: w.out / wt, inp: w.inp / wt, cw: w.cw / wt, cr: w.cr / wt } : null,
+    weighted: wt ? { out: r6(w.out / wt), inp: r6(w.inp / wt), cw: r6(w.cw / wt), cr: r6(w.cr / wt) } : null,   // 足す順で末尾の桁が揺れる＝6桁に丸める
   };
 }
 

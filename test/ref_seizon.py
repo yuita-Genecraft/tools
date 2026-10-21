@@ -3,7 +3,7 @@
 規則の正本は app.html のコメント。ここは写し（違いが出たらどちらかが間違い）。
 使い方: run(log_paths, project_dir, strict=False) -> dict"""
 import math, json, os, pathlib, re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Tokyo")   # e2e は Chromium のタイムゾーンを Asia/Tokyo にして揃える
@@ -903,12 +903,12 @@ def token_stats(acc, since=None):
             heavy_n += 1; heavy_w += wr1
         tmin = r["ts"] if tmin is None or r["ts"] < tmin else tmin
         tmax = r["ts"] if tmax is None or r["ts"] > tmax else tmax
-    rep_of = resolve_sessions(acc)[0]   # 再開で写った応答は読む順で sid が変わる＝つないだ会話の代表でまとめる
+    rep_of, sess_m = resolve_sessions(acc)   # 再開で写った応答は読む順で sid が変わる＝つないだ会話の代表でまとめる
     by_sid = {}
     for r in rs_all:   # 区切りの直前の応答も再開の相手には使う
         if not r.get("side"):
             by_sid.setdefault(rep_of.get(r["sid"], r["sid"]), []).append(r)
-    resumes = 0; matched = []; matched_w = 0
+    resumes = 0; matched = []; matched_w = 0; matched_ids = set()
     for sid in sorted(by_sid):
         a = sorted(by_sid[sid], key=lambda x: (x["ts"], ctx_of(x)))
         for i in range(1, len(a)):
@@ -922,14 +922,47 @@ def token_stats(acc, since=None):
             if prev > 20000 and (q.get("cr") or 0) < 0.2 * prev and (q.get("cw") or 0) > 0.5 * prev:
                 matched.append({"sid": sid, "ts": q["ts"], "gapMin": jround((q["ts"] - p["ts"]) / 60000), "prevCtx": prev, "cr": q.get("cr") or 0, "cw": q.get("cw") or 0})
                 by[tool_of(sid)]["matched"] += 1
-                matched_w += w_of(q)
+                matched_w += w_of(q); matched_ids.add(id(q))
     cws = sorted(m["cw"] for m in matched)
     latest = sorted(matched, key=lambda m: (-m["ts"], m["sid"]))[0] if matched else None
     wt = w["out"] + w["inp"] + w["cw"] + w["cr"]
     for b in bins:
         b["w"] = r6(b["w"] / wt) if wt else 0
     iso = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(ms) % 1000:03d}Z"
-    return {"n": len(rs), "over": over, "bins": bins, "by": by, "since": iso(since) if since is not None else None,
+    # 5時間ブロックと週（app.html と同じ）
+    HOUR = 3600 * 1000
+    blocks = []; weeks = {}; cur = None; last_ts = float("-inf")
+    for r in sorted(rs_all, key=lambda r: (r["ts"], r["sid"])):   # 境目は区切りより前の応答も使って決める
+        if cur is None or r["ts"] >= cur["end"] or r["ts"] - last_ts >= 5 * HOUR:
+            st = (int(r["ts"]) // HOUR) * HOUR
+            cur = {"start": st, "end": st + 5 * HOUR, "n": 0, "w": 0, "heavyW": 0, "matchedW": 0, "sids": {}}; blocks.append(cur)
+        last_ts = r["ts"]
+        if r["ts"] < frm:
+            continue
+        x = w_of(r); big = ctx_of(r) > HEAVY
+        cur["n"] += 1; cur["w"] += x
+        if big: cur["heavyW"] += x
+        if id(r) in matched_ids: cur["matchedW"] += x
+        k = rep_of.get(r["sid"], r["sid"]); cur["sids"][k] = cur["sids"].get(k, 0) + x
+        d = datetime.fromtimestamp(r["ts"] / 1000, TZ).date(); mon = d - timedelta(days=d.weekday())
+        mk = f"{mon.year}-{mon.month:02d}-{mon.day:02d}"
+        wk = weeks.setdefault(mk, {"start": mk, "n": 0, "w": 0, "heavyW": 0})
+        wk["n"] += 1; wk["w"] += x
+        if big: wk["heavyW"] += x
+    blocks = [b for b in blocks if b["n"]]
+    top_blocks = []
+    for b in sorted(blocks, key=lambda b: (-b["w"], b["start"]))[:5]:
+        ts_, tw = "", -1
+        for k in sorted(b["sids"]):
+            if b["sids"][k] > tw:
+                ts_, tw = k, b["sids"][k]
+        sv = sess_m.get(ts_)
+        top_blocks.append({"start": iso(b["start"]), "end": iso(b["end"]), "n": b["n"], "w": r6(b["w"] / wt) if wt else 0,
+                           "heavyW": r6(b["heavyW"] / b["w"]) if b["w"] else 0, "matchedW": r6(b["matchedW"] / b["w"]) if b["w"] else 0,
+                           "top": {"sid": ts_, "tool": tool_of(ts_), "w": r6(tw / b["w"]) if b["w"] else 0, "first": (sv or {}).get("first") or ""}})
+    week_list = [{"start": v["start"], "n": v["n"], "w": r6(v["w"] / wt) if wt else 0, "heavyW": r6(v["heavyW"] / v["w"]) if v["w"] else 0} for k, v in sorted(weeks.items())]
+    return {"blockCount": len(blocks), "blocks": top_blocks, "weeks": week_list,
+            "n": len(rs), "over": over, "bins": bins, "by": by, "since": iso(since) if since is not None else None,
             "heavy": {"n": heavy_n, "w": r6(heavy_w / wt) if wt else 0}, "matchedW": r6(matched_w / wt) if wt else 0,
             "period": {"start": date_key(tmin), "end": date_key(tmax)} if rs else None,
             "resumes": resumes, "matched": len(matched), "matchedMedianCw": cws[len(cws) // 2] if cws else 0,

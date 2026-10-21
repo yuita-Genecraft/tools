@@ -58,7 +58,9 @@ HAND_MULTI = dict(written=12, alive=9, rewritten=2, human=1, edits=5, sessions=2
 #   tm1 38,003・tm2 178,503・tm3 80,003・tm6 178・tm4 401,503（1時間の書き込み）・tm5 26,753・tm7 103,003・tr1 25,250・tr2 170,300＝計 1,023,496
 #   40万超＝103,003／1,023,496＝0.100638・一致した再開（tm4）＝401,503／1,023,496＝0.392286
 HAND_TOKENS = dict(n=9, over=7, bins=[2, 0, 0, 3, 3, 1, 0], resumes=3, matched=1, matchedMedianCw=200000,
-                   heavy={"n": 1, "w": 0.100638}, matchedW=0.392286, binsW=[0.037304, 0.0, 0.0, 0.365466, 0.496591, 0.100638, 0.0],
+                   heavy={"n": 1, "w": 0.100638}, matchedW=0.392286, blockCount=3, weeks=[{"start": "2026-09-14", "n": 7, "w": 0.808939, "heavyW": 0.124408}, {"start": "2026-09-21", "n": 2, "w": 0.191061, "heavyW": 0.0}],
+                   # 5時間ブロック：9/20 09:00〜14:00 に tm1〜tm7（tm5 14:10 は次のブロック）＝801,193（全体の 0.7828）・うち 40万超 103,003（0.128562）・再開 401,503（0.501131）・t1 が 698,190（0.871438）
+                   blocks0=("2026-09-20T09:00:00.000Z", "2026-09-20T14:00:00.000Z", 6, 0.7828, 0.128562, 0.501131, "t1", 0.871438), binsW=[0.037304, 0.0, 0.0, 0.365466, 0.496591, 0.100638, 0.0],
                    by={"claude": {"n": 7, "over": 5, "resumes": 2, "matched": 1}, "codex": {"n": 2, "over": 2, "resumes": 1, "matched": 0}},
                    latest={"sid": "t1", "tool": "claude", "ts": "2026-09-20T11:10:00.000Z", "gapMin": 120, "prevCtx": 220003, "cr": 10000, "cw": 200000})
 LOGS4 = HERE / "seizon" / "logs4"
@@ -191,10 +193,14 @@ with sync_playwright() as p:
             curT = page.evaluate("JSON.parse(JSON.stringify(window.__seizon.currentT))")
             expT = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")))
             ok = True
-            for k in ("n", "over", "bins", "by", "period", "resumes", "matched", "matchedMedianCw", "latest", "weighted", "heavy", "matchedW", "since"):
+            for k in ("n", "over", "bins", "by", "period", "resumes", "matched", "matchedMedianCw", "latest", "weighted", "heavy", "matchedW", "since", "blockCount", "blocks", "weeks"):
                 ok &= check(f"tokens js=py {k}", curT[k], expT[k])
             for k, v in HAND_TOKENS.items():
-                ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else [b["w"] for b in curT["bins"]] if k == "binsW" else curT[k], v)
+                b0 = curT["blocks"][0]
+                ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else [b["w"] for b in curT["bins"]] if k == "binsW"
+                            else (b0["start"], b0["end"], b0["n"], b0["w"], b0["heavyW"], b0["matchedW"], b0["top"]["sid"], b0["top"]["w"]) if k == "blocks0" else curT[k], v)
+            ok &= check("tokens blocks shown", page.evaluate("document.querySelectorAll('#details .blocks .rwev').length"), 3)
+            ok &= check("tokens weeks shown", page.evaluate("document.querySelectorAll('#details .weeks li:not(.head)').length"), 2)
             ok &= check("tokens weighted sums to 1", abs(sum(curT["weighted"].values()) - 1) < 1e-5, True)
             tok_txt = page.input_value("#shareText")
             ok &= check("tokens share text", ("使用量の 10% は" in tok_txt, "数では 11%" in tok_txt, "#AI開発ログマップ" in tok_txt, "t1" in tok_txt), (True, True, True, False))

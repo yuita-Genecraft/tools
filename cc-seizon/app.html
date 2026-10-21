@@ -240,6 +240,14 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 @media (max-width:520px){.bins.two li{grid-template-columns:62px 1fr 48px 48px;gap:6px}}
 .big-line .n small{font-size:.45em;color:var(--ink-2)}
 .latest{margin-top:10px}
+.blocks .meta{font-size:13px;color:var(--ink-2)}
+.blocks .meta b{font-family:var(--f-mono);color:var(--ink);font-weight:500}
+.blocks .rwev{padding:10px 0 12px 16px}
+.blocks .rows{margin:6px 0 4px}
+.blocks .rows li{padding:5px 0;font-size:13px}
+.blocks p.when{font-size:12px;color:var(--ink-2);margin:6px 0 2px;font-weight:400}
+.blocks q{display:block;font-size:13px;color:var(--ink-2)}
+.bins.weeks li{grid-template-columns:70px 1fr 56px 56px}
 /* 書き直しの各回 */
 .rwlist summary{cursor:pointer;color:var(--ink-2);font-size:13.5px;margin:10px 0}
 .rwevs{list-style:none;margin:0;padding:0;display:grid;gap:10px}
@@ -332,7 +340,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
         <label data-only="rework"><input type="checkbox" id="optHideFiles">ファイル名を隠す</label>
         <label data-only="rework"><input type="checkbox" id="optHideProject">プロジェクト名を隠す</label>
         <label data-only="rework"><input type="checkbox" id="optExamples">典型的な行を1つずつ載せる</label>
-        <label data-only="rework"><input type="checkbox" id="optHidePrompts">指示の冒頭を隠す</label>
+        <label><input type="checkbox" id="optHidePrompts">指示の冒頭を隠す</label>
         <label class="since">この日時以降だけで数える（設定を変えた後と比べる）<input type="datetime-local" id="optSince"><button type="button" class="btn small ghost" id="clearSince">外す</button></label>
       </div>
       <div class="actions">
@@ -989,11 +997,11 @@ function tokenStats(acc, since){
   }
   // 再開：会話ごと・サブエージェントを除いて時刻順
   // 再開（--resume）で写った応答は、どちらのファイルを先に読んだかで r.sid が変わる＝つないだ会話の代表でまとめる（読む順に左右されない）
-  const { repOf } = resolveSessions(acc);
+  const RS = resolveSessions(acc), repOf = RS.repOf;
   const bySid = new Map();
   // 区切りの直前の応答も、区切りの後の再開の相手としては使う（数えるのは区切りの後の応答だけ・Codex の指摘 PR #22）
   for (const r of rsAll) { if (r.side) continue; const k = repOf.get(r.sid) || r.sid; let a = bySid.get(k); if (!a) { a = []; bySid.set(k, a); } a.push(r); }
-  let resumes = 0, matchedW = 0; const matched = [];
+  let resumes = 0, matchedW = 0; const matched = [], matchedSet = new Set();
   for (const [sid, a] of [...bySid.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
     a.sort((x, y) => x.ts - y.ts || ctxOf(x) - ctxOf(y));
     for (let i = 1; i < a.length; i++) {
@@ -1004,7 +1012,7 @@ function tokenStats(acc, since){
       const prev = ctxOf(p);
       if (prev > 20000 && (q.cr || 0) < 0.2 * prev && (q.cw || 0) > 0.5 * prev) {
         matched.push({ sid, ts: q.ts, gapMin: Math.round((q.ts - p.ts) / 60000), prevCtx: prev, cr: q.cr || 0, cw: q.cw || 0 });
-        matchedW += wOf(q);
+        matchedW += wOf(q); matchedSet.add(q);
         by[toolOf(sid)].matched++;
       }
     }
@@ -1013,7 +1021,31 @@ function tokenStats(acc, since){
   const latest = matched.length ? [...matched].sort((x, y) => y.ts - x.ts || cmpStr(x.sid, y.sid))[0] : null;
   const wt = w.out + w.inp + w.cw + w.cr;
   for (const b of bins) b.w = wt ? r6(b.w / wt) : 0;
+  // 5時間ブロック（ccusage と同じ区切り方：最初の応答の時刻を時の単位に切り下げて5時間。間が5時間以上あいたら新しいブロック）と、週（月曜始まり・この端末の時刻）
+  const order = [...rs].sort((a, b) => a.ts - b.ts || cmpStr(a.sid, b.sid));
+  const blocks = [], weekMap = new Map();
+  let cur = null, lastTs = -Infinity;
+  for (const r of order) {
+    if (!cur || r.ts >= cur.end || r.ts - lastTs >= 5 * GAP_MS) { const st = Math.floor(r.ts / GAP_MS) * GAP_MS; cur = { start: st, end: st + 5 * GAP_MS, n: 0, w: 0, heavyW: 0, matchedW: 0, sids: new Map() }; blocks.push(cur); }
+    lastTs = r.ts;
+    const x = wOf(r), big = ctxOf(r) > HEAVY;
+    cur.n++; cur.w += x; if (big) cur.heavyW += x; if (matchedSet.has(r)) cur.matchedW += x;
+    const k = repOf.get(r.sid) || r.sid; cur.sids.set(k, (cur.sids.get(k) || 0) + x);
+    const d = new Date(r.ts), mon = dateKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - (d.getDay() + 6) % 7));
+    let wk = weekMap.get(mon); if (!wk) { wk = { start: mon, n: 0, w: 0, heavyW: 0 }; weekMap.set(mon, wk); }
+    wk.n++; wk.w += x; if (big) wk.heavyW += x;
+  }
+  const topBlocks = [...blocks].sort((a, b) => b.w - a.w || a.start - b.start).slice(0, 5).map(b => {
+    let ts = '', tw = -1;
+    for (const [k, v] of [...b.sids.entries()].sort((x, y) => cmpStr(x[0], y[0]))) if (v > tw) { ts = k; tw = v; }
+    const sv = RS.sess.get(ts);
+    return { start: new Date(b.start).toISOString(), end: new Date(b.end).toISOString(), n: b.n, w: wt ? r6(b.w / wt) : 0,
+      heavyW: b.w ? r6(b.heavyW / b.w) : 0, matchedW: b.w ? r6(b.matchedW / b.w) : 0,
+      top: { sid: ts, tool: toolOf(ts), w: b.w ? r6(tw / b.w) : 0, first: (sv && sv.first) || '' } };   // first＝その会話の最初の指示（画面だけ・カードと投稿文には入れない）
+  });
+  const weeks = [...weekMap.values()].sort((a, b) => cmpStr(a.start, b.start)).map(v => ({ start: v.start, n: v.n, w: wt ? r6(v.w / wt) : 0, heavyW: v.w ? r6(v.heavyW / v.w) : 0 }));
   return {
+    blockCount: blocks.length, blocks: topBlocks, weeks,
     n: rs.length, over, bins, by, since: Number.isFinite(since) ? new Date(since).toISOString() : null,
     heavy: { n: heavyN, w: wt ? r6(heavyW / wt) : 0 },
     matchedW: wt ? r6(matchedW / wt) : 0,   // 一致した再開の応答が、使用量（料金比の推定）に占める割合   // 文脈 40万超の応答の数と、使用量（料金比の推定）に占める割合
@@ -1553,7 +1585,10 @@ const sec = (kicker, title, body, aside) => `<section class="sec" data-kicker="$
 function sampleTokens(){
   return { sample: true, n: 9240, over: 5820, by: { claude: { n: 6100, over: 3900, resumes: 64, matched: 41 }, codex: { n: 3140, over: 1920, resumes: 22, matched: 0 } },
     bins: [{ label: '〜5万', n: 980, w: 0.01 }, { label: '5〜10万', n: 1260, w: 0.03 }, { label: '10〜15万', n: 1180, w: 0.05 }, { label: '15〜20万', n: 1040, w: 0.07 }, { label: '20〜40万', n: 2650, w: 0.33 }, { label: '40〜70万', n: 1430, w: 0.31 }, { label: '70万〜', n: 700, w: 0.20 }],
-    heavy: { n: 2130, w: 0.51 }, matchedW: 0.06, since: null,
+    heavy: { n: 2130, w: 0.51 }, matchedW: 0.06, since: null, blockCount: 74,
+    weeks: [{ start: '2026-09-01', n: 2010, w: 0.21, heavyW: 0.58 }, { start: '2026-09-08', n: 2380, w: 0.27, heavyW: 0.61 }, { start: '2026-09-15', n: 2290, w: 0.26, heavyW: 0.49 }, { start: '2026-09-22', n: 1840, w: 0.20, heavyW: 0.35 }, { start: '2026-09-29', n: 720, w: 0.06, heavyW: 0.31 }],
+    blocks: [{ start: '2026-09-10T01:00:00.000Z', end: '2026-09-10T06:00:00.000Z', n: 312, w: 0.041, heavyW: 0.82, matchedW: 0.11, top: { sid: 'sample1', tool: 'claude', w: 0.77, first: '設定画面に通知の切り替えを足して、テストも書いて' } },
+      { start: '2026-09-16T11:00:00.000Z', end: '2026-09-16T16:00:00.000Z', n: 240, w: 0.033, heavyW: 0.64, matchedW: 0.0, top: { sid: 'sample2', tool: 'codex', w: 0.58, first: 'ログイン周りのエラーを直して' } }],
     period: { start: '2026-09-01', end: '2026-09-30' }, resumes: 86, matched: 41, matchedMedianCw: 286000,
     latest: { sid: 'sample', tool: 'claude', ts: '2026-09-29T00:40:00.000Z', gapMin: 214, prevCtx: 412000, cr: 18000, cw: 395000 },
     weighted: { out: 0.15, inp: 0.01, cw: 0.24, cr: 0.60 } };
@@ -1561,7 +1596,22 @@ function sampleTokens(){
 const pctOf = (a, b) => (b ? Math.round(a / b * 100) + '%' : '—');
 const localTime = iso => { const d = new Date(iso); return `${dateKey(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const hoursMin = m => (m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`);
-function tokenDetailsHTML(T){
+/* 5時間ブロックと週：どの時間帯・どの会話・どの文脈の大きさの応答が使用量を食ったか */
+function blocksHTML(T, hidePrompts){
+  const B = T.blocks || [], Wk = T.weeks || [];
+  if (!B.length) return '';
+  const hm = iso => { const d = new Date(iso); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+  const maxW = Math.max(...Wk.map(v => v.w), 0.0001);
+  const weeks = Wk.length ? `<h3 class="sub">週ごと（月曜始まり）</h3><ul class="bins two weeks"><li class="head"><span class="lab">週</span><span class="bar"></span><b>使用量</b><b>40万超</b></li>${Wk.map(v => `<li><span class="lab">${v.start.slice(5).replace('-', '/')}〜</span><span class="bar"><i class="n" style="width:${(v.w / maxW * 100).toFixed(1)}%"></i><i style="width:${(v.w * v.heavyW / maxW * 100).toFixed(1)}%"></i></span><b>${pct(v.w)}</b><b>${pct(v.heavyW)}</b></li>`).join('')}</ul>
+  <p class="fine">帯は、細い方＝その週の使用量（全体に占める割合）、太い方＝そのうち文脈 40万超の応答の分。右の「40万超」は、その週の使用量のうち 40万超の応答が占める割合です。autoCompact などの設定を変えた週の前と後を比べられます。</p>` : '';
+  const q = t => hidePrompts ? '<i class="dim">（指示の冒頭を隠しています）</i>' : t ? `<q title="${esc(t)}">${esc(t.length > 60 ? t.slice(0, 60) + '…' : t)}</q>` : '<i class="dim">（最初の指示が記録にない）</i>';
+  const tools = Object.keys(T.by || {});
+  const blocks = `<h3 class="sub">使用量が多かった5時間ブロック（全 ${fmt(T.blockCount)} ブロックのうち上位 ${B.length}）</h3><ul class="rwlist blocks">${B.map(b => `<li class="rwev"><div class="meta"><b>${esc(localTime(b.start))}〜${hm(b.end)}</b>　全体の使用量の ${pct(b.w)}・${fmt(b.n)} 応答</div>
+    <ul class="rows"><li><span>そのうち文脈 40万超の応答</span><b>${pct(b.heavyW)}</b></li><li><span>そのうち再開で大量のキャッシュ作成をした応答</span><b>${pct(b.matchedW)}</b></li><li><span>いちばん使った会話${tools.length > 1 ? `（${TOOL_NAME[b.top.tool]}）` : ''}</span><b>${pct(b.top.w)}</b></li></ul><p class="when">その会話の最初の指示</p>${q(b.top.first)}</li>`).join('')}</ul>
+  <p class="fine">ブロックの区切り方は ccusage と同じです（最初の応答の時刻を時の単位に切り下げて5時間。前の応答から5時間以上あいたら新しいブロック）。公式の5時間の枠と時刻がずれることがあります。数えたのはこの端末のログに残った分だけで、別の端末や claude.ai での使用は入りません。割合は料金比の推定で、利用枠の減り方そのものではありません。最初の指示は画面にだけ出し、カード・投稿文には入れません。</p>`;
+  return weeks + blocks;
+}
+function tokenDetailsHTML(T, hidePrompts){
   if (!T || !T.n) return '<p class="fine">ログに、応答ごとの使用トークン（usage）の記録がありません。</p>';
   const tools = Object.keys(T.by).sort();
   const maxBin = Math.max(...T.bins.map(b => Math.max(b.n / T.n, b.w || 0)), 0.01);
@@ -1579,7 +1629,8 @@ function tokenDetailsHTML(T){
   const W = T.weighted;
   const wt = W ? `<ul class="rows"><li><span>キャッシュ読み（文脈を毎回読み直す分）</span><b>${pct(W.cr)}</b></li><li><span>キャッシュ書き込み</span><b>${pct(W.cw)}</b></li><li><span>出力</span><b>${pct(W.out)}</b></li><li><span>入力（キャッシュ以外）</span><b>${pct(W.inp)}</b></li></ul>
   <p class="fine"><b>料金の比で重みづけた推定</b>です（入力 1・キャッシュ書き込み 5分 1.25／1時間 2・キャッシュ読み 0.1・出力 5 の共通の比。モデルごとの単価の違いは入れていません）。トークンの量そのものの割合でも、定額プランの利用枠の減り方でもありません（定額の枠の数え方は公開されていません）。</p>` : '';
-  return sec('文脈', '使用量の行き先（文脈の大きさ別）', ctx) + sec('再開', '1時間以上あけた再開', resume) + (wt ? sec('内訳', '使い道の内訳（料金比の推定）', wt) : '') +
+  const blk = blocksHTML(T, hidePrompts);
+  return sec('文脈', '使用量の行き先（文脈の大きさ別）', ctx) + (blk ? sec('時間', '週と5時間ブロックで見る', blk) : '') + sec('再開', '1時間以上あけた再開', resume) + (wt ? sec('内訳', '使い道の内訳（料金比の推定）', wt) : '') +
     sec('測り方', '何を数えて、何を数えないか', `<p class="fine">ログ（Claude Code の usage・Codex の token_usage_record・Antigravity の step）の応答ごとの使用量を、同じ応答の重複は1回にして数えています。プロジェクトのフォルダは使いません。ログはブラウザの中で読み、外に出しません。</p>`);
 }
 function tokenShareText(T){
@@ -1848,7 +1899,7 @@ function renderAll(){
   renderCard();
   const pill = $('#statusPill'), st = $('#statusText');
   if (tab === 'tokens') {
-    $('#details').innerHTML = tokenDetailsHTML(currentT);
+    $('#details').innerHTML = tokenDetailsHTML(currentT, opts().hidePrompts);
     if (currentT.sample) { pill.textContent = '見本'; pill.className = 'pill'; st.textContent = '架空のデータで表示しています。AI のログを入れると、あなたの数字に変わります（プロジェクトのフォルダは要りません）。'; }
     else { pill.textContent = 'あなたのログ'; pill.className = 'pill mine'; st.textContent = currentT.n ? `${fmt(currentT.n)} 応答のログから作りました。` : 'ログを読みましたが、応答ごとのトークンの記録がありませんでした。「コードの手直し」は使えます。'; }
     $('#resetBtn').hidden = !!currentT.sample;
@@ -2113,7 +2164,7 @@ $('#optStrict').addEventListener('change', async () => {
   if (current.sample) { current.strict = $('#optStrict').checked; renderAll(); return; }
   if (inputs.acc && inputs.project) await maybeAnalyze();
 });
-for (const id of ['#optHideFiles', '#optHideProject', '#optExamples', '#optHidePrompts']) $(id).addEventListener('change', () => { renderCard(); renderDetails(current, opts()); });
+for (const id of ['#optHideFiles', '#optHideProject', '#optExamples', '#optHidePrompts']) $(id).addEventListener('change', () => renderAll());   // どちらのタブでも、そのタブの中身を描き直す
 $('#resetBtn').addEventListener('click', () => { if (tab === 'tokens') currentT = sampleTokens(); else current = Object.assign(sampleResult(), { reset: true }); renderAll(); });   // 見本に戻した＝「あと1つ」は出さない
 for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => { tab = b.dataset.tab; try { history.replaceState(null, '', '#' + tab); } catch (e) {} renderAll(); });
 $('#optSince').addEventListener('change', () => { if (inputs.acc) maybeAnalyze(); });

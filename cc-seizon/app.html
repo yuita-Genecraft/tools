@@ -1022,12 +1022,14 @@ function tokenStats(acc, since){
   const wt = w.out + w.inp + w.cw + w.cr;
   for (const b of bins) b.w = wt ? r6(b.w / wt) : 0;
   // 5時間ブロック（ccusage と同じ区切り方：最初の応答の時刻を時の単位に切り下げて5時間。間が5時間以上あいたら新しいブロック）と、週（月曜始まり・この端末の時刻）
-  const order = [...rs].sort((a, b) => a.ts - b.ts || cmpStr(a.sid, b.sid));
-  const blocks = [], weekMap = new Map();
+  // ブロックの境目は区切りより前の応答も使って決め、数えるのは区切りの後の応答だけ（Codex の指摘 PR #23）
+  const order = [...rsAll].sort((a, b) => a.ts - b.ts || cmpStr(a.sid, b.sid));
+  const blocksAll = [], weekMap = new Map();
   let cur = null, lastTs = -Infinity;
   for (const r of order) {
-    if (!cur || r.ts >= cur.end || r.ts - lastTs >= 5 * GAP_MS) { const st = Math.floor(r.ts / GAP_MS) * GAP_MS; cur = { start: st, end: st + 5 * GAP_MS, n: 0, w: 0, heavyW: 0, matchedW: 0, sids: new Map() }; blocks.push(cur); }
+    if (!cur || r.ts >= cur.end || r.ts - lastTs >= 5 * GAP_MS) { const st = Math.floor(r.ts / GAP_MS) * GAP_MS; cur = { start: st, end: st + 5 * GAP_MS, n: 0, w: 0, heavyW: 0, matchedW: 0, sids: new Map() }; blocksAll.push(cur); }
     lastTs = r.ts;
+    if (r.ts < from) continue;
     const x = wOf(r), big = ctxOf(r) > HEAVY;
     cur.n++; cur.w += x; if (big) cur.heavyW += x; if (matchedSet.has(r)) cur.matchedW += x;
     const k = repOf.get(r.sid) || r.sid; cur.sids.set(k, (cur.sids.get(k) || 0) + x);
@@ -1035,6 +1037,7 @@ function tokenStats(acc, since){
     let wk = weekMap.get(mon); if (!wk) { wk = { start: mon, n: 0, w: 0, heavyW: 0 }; weekMap.set(mon, wk); }
     wk.n++; wk.w += x; if (big) wk.heavyW += x;
   }
+  const blocks = blocksAll.filter(b => b.n);
   const topBlocks = [...blocks].sort((a, b) => b.w - a.w || a.start - b.start).slice(0, 5).map(b => {
     let ts = '', tw = -1;
     for (const [k, v] of [...b.sids.entries()].sort((x, y) => cmpStr(x[0], y[0]))) if (v > tw) { ts = k; tw = v; }

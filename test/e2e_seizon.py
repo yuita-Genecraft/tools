@@ -217,6 +217,8 @@ with sync_playwright() as p:
             tm_py = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")), since=T_MID)
             ok &= check("tokens since mid js=py", tm_js, tm_py)
             ok &= check("tokens since mid hand", (tm_js["n"], tm_js["resumes"], tm_js["matched"], tm_js["matchedW"] > 0), (6, 3, 1, True))
+            # 区切り 10:00 が 09:00〜14:00 のブロックの途中＝ブロックは 09:00 からのまま（10:00〜15:00 にしない・Codex の指摘 PR #23）。tm5 14:10 は次の 14:00〜 のブロック
+            ok &= check("tokens since mid blocks", sorted((b["start"], b["n"]) for b in tm_js["blocks"]), [("2026-09-20T09:00:00.000Z", 3), ("2026-09-20T14:00:00.000Z", 1), ("2026-09-21T09:00:00.000Z", 2)])
             # 区切りちょうど（文脈 400,000・150,000）は「超」に入れない
             def tkb(mid, cr, ts):
                 return json.dumps({"type": "assistant", "sessionId": "bd", "uuid": "u" + mid, "timestamp": ts, "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 0, "output_tokens": 1, "cache_read_input_tokens": cr, "cache_creation_input_tokens": 0}}})

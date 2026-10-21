@@ -932,11 +932,13 @@ def token_stats(acc, since=None):
     # 5時間ブロックと週（app.html と同じ）
     HOUR = 3600 * 1000
     blocks = []; weeks = {}; cur = None; last_ts = float("-inf")
-    for r in sorted(rs, key=lambda r: (r["ts"], r["sid"])):
+    for r in sorted(rs_all, key=lambda r: (r["ts"], r["sid"])):   # 境目は区切りより前の応答も使って決める
         if cur is None or r["ts"] >= cur["end"] or r["ts"] - last_ts >= 5 * HOUR:
             st = (int(r["ts"]) // HOUR) * HOUR
             cur = {"start": st, "end": st + 5 * HOUR, "n": 0, "w": 0, "heavyW": 0, "matchedW": 0, "sids": {}}; blocks.append(cur)
         last_ts = r["ts"]
+        if r["ts"] < frm:
+            continue
         x = w_of(r); big = ctx_of(r) > HEAVY
         cur["n"] += 1; cur["w"] += x
         if big: cur["heavyW"] += x
@@ -947,6 +949,7 @@ def token_stats(acc, since=None):
         wk = weeks.setdefault(mk, {"start": mk, "n": 0, "w": 0, "heavyW": 0})
         wk["n"] += 1; wk["w"] += x
         if big: wk["heavyW"] += x
+    blocks = [b for b in blocks if b["n"]]
     top_blocks = []
     for b in sorted(blocks, key=lambda b: (-b["w"], b["start"]))[:5]:
         ts_, tw = "", -1

@@ -1,5 +1,5 @@
 <title>AI 開発ログマップ</title>
-<meta name="description" content="Claude Code・Codex・Antigravity のログから、応答ごとの文脈の大きさと、時間をあけた再開での大量のキャッシュ作成を数えます。手元のフォルダも入れると、AI が書いた行のうち残った割合と、書き直しが集中したファイルも。ブラウザの中だけで数え、ファイルは外に送信されません。">
+<meta name="description" content="Claude Code・Codex・Antigravity のログから、使用量のどれだけが文脈 40万トークン超の応答に行ったか（応答の数との差）を数えます。手元のフォルダも入れると、AI が書いた行のうち残った割合と、書き直しが集中したファイルも。ブラウザの中だけで数え、ファイルは外に送信されません。">
 <style>
 /* 設計：暗い机に、罫線で区切った解析票。
    色は無彩色＋低彩度の青緑（主要な数値・選択状態・主要操作だけ）。測った物（数・ファイル名・日付・トークン）は等幅、説明は和文ゴシック。
@@ -230,6 +230,14 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 .bins .bar i{display:block;height:100%;background:#4E6E73}
 .bins li.hi .bar i{background:var(--accent)}
 .bins b{font-family:var(--f-mono);font-weight:500;text-align:right;color:var(--ink-2)}
+.bins.two li{grid-template-columns:86px 1fr 64px 64px}
+.bins.two .bar{height:16px;display:grid;grid-template-rows:5px 9px;gap:2px;background:none}
+.bins.two .bar i{border-radius:1px;background:#4E6E73}
+.bins.two .bar i.n{background:#3B4A57}
+.bins.two li.hi .bar i.n{background:#5C7F7A}
+.bins.two li.head{font-size:12px;color:var(--ink-2)}
+.bins.two li.head b{font-family:inherit}
+@media (max-width:520px){.bins.two li{grid-template-columns:62px 1fr 48px 48px;gap:6px}}
 .big-line .n small{font-size:.45em;color:var(--ink-2)}
 .latest{margin-top:10px}
 /* 書き直しの各回 */
@@ -257,7 +265,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 <div class="page">
   <header class="masthead">
     <h1>AI 開発ログマップ</h1>
-    <p class="lead">Claude Code・Codex・Antigravity の会話ログを、このページに落とすだけ。<b>文脈とトークン</b>では、応答ごとの文脈の大きさと、間をあけて再開した時に何が起きたかを、ログだけで数えます。<b>コードの手直し</b>では、手元のプロジェクトのフォルダも入れて、AI が書いた行のその後（残った・AI が自分で書き直した・ログの外で変わった・ファイルごと消えた）と、書き直しが集中した所、繰り返した直しの型を出します。</p>
+    <p class="lead">Claude Code・Codex・Antigravity の会話ログを、このページに落とすだけ。<b>文脈とトークン</b>では、使用量のどれだけが長い文脈の応答に行ったか（応答の数との差）と、間をあけて再開した時に何が起きたかを、ログだけで数えます。<b>コードの手直し</b>では、手元のプロジェクトのフォルダも入れて、AI が書いた行のその後（残った・AI が自分で書き直した・ログの外で変わった・ファイルごと消えた）と、書き直しが集中した所、繰り返した直しの型を出します。</p>
     <p class="facts"><span>ブラウザの中だけで突き合わせ</span><span>通信なし</span><span>無料</span></p>
   </header>
 
@@ -325,7 +333,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
         <label data-only="rework"><input type="checkbox" id="optHideProject">プロジェクト名を隠す</label>
         <label data-only="rework"><input type="checkbox" id="optExamples">典型的な行を1つずつ載せる</label>
         <label data-only="rework"><input type="checkbox" id="optHidePrompts">指示の冒頭を隠す</label>
-        <label class="since" data-only="rework">この日時以降に入った行だけで数える<input type="datetime-local" id="optSince"><button type="button" class="btn small ghost" id="clearSince">外す</button></label>
+        <label class="since">この日時以降だけで数える（設定を変えた後と比べる）<input type="datetime-local" id="optSince"><button type="button" class="btn small ghost" id="clearSince">外す</button></label>
       </div>
       <div class="actions">
         <div class="share">
@@ -954,20 +962,28 @@ const CTX_EDGES = [50000, 100000, 150000, 200000, 400000, 700000];
 const CTX_LABELS = ['〜5万', '5〜10万', '10〜15万', '15〜20万', '20〜40万', '40〜70万', '70万〜'];
 const GAP_MS = 3600 * 1000;
 const r6 = x => Math.floor(x * 1e6 + 0.5) / 1e6;
-function tokenStats(acc){
-  const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts) && r.u !== false);   // usage の無い応答（記録の行だけ）は数えない
+const HEAVY = 400000;
+/* 応答1つの重み＝料金の比（入力 1・キャッシュ書き込み 5分 1.25／1時間 2・キャッシュ読み 0.1・出力 5）。単価の違いは入れない */
+const wOf = r => (r.out || 0) * 5 + (r.inp || 0) + (((r.cw || 0) - (r.cw1h || 0)) * 1.25 + (r.cw1h || 0) * 2) + (r.cr || 0) * 0.1;   // 「長い文脈」の区切り（autoCompact の窓を 40万にする人が多い・davekiss の投稿も 400k）
+function tokenStats(acc, since){
+  const from = Number.isFinite(since) ? since : -Infinity;   // この日時以降の応答だけ（設定を変えた前後を比べる）
+  const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts) && r.u !== false && r.ts >= from);   // usage の無い応答（記録の行だけ）は数えない
   const ctxOf = r => (r.inp || 0) + (r.cr || 0) + (r.cw || 0);
-  const bins = CTX_LABELS.map(label => ({ label, n: 0 }));
+  const bins = CTX_LABELS.map(label => ({ label, n: 0, w: 0 }));
   const by = {};
   const w = { out: 0, inp: 0, cw: 0, cr: 0 };
-  let over = 0, tmin = Infinity, tmax = -Infinity;
+  let over = 0, heavyN = 0, heavyW = 0, tmin = Infinity, tmax = -Infinity;
   for (const r of rs) {
     const c = ctxOf(r);
     let i = 0; while (i < CTX_EDGES.length && c >= CTX_EDGES[i]) i++;
     bins[i].n++;
     const t = toolOf(r.sid), v = by[t] || (by[t] = { n: 0, over: 0, resumes: 0, matched: 0 });
     v.n++; if (c >= 150000) { v.over++; over++; }
-    w.out += (r.out || 0) * 5; w.inp += r.inp || 0; w.cw += ((r.cw || 0) - (r.cw1h || 0)) * 1.25 + (r.cw1h || 0) * 2; w.cr += (r.cr || 0) * 0.1;
+    const wo = (r.out || 0) * 5, wi = r.inp || 0, wc = ((r.cw || 0) - (r.cw1h || 0)) * 1.25 + (r.cw1h || 0) * 2, wr = (r.cr || 0) * 0.1;
+    w.out += wo; w.inp += wi; w.cw += wc; w.cr += wr;
+    const wr1 = wOf(r);   // この応答の重み（料金比）
+    bins[i].w += wr1;
+    if (c >= HEAVY) { heavyN++; heavyW += wr1; }
     if (r.ts < tmin) tmin = r.ts; if (r.ts > tmax) tmax = r.ts;
   }
   // 再開：会話ごと・サブエージェントを除いて時刻順
@@ -975,7 +991,7 @@ function tokenStats(acc){
   const { repOf } = resolveSessions(acc);
   const bySid = new Map();
   for (const r of rs) { if (r.side) continue; const k = repOf.get(r.sid) || r.sid; let a = bySid.get(k); if (!a) { a = []; bySid.set(k, a); } a.push(r); }
-  let resumes = 0; const matched = [];
+  let resumes = 0, matchedW = 0; const matched = [];
   for (const [sid, a] of [...bySid.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
     a.sort((x, y) => x.ts - y.ts || ctxOf(x) - ctxOf(y));
     for (let i = 1; i < a.length; i++) {
@@ -985,6 +1001,7 @@ function tokenStats(acc){
       const prev = ctxOf(p);
       if (prev > 20000 && (q.cr || 0) < 0.2 * prev && (q.cw || 0) > 0.5 * prev) {
         matched.push({ sid, ts: q.ts, gapMin: Math.round((q.ts - p.ts) / 60000), prevCtx: prev, cr: q.cr || 0, cw: q.cw || 0 });
+        matchedW += wOf(q);
         by[toolOf(sid)].matched++;
       }
     }
@@ -992,8 +1009,11 @@ function tokenStats(acc){
   const cws = matched.map(m => m.cw).sort((x, y) => x - y);
   const latest = matched.length ? [...matched].sort((x, y) => y.ts - x.ts || cmpStr(x.sid, y.sid))[0] : null;
   const wt = w.out + w.inp + w.cw + w.cr;
+  for (const b of bins) b.w = wt ? r6(b.w / wt) : 0;
   return {
-    n: rs.length, over, bins, by,
+    n: rs.length, over, bins, by, since: Number.isFinite(since) ? new Date(since).toISOString() : null,
+    heavy: { n: heavyN, w: wt ? r6(heavyW / wt) : 0 },
+    matchedW: wt ? r6(matchedW / wt) : 0,   // 一致した再開の応答が、使用量（料金比の推定）に占める割合   // 文脈 40万超の応答の数と、使用量（料金比の推定）に占める割合
     period: rs.length ? { start: dateKey(new Date(tmin)), end: dateKey(new Date(tmax)) } : null,
     resumes, matched: matched.length, matchedMedianCw: cws.length ? cws[Math.floor(cws.length / 2)] : 0,
     latest: latest ? { sid: latest.sid, tool: toolOf(latest.sid), ts: new Date(latest.ts).toISOString(), gapMin: latest.gapMin, prevCtx: latest.prevCtx, cr: latest.cr, cw: latest.cw } : null,
@@ -1315,42 +1335,46 @@ function drawTokenCard(T){
   text('AI 開発ログマップ・文脈とトークン', L, 96, `600 22px ${GOTHIC}`, P.ink2);
   text(T.period ? `${T.period.start.replace(/-/g, '.')} - ${T.period.end.replace(/-/g, '.')}` : '', Rr, 96, `400 21px ${MONO}`, P.ink2, 'right');
   x.fillStyle = P.rule2; x.fillRect(L, 124, CW, 1);
-  const share = T.n ? T.over / T.n : 0;
-  text('15万トークンを超える文脈での応答', L, 212, `600 28px ${GOTHIC}`, P.ink);
-  const big = T.n ? String(Math.round(share * 100)) : '—';
+  const hv = T.heavy || { n: 0, w: 0 };
+  const wShare = hv.w, nShare = T.n ? hv.n / T.n : 0;
+  const pc = v => String(Math.round(v * 100));
+  // 主役：使用量のうち、文脈 40万超の応答の分（料金比の推定）
+  text('使用量のうち、文脈が40万トークンを超えた応答の分', L, 212, `600 28px ${GOTHIC}`, P.ink);
+  const big = T.n ? pc(wShare) : '—';
   x.font = `500 230px ${NUM}`; const bw = x.measureText(big).width;
   text(big, L - 8, 432, `500 230px ${NUM}`, P.accent);
   if (T.n) text('%', L - 8 + bw + 8, 432, `400 84px ${NUM}`, P.accent);
   x.font = `500 36px ${GOTHIC}`;
-  const lead = wrapJa(x, T.n ? `応答の ${Math.round(share * 100)}% が、15万トークンを超える文脈で動いていた` : 'ログに、応答ごとのトークンの記録がありません', CW).slice(0, 2);
+  const lead = wrapJa(x, T.n ? `応答の数では ${pc(nShare)}% しかないのに、使用量では ${pc(wShare)}%` : 'ログに、応答ごとのトークンの記録がありません', CW).slice(0, 2);
   lead.forEach((ln, i) => text(ln, L, 506 + i * 52, `500 36px ${GOTHIC}`, P.ink));
   const tools = Object.keys(T.by || {}).sort();
-  text(`全 ${fmt(T.n)} 応答${tools.length > 1 ? `（${tools.map(k => TOOL_NAME[k] + ' ' + fmt(T.by[k].n)).join('・')}）` : ''}`, L, 506 + lead.length * 52 + 8, `400 22px ${GOTHIC}`, P.ink2);
-  const bY = 650;
-  x.save(); rrect(x, L, bY, CW, 56, 3); x.clip();
-  x.fillStyle = '#3B4A57'; x.fillRect(L, bY, CW, 56); x.fillStyle = P.accent; x.fillRect(L, bY, CW * share, 56); x.restore();
-  text('15万超', L + 22, bY + 96, `400 22px ${GOTHIC}`, P.ink2); x.font = `400 22px ${GOTHIC}`; const lw = x.measureText('15万超').width;
-  text(fmt(T.over), L + 22 + lw + 12, bY + 96, `500 24px ${MONO}`, P.ink);
-  x.fillStyle = P.accent; x.fillRect(L, bY + 82, 13, 13);
-  text(fmt(T.n - T.over), Rr, bY + 96, `500 24px ${MONO}`, P.ink, 'right'); x.font = `500 24px ${MONO}`; const rw = x.measureText(fmt(T.n - T.over)).width;
-  text('15万以下', Rr - rw - 12, bY + 96, `400 22px ${GOTHIC}`, P.ink2, 'right'); x.font = `400 22px ${GOTHIC}`; const rl = x.measureText('15万以下').width;
-  x.fillStyle = '#3B4A57'; x.fillRect(Rr - rw - 12 - rl - 22, bY + 82, 13, 13);
-  // 再開（観測値だけ）
-  const rY = 830;
-  x.fillStyle = P.rule; x.fillRect(L, rY - 34, CW, 1);
-  text('1時間以上あけて再開した時', L, rY + 10, `600 24px ${GOTHIC}`, P.ink2);
-  text(fmt(T.matched), L, rY + 82, `500 60px ${NUM}`, P.ink); x.font = `500 60px ${NUM}`; const mw = x.measureText(fmt(T.matched)).width;
-  text(`／ ${fmt(T.resumes)} 回のうち`, L + mw + 14, rY + 82, `500 30px ${GOTHIC}`, P.ink2);
+  text(`全 ${fmt(T.n)} 応答${tools.length > 1 ? `（${tools.map(k => TOOL_NAME[k] + ' ' + fmt(T.by[k].n)).join('・')}）` : ''}${T.since ? `・${localTime(T.since)} 以降` : ''}`, L, 506 + lead.length * 52 + 8, `400 22px ${GOTHIC}`, P.ink2);
+  // 2本の帯：応答の数と使用量で、40万超が占める幅
+  const bar = (y, label, v) => {
+    text(label, L, y, `500 24px ${GOTHIC}`, P.ink2);
+    text(T.n ? pc(v) + '%' : '—', Rr, y, `500 28px ${MONO}`, P.ink, 'right');
+    x.save(); rrect(x, L, y + 18, CW, 40, 3); x.clip();
+    x.fillStyle = '#3B4A57'; x.fillRect(L, y + 18, CW, 40); x.fillStyle = P.accent; x.fillRect(L, y + 18, CW * v, 40); x.restore();
+  };
+  bar(672, '応答の数', nShare);
+  bar(772, '使用量（料金比の推定）', wShare);
+  x.fillStyle = P.accent; x.fillRect(L, 860, 13, 13);
+  text('文脈 40万超', L + 22, 873, `400 20px ${GOTHIC}`, P.ink2);
+  x.fillStyle = '#3B4A57'; x.fillRect(L + 170, 860, 13, 13);
+  text('40万以下', L + 192, 873, `400 20px ${GOTHIC}`, P.ink2);
+  // 再開は1行（使用量に占める分も）
+  const rY = 950;
+  x.fillStyle = P.rule; x.fillRect(L, rY - 30, CW, 1);
   x.font = `400 24px ${GOTHIC}`;
-  wrapJa(x, `大量のキャッシュ作成が記録された回数${T.matched ? `（作成量の中央値 ${fmtTok(T.matchedMedianCw)} トークン）` : ''}`, CW).slice(0, 2).forEach((ln, i) => text(ln, L, rY + 128 + i * 34, `400 24px ${GOTHIC}`, P.ink2));
+  wrapJa(x, `1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で、大量のキャッシュ作成${T.matched ? `（使用量の ${pct(T.matchedW || 0)}）` : ''}`, CW).slice(0, 2).forEach((ln, i) => text(ln, L, rY + 12 + i * 34, `400 24px ${GOTHIC}`, P.ink2));
   // 自分のログで確かめる
   const uY = 1056;
   x.fillStyle = P.panel; x.fillRect(L, uY, CW, 88); x.fillStyle = P.accent; x.fillRect(L, uY, 3, 88);
-  text('自分のログでも、文脈の大きさと直近の再開1件を確かめられます。', L + 30, uY + 54, `500 26px ${GOTHIC}`, P.ink);
+  text('自分のログで、設定を変えた前と後を比べられます。', L + 30, uY + 54, `500 26px ${GOTHIC}`, P.ink);
   x.fillStyle = P.rule; x.fillRect(L, 1226, CW, 1);
   x.font = `400 16px ${GOTHIC}`;
-  wrapJa(x, 'ログに残ったトークンの記録で、利用枠の消費量ではありません。文脈＝読み直した会話・道具の定義・読んだファイルの合計。15万は区切りの1つで、良し悪しの境目ではありません。キャッシュ切れと断定はしません。ログはブラウザの中で読み、外に出ません。', CW - 80).slice(0, 3).forEach((ln, i) => text(ln, L, 1256 + i * 24, `400 16px ${GOTHIC}`, P.ink2));
-  text(T.sample ? '見本' : '#AI開発ログマップ', Rr, 1256, `500 17px ${MONO}`, P.sub, 'right');
+  wrapJa(x, '使用量＝ログに残ったトークンを API の料金比（入力 1・キャッシュ書き込み 1.25〜2・キャッシュ読み 0.1・出力 5）で重みづけた推定で、定額プランの利用枠の減り方ではありません。文脈＝その応答で読み直した会話・道具の定義・読んだファイルの合計。キャッシュ切れと断定はしません。ログはブラウザの中で読み、外に出ません。', CW).slice(0, 3).forEach((ln, i) => text(ln, L, 1256 + i * 24, `400 16px ${GOTHIC}`, P.ink2));
+  text(T.sample ? '見本' : '#AI開発ログマップ', Rr, 1200, `500 18px ${MONO}`, P.sub, 'right');
   return cv;
 }
 function drawCard(R, opts){
@@ -1519,7 +1543,8 @@ const sec = (kicker, title, body, aside) => `<section class="sec" data-kicker="$
 /* 文脈とトークンの見本（架空のデータ） */
 function sampleTokens(){
   return { sample: true, n: 9240, over: 5820, by: { claude: { n: 6100, over: 3900, resumes: 64, matched: 41 }, codex: { n: 3140, over: 1920, resumes: 22, matched: 0 } },
-    bins: [{ label: '〜5万', n: 980 }, { label: '5〜10万', n: 1260 }, { label: '10〜15万', n: 1180 }, { label: '15〜20万', n: 1040 }, { label: '20〜40万', n: 2650 }, { label: '40〜70万', n: 1430 }, { label: '70万〜', n: 700 }],
+    bins: [{ label: '〜5万', n: 980, w: 0.01 }, { label: '5〜10万', n: 1260, w: 0.03 }, { label: '10〜15万', n: 1180, w: 0.05 }, { label: '15〜20万', n: 1040, w: 0.07 }, { label: '20〜40万', n: 2650, w: 0.33 }, { label: '40〜70万', n: 1430, w: 0.31 }, { label: '70万〜', n: 700, w: 0.20 }],
+    heavy: { n: 2130, w: 0.51 }, matchedW: 0.06, since: null,
     period: { start: '2026-09-01', end: '2026-09-30' }, resumes: 86, matched: 41, matchedMedianCw: 286000,
     latest: { sid: 'sample', tool: 'claude', ts: '2026-09-29T00:40:00.000Z', gapMin: 214, prevCtx: 412000, cr: 18000, cw: 395000 },
     weighted: { out: 0.15, inp: 0.01, cw: 0.24, cr: 0.60 } };
@@ -1530,28 +1555,32 @@ const hoursMin = m => (m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60)
 function tokenDetailsHTML(T){
   if (!T || !T.n) return '<p class="fine">ログに、応答ごとの使用トークン（usage）の記録がありません。</p>';
   const tools = Object.keys(T.by).sort();
-  const maxBin = Math.max(...T.bins.map(b => b.n), 1);
-  const bins = `<ul class="bins">${T.bins.map((b, i) => `<li${i >= 3 ? ' class="hi"' : ''}><span class="lab">${b.label}</span><span class="bar"><i style="width:${(b.n / maxBin * 100).toFixed(1)}%"></i></span><b>${fmt(b.n)}</b></li>`).join('')}</ul>`;
+  const maxBin = Math.max(...T.bins.map(b => Math.max(b.n / T.n, b.w || 0)), 0.01);
+  // 区切りごとに、応答の数の割合（上の細い帯）と使用量の割合（下の帯）を並べる
+  const bins = `<ul class="bins two"><li class="head"><span class="lab">文脈</span><span class="bar"></span><b>応答の数</b><b>使用量</b></li>${T.bins.map((b, i) => `<li${i >= 5 ? ' class="hi"' : ''}><span class="lab">${b.label}</span><span class="bar"><i class="n" style="width:${(b.n / T.n / maxBin * 100).toFixed(1)}%"></i><i style="width:${((b.w || 0) / maxBin * 100).toFixed(1)}%"></i></span><b>${pct(b.n / T.n)}</b><b>${pct(b.w || 0)}</b></li>`).join('')}</ul>`;
   const byTool = tools.length > 1 ? `<ul class="rows">${tools.map(k => `<li><span>${TOOL_NAME[k]}</span><b>${fmt(T.by[k].n)} 応答・15万超 ${pctOf(T.by[k].over, T.by[k].n)}</b></li>`).join('')}</ul>` : '';
-  const ctx = `<div class="big-line"><span class="n">${pctOf(T.over, T.n)}</span><span class="l">15万トークンを超える文脈での応答（全 ${fmt(T.n)} 応答${T.period ? `・${T.period.start} 〜 ${T.period.end}` : ''}）</span></div>${bins}${byTool}
-  <p class="fine">文脈＝その応答で読み直した会話・道具の定義・システムの指示・読んだファイルの合計（入力＋キャッシュ読み＋キャッシュ書き込み）。15万は区切りの1つで、良し悪しの境目ではありません。ログに残っている期間の分だけです。</p>`;
+  const hv = T.heavy || { n: 0, w: 0 };
+  const ctx = `<div class="big-line"><span class="n">${pct(hv.w)}</span><span class="l">使用量（料金比の推定）のうち、文脈が40万トークンを超えた応答の分。応答の数では ${pctOf(hv.n, T.n)}（${fmt(hv.n)} / ${fmt(T.n)} 応答${T.period ? `・${T.period.start} 〜 ${T.period.end}` : ''}${T.since ? `・${esc(localTime(T.since))} 以降` : ''}）</span></div>${bins}${byTool}
+  <p class="fine">帯は、細い方＝応答の数の割合、太い方＝使用量の割合。文脈＝その応答で読み直した会話・道具の定義・システムの指示・読んだファイルの合計（入力＋キャッシュ読み＋キャッシュ書き込み）。文脈が大きい応答ほど、1回で読み直す量が多いので、数が少なくても使用量の多くを占めます。15万トークンを超えた応答は ${pctOf(T.over, T.n)}。40万は区切りの1つ（autoCompact の窓をこの辺りにする人が多い）で、良し悪しの境目ではありません。ログに残っている期間の分だけです。autoCompact の設定を変えた・会話を短く切るようにした、などの後は、上の「この日時以降だけで数える」で、その後の応答だけと比べられます。</p>`;
   const L = T.latest;
   const noCw = tools.filter(k => k !== 'claude' && T.by[k].resumes && !T.by[k].matched).map(k => TOOL_NAME[k]);
-  const resume = `<div class="big-line"><span class="n">${fmt(T.matched)}<small> / ${fmt(T.resumes)}</small></span><span class="l">1時間以上あけて再開した ${fmt(T.resumes)} 回のうち、大量のキャッシュ作成が記録された回数（${pctOf(T.matched, T.resumes)}${T.matched ? `・作成量の中央値 ${fmtTok(T.matchedMedianCw)} トークン` : ''}）</span></div>
+  const resume = `<div class="big-line"><span class="n">${fmt(T.matched)}<small> / ${fmt(T.resumes)}</small></span><span class="l">1時間以上あけて再開した ${fmt(T.resumes)} 回のうち、大量のキャッシュ作成が記録された回数（${pctOf(T.matched, T.resumes)}${T.matched ? `・作成量の中央値 ${fmtTok(T.matchedMedianCw)} トークン・その応答が使用量に占める分 ${pct(T.matchedW || 0)}` : ''}）</span></div>
   ${L ? `<div class="latest"><h3 class="sub">直近の1件</h3><ul class="rows"><li><span>再開した時刻</span><b>${localTime(L.ts)}${tools.length > 1 ? `（${TOOL_NAME[L.tool]}）` : ''}</b></li><li><span>その前の応答からの間</span><b>${hoursMin(L.gapMin)}</b></li><li><span>その前の応答の文脈</span><b>${fmtTok(L.prevCtx)} トークン</b></li><li><span>再開した応答で、キャッシュから読めた分</span><b>${fmtTok(L.cr)} トークン</b></li><li><span>再開した応答で、キャッシュに書き込んだ分</span><b>${fmtTok(L.cw)} トークン</b></li></ul><p class="fine">この時刻に何の作業を再開したかを思い出して、次に同じような作業をする時に「続ける」か「要点を渡して新しい会話で始める」かを比べてみてください（比べるのは再開の1回だけでなく、作業が終わるまでの使用量と手戻りです）。</p></div>` : ''}
   <p class="fine">数えたのは、同じ会話（サブエージェントは除く）で前の応答から1時間より長くあいた次の応答。そのうち<b>検出条件</b>＝前の応答の文脈が2万を超え、次の応答でキャッシュから読めた分が前の文脈の2割未満、キャッシュに書き込んだ分が前の文脈の半分を超える、に一致したものです。キャッシュの有効期間は、キャッシュを読み書きしたリクエストから数えるので、操作の間隔と同じではありません＝キャッシュ切れと断定はしません。${noCw.length ? `${esc(noCw.join('・'))} はキャッシュへの書き込みが記録に残らないので、一致の数には入りません（再開の回数には入ります）。` : ''}</p>`;
   const W = T.weighted;
   const wt = W ? `<ul class="rows"><li><span>キャッシュ読み（文脈を毎回読み直す分）</span><b>${pct(W.cr)}</b></li><li><span>キャッシュ書き込み</span><b>${pct(W.cw)}</b></li><li><span>出力</span><b>${pct(W.out)}</b></li><li><span>入力（キャッシュ以外）</span><b>${pct(W.inp)}</b></li></ul>
   <p class="fine"><b>料金の比で重みづけた推定</b>です（入力 1・キャッシュ書き込み 5分 1.25／1時間 2・キャッシュ読み 0.1・出力 5 の共通の比。モデルごとの単価の違いは入れていません）。トークンの量そのものの割合でも、定額プランの利用枠の減り方でもありません（定額の枠の数え方は公開されていません）。</p>` : '';
-  return sec('文脈', '文脈の大きさ', ctx) + sec('再開', '1時間以上あけた再開', resume) + (wt ? sec('内訳', '使い道の内訳（料金比の推定）', wt) : '') +
+  return sec('文脈', '使用量の行き先（文脈の大きさ別）', ctx) + sec('再開', '1時間以上あけた再開', resume) + (wt ? sec('内訳', '使い道の内訳（料金比の推定）', wt) : '') +
     sec('測り方', '何を数えて、何を数えないか', `<p class="fine">ログ（Claude Code の usage・Codex の token_usage_record・Antigravity の step）の応答ごとの使用量を、同じ応答の重複は1回にして数えています。プロジェクトのフォルダは使いません。ログはブラウザの中で読み、外に出しません。</p>`);
 }
 function tokenShareText(T){
   if (!T.n) return '';
-  const lines = ['自分の AI コーディングのログで、応答ごとの文脈の大きさを数えました',
-    `・15万トークンを超える文脈での応答：${pctOf(T.over, T.n)}（全 ${fmt(T.n)} 応答）`,
-    `・1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で、大量のキャッシュ作成${T.matched ? `（中央値 ${fmtTok(T.matchedMedianCw)} トークン）` : ''}`,
-    '（ログに残ったトークンの記録で、利用枠の消費量ではありません）', '#AI開発ログマップ'];
+  const hv = T.heavy || { n: 0, w: 0 };
+  const lines = ['自分の AI コーディングのログで、使用量の行き先を数えました',
+    `・使用量の ${pct(hv.w)} は、文脈が40万トークンを超えた応答だった`,
+    `・その応答は、数では ${pctOf(hv.n, T.n)}（全 ${fmt(T.n)} 応答）`,
+    `・1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で大量のキャッシュ作成${T.matched ? `（使用量の ${pct(T.matchedW || 0)}）` : ''}`,
+    '（使用量＝API の料金比で重みをつけた推定。利用枠の減り方ではありません）', '#AI開発ログマップ'];
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');
 }
@@ -1788,7 +1817,7 @@ function renderCard(){
     const cv = drawTokenCard(currentT);
     lastCanvas = cv;
     $('#cardImg').src = cv.toDataURL('image/png');
-    $('#cardImg').alt = `文脈とトークンのカード：応答の${pctOf(currentT.over, currentT.n)}が15万トークンを超える文脈。1時間以上あけた再開${fmt(currentT.resumes)}回のうち${fmt(currentT.matched)}回で大量のキャッシュ作成。` + (currentT.sample ? '（見本・架空のデータ）' : '');
+    $('#cardImg').alt = `文脈とトークンのカード：使用量（料金比の推定）の${pct((currentT.heavy || {}).w || 0)}が、文脈40万トークン超の応答。応答の数では${pctOf((currentT.heavy || {}).n || 0, currentT.n)}。1時間以上あけた再開${fmt(currentT.resumes)}回のうち${fmt(currentT.matched)}回で大量のキャッシュ作成。` + (currentT.sample ? '（見本・架空のデータ）' : '');
     const t = tokenShareText(currentT);
     $('#shareText').value = t;
     $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent(t);
@@ -2011,7 +2040,7 @@ async function handleProject(list){
 }
 function sinceMs(){ const v = $('#optSince').value; const t = v ? new Date(v).getTime() : NaN; return Number.isFinite(t) ? t : undefined; }
 async function maybeAnalyze(){
-  if (inputs.acc) { finalizeGemini(inputs.acc); currentT = tokenStats(inputs.acc); }   // 応答の記録が無くても見本の数は使わない（0 のまま・Codex の指摘 PR #21）
+  if (inputs.acc) { finalizeGemini(inputs.acc); currentT = tokenStats(inputs.acc, sinceMs()); }   // 応答の記録が無くても見本の数は使わない（0 のまま・Codex の指摘 PR #21）
   if (!inputs.acc || !inputs.project) { renderAll(); return; }
   showProgress('突き合わせ中', 1, 1, 1);
   await tick();
@@ -2078,8 +2107,8 @@ $('#optStrict').addEventListener('change', async () => {
 for (const id of ['#optHideFiles', '#optHideProject', '#optExamples', '#optHidePrompts']) $(id).addEventListener('change', () => { renderCard(); renderDetails(current, opts()); });
 $('#resetBtn').addEventListener('click', () => { if (tab === 'tokens') currentT = sampleTokens(); else current = Object.assign(sampleResult(), { reset: true }); renderAll(); });   // 見本に戻した＝「あと1つ」は出さない
 for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => { tab = b.dataset.tab; try { history.replaceState(null, '', '#' + tab); } catch (e) {} renderAll(); });
-$('#optSince').addEventListener('change', () => { if (inputs.acc && inputs.project) maybeAnalyze(); });
-$('#clearSince').addEventListener('click', () => { $('#optSince').value = ''; if (inputs.acc && inputs.project) maybeAnalyze(); });
+$('#optSince').addEventListener('change', () => { if (inputs.acc) maybeAnalyze(); });
+$('#clearSince').addEventListener('click', () => { $('#optSince').value = ''; if (inputs.acc) maybeAnalyze(); });
 $('#details').addEventListener('change', e => { const sel = e.target.closest && e.target.closest('select[data-mark]'); if (sel) { if (sel.value) marks[sel.dataset.mark] = sel.value; else delete marks[sel.dataset.mark]; } });
 
 async function copyText(text, btn){
@@ -2115,11 +2144,11 @@ if (STANDALONE) {
 }
 
 /* テストと再利用のための入口：文字列から同じ計算をする */
-function tokenTexts(logs){
+function tokenTexts(logs, since){
   const acc = newLogAcc();
   for (const { text, path } of logs) { acc.cur = newFileState(path || ''); for (const line of String(text).split('\n')) handleLogLine(line, acc); acc.files++; }
   finalizeGemini(acc);
-  return tokenStats(acc);
+  return tokenStats(acc, since);
 }
 function analyzeTexts(logs, project, projectName, strict, since){
   const acc = newLogAcc();

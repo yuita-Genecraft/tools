@@ -870,13 +870,20 @@ CTX_EDGES = [50000, 100000, 150000, 200000, 400000, 700000]
 CTX_LABELS = ["〜5万", "5〜10万", "10〜15万", "15〜20万", "20〜40万", "40〜70万", "70万〜"]
 GAP_MS = 3600 * 1000
 
-def token_stats(acc):
+HEAVY = 400000
+def r6(x):
+    return math.floor(x * 1e6 + 0.5) / 1e6
+def w_of(r):   # app.html の wOf と同じ式・同じ足す順
+    return (r.get("out") or 0) * 5 + (r.get("inp") or 0) + (((r.get("cw") or 0) - (r.get("cw1h") or 0)) * 1.25 + (r.get("cw1h") or 0) * 2) + (r.get("cr") or 0) * 0.1
+
+def token_stats(acc, since=None):
     """app.html の tokenStats と同じ（文脈とトークン・ログだけ）"""
-    rs = [r for r in acc["resp"].values() if r.get("ts") is not None and r.get("u") is not False]   # usage の無い応答は数えない
+    frm = since if since is not None else float("-inf")
+    rs = [r for r in acc["resp"].values() if r.get("ts") is not None and r.get("u") is not False and r["ts"] >= frm]   # usage の無い応答は数えない
     ctx_of = lambda r: (r.get("inp") or 0) + (r.get("cr") or 0) + (r.get("cw") or 0)
-    bins = [{"label": l, "n": 0} for l in CTX_LABELS]
+    bins = [{"label": l, "n": 0, "w": 0} for l in CTX_LABELS]
     by = {}; w = {"out": 0, "inp": 0, "cw": 0, "cr": 0}
-    over = 0; tmin = None; tmax = None
+    over = 0; heavy_n = 0; heavy_w = 0; tmin = None; tmax = None
     for r in rs:
         c = ctx_of(r); i = 0
         while i < len(CTX_EDGES) and c >= CTX_EDGES[i]:
@@ -886,8 +893,13 @@ def token_stats(acc):
         v["n"] += 1
         if c >= 150000:
             v["over"] += 1; over += 1
-        w["out"] += (r.get("out") or 0) * 5; w["inp"] += r.get("inp") or 0
-        w["cw"] += ((r.get("cw") or 0) - (r.get("cw1h") or 0)) * 1.25 + (r.get("cw1h") or 0) * 2; w["cr"] += (r.get("cr") or 0) * 0.1
+        wo = (r.get("out") or 0) * 5; wi = r.get("inp") or 0
+        wc = ((r.get("cw") or 0) - (r.get("cw1h") or 0)) * 1.25 + (r.get("cw1h") or 0) * 2; wr = (r.get("cr") or 0) * 0.1
+        w["out"] += wo; w["inp"] += wi; w["cw"] += wc; w["cr"] += wr
+        wr1 = w_of(r)
+        bins[i]["w"] += wr1
+        if c >= HEAVY:
+            heavy_n += 1; heavy_w += wr1
         tmin = r["ts"] if tmin is None or r["ts"] < tmin else tmin
         tmax = r["ts"] if tmax is None or r["ts"] > tmax else tmax
     rep_of = resolve_sessions(acc)[0]   # 再開で写った応答は読む順で sid が変わる＝つないだ会話の代表でまとめる
@@ -895,7 +907,7 @@ def token_stats(acc):
     for r in rs:
         if not r.get("side"):
             by_sid.setdefault(rep_of.get(r["sid"], r["sid"]), []).append(r)
-    resumes = 0; matched = []
+    resumes = 0; matched = []; matched_w = 0
     for sid in sorted(by_sid):
         a = sorted(by_sid[sid], key=lambda x: (x["ts"], ctx_of(x)))
         for i in range(1, len(a)):
@@ -907,15 +919,19 @@ def token_stats(acc):
             if prev > 20000 and (q.get("cr") or 0) < 0.2 * prev and (q.get("cw") or 0) > 0.5 * prev:
                 matched.append({"sid": sid, "ts": q["ts"], "gapMin": jround((q["ts"] - p["ts"]) / 60000), "prevCtx": prev, "cr": q.get("cr") or 0, "cw": q.get("cw") or 0})
                 by[tool_of(sid)]["matched"] += 1
+                matched_w += w_of(q)
     cws = sorted(m["cw"] for m in matched)
     latest = sorted(matched, key=lambda m: (-m["ts"], m["sid"]))[0] if matched else None
     wt = w["out"] + w["inp"] + w["cw"] + w["cr"]
+    for b in bins:
+        b["w"] = r6(b["w"] / wt) if wt else 0
     iso = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(ms) % 1000:03d}Z"
-    return {"n": len(rs), "over": over, "bins": bins, "by": by,
+    return {"n": len(rs), "over": over, "bins": bins, "by": by, "since": iso(since) if since is not None else None,
+            "heavy": {"n": heavy_n, "w": r6(heavy_w / wt) if wt else 0}, "matchedW": r6(matched_w / wt) if wt else 0,
             "period": {"start": date_key(tmin), "end": date_key(tmax)} if rs else None,
             "resumes": resumes, "matched": len(matched), "matchedMedianCw": cws[len(cws) // 2] if cws else 0,
             "latest": {"sid": latest["sid"], "tool": tool_of(latest["sid"]), "ts": iso(latest["ts"]), "gapMin": latest["gapMin"], "prevCtx": latest["prevCtx"], "cr": latest["cr"], "cw": latest["cw"]} if latest else None,
-            "weighted": {k: math.floor(w[k] / wt * 1e6 + 0.5) / 1e6 for k in ("out", "inp", "cw", "cr")} if wt else None}   # 足す順で末尾の桁が揺れる＝6桁に丸める（app.html と同じ式）
+            "weighted": {k: r6(w[k] / wt) for k in ("out", "inp", "cw", "cr")} if wt else None}   # 足す順で末尾の桁が揺れる＝6桁に丸める（app.html と同じ式）
 
 def analyze(acc, project, project_name, strict, since=None):
     finalize_gemini(acc)
@@ -1136,10 +1152,10 @@ def run(log_paths, project_dir, strict=False, since=None):
     project = load_project(project_dir)
     return analyze(acc, project, pathlib.Path(project_dir).name, strict, since)
 
-def run_tokens(log_paths):
+def run_tokens(log_paths, since=None):
     acc = load_acc(log_paths)
     finalize_gemini(acc)
-    return token_stats(acc)
+    return token_stats(acc, since)
 
 if __name__ == "__main__":
     import sys

@@ -879,7 +879,8 @@ def w_of(r):   # app.html の wOf と同じ式・同じ足す順
 def token_stats(acc, since=None):
     """app.html の tokenStats と同じ（文脈とトークン・ログだけ）"""
     frm = since if since is not None else float("-inf")
-    rs = [r for r in acc["resp"].values() if r.get("ts") is not None and r.get("u") is not False and r["ts"] >= frm]   # usage の無い応答は数えない
+    rs_all = [r for r in acc["resp"].values() if r.get("ts") is not None and r.get("u") is not False]   # usage の無い応答は数えない
+    rs = [r for r in rs_all if r["ts"] >= frm]
     ctx_of = lambda r: (r.get("inp") or 0) + (r.get("cr") or 0) + (r.get("cw") or 0)
     bins = [{"label": l, "n": 0, "w": 0} for l in CTX_LABELS]
     by = {}; w = {"out": 0, "inp": 0, "cw": 0, "cr": 0}
@@ -904,7 +905,7 @@ def token_stats(acc, since=None):
         tmax = r["ts"] if tmax is None or r["ts"] > tmax else tmax
     rep_of = resolve_sessions(acc)[0]   # 再開で写った応答は読む順で sid が変わる＝つないだ会話の代表でまとめる
     by_sid = {}
-    for r in rs:
+    for r in rs_all:   # 区切りの直前の応答も再開の相手には使う
         if not r.get("side"):
             by_sid.setdefault(rep_of.get(r["sid"], r["sid"]), []).append(r)
     resumes = 0; matched = []; matched_w = 0
@@ -912,6 +913,8 @@ def token_stats(acc, since=None):
         a = sorted(by_sid[sid], key=lambda x: (x["ts"], ctx_of(x)))
         for i in range(1, len(a)):
             p, q = a[i - 1], a[i]
+            if q["ts"] < frm:
+                continue
             if q["ts"] - p["ts"] <= GAP_MS:
                 continue
             resumes += 1; by[tool_of(sid)]["resumes"] += 1

@@ -205,6 +205,15 @@ with sync_playwright() as p:
             ts_py = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")), since=T_SINCE)
             ok &= check("tokens since js=py", ts_js, ts_py)
             ok &= check("tokens since hand", (ts_js["n"], ts_js["resumes"], ts_js["heavy"]["n"], ts_js["since"]), (2, 1, 0, "2026-09-21T00:00:00.000Z"))
+            # 区切りが再開の間に入る（tm3 09:10 と tm4 11:10 の間の 10:00）＝tm4 の再開は数える（相手の tm3 は区切りの前でも使う・Codex の指摘 PR #22）
+            T_MID = 1789898400000   # 2026-09-20T10:00Z
+            tm_js = page.evaluate("([l, t]) => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l, t)))", [L4, T_MID])
+            tm_py = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")), since=T_MID)
+            ok &= check("tokens since mid js=py", tm_js, tm_py)
+            ok &= check("tokens since mid hand", (tm_js["n"], tm_js["resumes"], tm_js["matched"], tm_js["matchedW"] > 0), (6, 3, 1, True))
+            # 2行目の言い回し：使用量の方が小さい時は「しかないのに」と書かない
+            ok &= check("token lead neutral", page.evaluate("window.__seizon.tokenLead({n: 10, heavy: {n: 5, w: 0.3}})"), "応答の数では 50%、使用量では 30%")
+            ok &= check("token lead contrast", page.evaluate("window.__seizon.tokenLead({n: 100, heavy: {n: 28, w: 0.53}})"), "応答の数では 28% しかないのに、使用量では 53%")
             page.fill("#optSince", "2026-09-21T09:00"); page.dispatch_event("#optSince", "change")
             page.wait_for_function("window.__seizon.currentT.since === '2026-09-21T00:00:00.000Z'", timeout=20000)
             ok &= check("tokens since ui", page.evaluate("window.__seizon.currentT.n"), 2)

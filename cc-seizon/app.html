@@ -967,7 +967,8 @@ const HEAVY = 400000;
 const wOf = r => (r.out || 0) * 5 + (r.inp || 0) + (((r.cw || 0) - (r.cw1h || 0)) * 1.25 + (r.cw1h || 0) * 2) + (r.cr || 0) * 0.1;   // 「長い文脈」の区切り（autoCompact の窓を 40万にする人が多い・davekiss の投稿も 400k）
 function tokenStats(acc, since){
   const from = Number.isFinite(since) ? since : -Infinity;   // この日時以降の応答だけ（設定を変えた前後を比べる）
-  const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts) && r.u !== false && r.ts >= from);   // usage の無い応答（記録の行だけ）は数えない
+  const rsAll = [...acc.resp.values()].filter(r => Number.isFinite(r.ts) && r.u !== false);   // usage の無い応答（記録の行だけ）は数えない
+  const rs = rsAll.filter(r => r.ts >= from);
   const ctxOf = r => (r.inp || 0) + (r.cr || 0) + (r.cw || 0);
   const bins = CTX_LABELS.map(label => ({ label, n: 0, w: 0 }));
   const by = {};
@@ -990,12 +991,14 @@ function tokenStats(acc, since){
   // 再開（--resume）で写った応答は、どちらのファイルを先に読んだかで r.sid が変わる＝つないだ会話の代表でまとめる（読む順に左右されない）
   const { repOf } = resolveSessions(acc);
   const bySid = new Map();
-  for (const r of rs) { if (r.side) continue; const k = repOf.get(r.sid) || r.sid; let a = bySid.get(k); if (!a) { a = []; bySid.set(k, a); } a.push(r); }
+  // 区切りの直前の応答も、区切りの後の再開の相手としては使う（数えるのは区切りの後の応答だけ・Codex の指摘 PR #22）
+  for (const r of rsAll) { if (r.side) continue; const k = repOf.get(r.sid) || r.sid; let a = bySid.get(k); if (!a) { a = []; bySid.set(k, a); } a.push(r); }
   let resumes = 0, matchedW = 0; const matched = [];
   for (const [sid, a] of [...bySid.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
     a.sort((x, y) => x.ts - y.ts || ctxOf(x) - ctxOf(y));
     for (let i = 1; i < a.length; i++) {
       const p = a[i - 1], q = a[i];
+      if (q.ts < from) continue;
       if (q.ts - p.ts <= GAP_MS) continue;
       resumes++; by[toolOf(sid)].resumes++;
       const prev = ctxOf(p);
@@ -1326,6 +1329,12 @@ function ellipsize(x, text, maxW){
 function rrect(x, x0, y0, w, h, r){
   x.beginPath(); x.moveTo(x0 + r, y0); x.arcTo(x0 + w, y0, x0 + w, y0 + h, r); x.arcTo(x0 + w, y0 + h, x0, y0 + h, r); x.arcTo(x0, y0 + h, x0, y0, r); x.arcTo(x0, y0, x0 + w, y0, r); x.closePath();
 }
+/* カードの2行目：使用量の方が大きい時だけ「しかないのに」と書く（Codex の指摘 PR #22） */
+function tokenLead(T){
+  if (!T.n) return 'ログに、応答ごとのトークンの記録がありません';
+  const hv = T.heavy || { n: 0, w: 0 }, nShare = hv.n / T.n, wShare = hv.w, pc = v => String(Math.round(v * 100));
+  return wShare > nShare ? `応答の数では ${pc(nShare)}% しかないのに、使用量では ${pc(wShare)}%` : `応答の数では ${pc(nShare)}%、使用量では ${pc(wShare)}%`;
+}
 function drawTokenCard(T){
   const W = 1080, H = 1350, L = 72, Rr = W - 72, CW = Rr - L;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -1345,7 +1354,7 @@ function drawTokenCard(T){
   text(big, L - 8, 432, `500 230px ${NUM}`, P.accent);
   if (T.n) text('%', L - 8 + bw + 8, 432, `400 84px ${NUM}`, P.accent);
   x.font = `500 36px ${GOTHIC}`;
-  const lead = wrapJa(x, T.n ? `応答の数では ${pc(nShare)}% しかないのに、使用量では ${pc(wShare)}%` : 'ログに、応答ごとのトークンの記録がありません', CW).slice(0, 2);
+  const lead = wrapJa(x, tokenLead(T), CW).slice(0, 2);
   lead.forEach((ln, i) => text(ln, L, 506 + i * 52, `500 36px ${GOTHIC}`, P.ink));
   const tools = Object.keys(T.by || {}).sort();
   text(`全 ${fmt(T.n)} 応答${tools.length > 1 ? `（${tools.map(k => TOOL_NAME[k] + ' ' + fmt(T.by[k].n)).join('・')}）` : ''}${T.since ? `・${localTime(T.since)} 以降` : ''}`, L, 506 + lead.length * 52 + 8, `400 22px ${GOTHIC}`, P.ink2);
@@ -2163,7 +2172,7 @@ function analyzeTexts(logs, project, projectName, strict, since){
   for (const { rel, text } of project) if (projectFilter(rel, String(text).length) && !looksBinary(String(text).slice(0, 4096))) pm.set(normPath(rel), String(text));
   return analyzeParsed(acc, pm, projectName || '', !!strict, since);
 }
-window.__seizon = { analyzeTexts, tokenTexts, tokenStats, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get currentT(){ return currentT; }, get tab(){ return tab; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
+window.__seizon = { analyzeTexts, tokenTexts, tokenStats, tokenLead, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get currentT(){ return currentT; }, get tab(){ return tab; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
 // 埋め込んだ等幅フォントが使えるようになってから最初の描画（canvas は読み込み前の書体で描いてしまう）
 const fontsReady = (document.fonts && document.fonts.load) ? Promise.all(['400 16px PlexMonoSub', '500 16px PlexMonoSub', '600 16px PlexMonoSub'].map(f => document.fonts.load(f))).catch(() => {}) : Promise.resolve();
 fontsReady.then(renderAll);

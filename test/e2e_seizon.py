@@ -200,6 +200,7 @@ with sync_playwright() as p:
                 ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else [b["w"] for b in curT["bins"]] if k == "binsW"
                             else (b0["start"], b0["end"], b0["n"], b0["w"], b0["heavyW"], b0["matchedW"], b0["top"]["sid"], b0["top"]["w"]) if k == "blocks0" else curT[k], v)
             ok &= check("tokens blocks shown", page.evaluate("document.querySelectorAll('#details .blocks .rwev').length"), 3)
+            ok &= check("tokens block crosses midnight", page.evaluate("document.querySelector('#details .blocks').textContent.includes('2026-09-20 23:00〜09/21 04:00')"), True)   # 14:00Z〜19:00Z＝東京 23:00〜翌 04:00
             ok &= check("tokens weeks shown", page.evaluate("document.querySelectorAll('#details .weeks li:not(.head)').length"), 2)
             ok &= check("tokens weighted sums to 1", abs(sum(curT["weighted"].values()) - 1) < 1e-5, True)
             tok_txt = page.input_value("#shareText")

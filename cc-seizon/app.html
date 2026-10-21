@@ -1589,7 +1589,7 @@ function sampleTokens(){
   return { sample: true, n: 9240, over: 5820, by: { claude: { n: 6100, over: 3900, resumes: 64, matched: 41 }, codex: { n: 3140, over: 1920, resumes: 22, matched: 0 } },
     bins: [{ label: '〜5万', n: 980, w: 0.01 }, { label: '5〜10万', n: 1260, w: 0.03 }, { label: '10〜15万', n: 1180, w: 0.05 }, { label: '15〜20万', n: 1040, w: 0.07 }, { label: '20〜40万', n: 2650, w: 0.33 }, { label: '40〜70万', n: 1430, w: 0.31 }, { label: '70万〜', n: 700, w: 0.20 }],
     heavy: { n: 2130, w: 0.51 }, matchedW: 0.06, since: null, blockCount: 74,
-    weeks: [{ start: '2026-09-01', n: 2010, w: 0.21, heavyW: 0.58 }, { start: '2026-09-08', n: 2380, w: 0.27, heavyW: 0.61 }, { start: '2026-09-15', n: 2290, w: 0.26, heavyW: 0.49 }, { start: '2026-09-22', n: 1840, w: 0.20, heavyW: 0.35 }, { start: '2026-09-29', n: 720, w: 0.06, heavyW: 0.31 }],
+    weeks: [{ start: '2026-08-31', n: 2010, w: 0.21, heavyW: 0.58 }, { start: '2026-09-07', n: 2380, w: 0.27, heavyW: 0.61 }, { start: '2026-09-14', n: 2290, w: 0.26, heavyW: 0.49 }, { start: '2026-09-21', n: 1840, w: 0.20, heavyW: 0.35 }, { start: '2026-09-28', n: 720, w: 0.06, heavyW: 0.31 }],   // 月曜
     blocks: [{ start: '2026-09-10T01:00:00.000Z', end: '2026-09-10T06:00:00.000Z', n: 312, w: 0.041, heavyW: 0.82, matchedW: 0.11, top: { sid: 'sample1', tool: 'claude', w: 0.77, first: '設定画面に通知の切り替えを足して、テストも書いて' } },
       { start: '2026-09-16T11:00:00.000Z', end: '2026-09-16T16:00:00.000Z', n: 240, w: 0.033, heavyW: 0.64, matchedW: 0.0, top: { sid: 'sample2', tool: 'codex', w: 0.58, first: 'ログイン周りのエラーを直して' } }],
     period: { start: '2026-09-01', end: '2026-09-30' }, resumes: 86, matched: 41, matchedMedianCw: 286000,
@@ -1603,13 +1603,14 @@ const hoursMin = m => (m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60)
 function blocksHTML(T, hidePrompts){
   const B = T.blocks || [], Wk = T.weeks || [];
   if (!B.length) return '';
-  const hm = iso => { const d = new Date(iso); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+  // 終わりの日が始まりと違う（日をまたぐ）時は日付も出す（Codex の指摘 PR #23）
+  const hm = (iso, startIso) => { const d = new Date(iso); const t = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; return dateKey(d) === dateKey(new Date(startIso)) ? t : `${dateKey(d).slice(5).replace('-', '/')} ${t}`; };
   const maxW = Math.max(...Wk.map(v => v.w), 0.0001);
   const weeks = Wk.length ? `<h3 class="sub">週ごと（月曜始まり）</h3><ul class="bins two weeks"><li class="head"><span class="lab">週</span><span class="bar"></span><b>使用量</b><b>40万超</b></li>${Wk.map(v => `<li><span class="lab">${v.start.slice(5).replace('-', '/')}〜</span><span class="bar"><i class="n" style="width:${(v.w / maxW * 100).toFixed(1)}%"></i><i style="width:${(v.w * v.heavyW / maxW * 100).toFixed(1)}%"></i></span><b>${pct(v.w)}</b><b>${pct(v.heavyW)}</b></li>`).join('')}</ul>
   <p class="fine">帯は、細い方＝その週の使用量（全体に占める割合）、太い方＝そのうち文脈 40万超の応答の分。右の「40万超」は、その週の使用量のうち 40万超の応答が占める割合です。autoCompact などの設定を変えた週の前と後を比べられます。</p>` : '';
   const q = t => hidePrompts ? '<i class="dim">（指示の冒頭を隠しています）</i>' : t ? `<q title="${esc(t)}">${esc(t.length > 60 ? t.slice(0, 60) + '…' : t)}</q>` : '<i class="dim">（最初の指示が記録にない）</i>';
   const tools = Object.keys(T.by || {});
-  const blocks = `<h3 class="sub">使用量が多かった5時間ブロック（全 ${fmt(T.blockCount)} ブロックのうち上位 ${B.length}）</h3><ul class="rwlist blocks">${B.map(b => `<li class="rwev"><div class="meta"><b>${esc(localTime(b.start))}〜${hm(b.end)}</b>　全体の使用量の ${pct(b.w)}・${fmt(b.n)} 応答</div>
+  const blocks = `<h3 class="sub">使用量が多かった5時間ブロック（全 ${fmt(T.blockCount)} ブロックのうち上位 ${B.length}）</h3><ul class="rwlist blocks">${B.map(b => `<li class="rwev"><div class="meta"><b>${esc(localTime(b.start))}〜${hm(b.end, b.start)}</b>　全体の使用量の ${pct(b.w)}・${fmt(b.n)} 応答</div>
     <ul class="rows"><li><span>そのうち文脈 40万超の応答</span><b>${pct(b.heavyW)}</b></li><li><span>そのうち再開で大量のキャッシュ作成をした応答</span><b>${pct(b.matchedW)}</b></li><li><span>いちばん使った会話${tools.length > 1 ? `（${TOOL_NAME[b.top.tool]}）` : ''}</span><b>${pct(b.top.w)}</b></li></ul><p class="when">その会話の最初の指示</p>${q(b.top.first)}</li>`).join('')}</ul>
   <p class="fine">ブロックの区切り方は ccusage と同じです（最初の応答の時刻を時の単位に切り下げて5時間。前の応答から5時間以上あいたら新しいブロック）。公式の5時間の枠と時刻がずれることがあります。数えたのはこの端末のログに残った分だけで、別の端末や claude.ai での使用は入りません。割合は料金比の推定で、利用枠の減り方そのものではありません。最初の指示は画面にだけ出し、カード・投稿文には入れません。</p>`;
   return weeks + blocks;

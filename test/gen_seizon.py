@@ -6,7 +6,7 @@ import json, pathlib, shutil
 HERE = pathlib.Path(__file__).parent / "seizon"
 LOGS = HERE / "logs" / "projects"
 PROJ = HERE / "proj" / "alpha"
-for d in (HERE / "logs", HERE / "logs2", HERE / "proj"):
+for d in (HERE / "logs", HERE / "logs2", HERE / "logs3", HERE / "logs4", HERE / "proj"):
     if d.exists():
         shutil.rmtree(d)
 
@@ -311,3 +311,100 @@ put2("src/old.ts", OLD_NOW)
 put2("src/tool.py", TOOL_NOW)
 put2("src/extra.py", "EXTRA = True\n")
 put2("README.md", "# habits\n")
+
+
+# ---------- Codex と Gemini（Antigravity）のログ（logs3）・プロジェクト multi ----------
+# 手で数えた期待値は e2e_seizon.py の HAND_MULTI。
+MULTI = "/Users/t/dev/multi"
+LOGS3 = HERE / "logs3"
+PROJ3 = HERE / "proj" / "multi"
+X_V1 = "export const one = 1;\nexport const two = 2;\nexport const three = 3;\nexport const four = 4;\n"
+#   Codex：x.ts を作る（4行）→ unified_diff で two を消して five を足す。今の x.ts＝one・three・five・人が足した行（four は人が消した）
+#   → 書いた 5（one two three four five）・残った 3・自分で書き直し 1（two）・人が消した 1（four）
+X_DIFF = "--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1,4 +1,4 @@\n export const one = 1;\n-export const two = 2;\n export const three = 3;\n export const four = 4;\n+export const five = 5;\n"
+X_NOW = "export const one = 1;\nexport const three = 3;\nexport const five = 5;\nexport const human = 'h';\n"
+def cx(ts, typ, payload):
+    return {"timestamp": ts, "type": typ, "payload": payload}
+CX = [cx("2026-10-01T09:00:00.000Z", "session_meta", {"id": "cx-1", "cwd": MULTI, "originator": "codex_cli_rs"}),
+      cx("2026-10-01T09:00:01.000Z", "event_msg", {"type": "item_completed", "item": {"type": "UserMessage", "id": "u1", "content": [{"type": "text", "text": "x.ts を作って"}]}}),
+      cx("2026-10-01T09:00:05.000Z", "event_msg", {"type": "item_completed", "item": {"type": "FileChange", "id": "fc1", "status": "completed", "changes": {f"{MULTI}/src/x.ts": {"type": "add", "content": X_V1}}}}),
+      #   使用量：応答ごと。input はキャッシュ分（cached）を含む＝入力 200・キャッシュ 800。出力 50＋70＝120（同じ response_id の2行目は数えない）
+      cx("2026-10-01T09:00:06.000Z", "token_usage_record", {"response_id": "r1", "usage": {"input_tokens": 1000, "cached_input_tokens": 800, "cache_write_input_tokens": 0, "output_tokens": 50}}),
+      cx("2026-10-01T09:00:06.500Z", "token_usage_record", {"response_id": "r1", "usage": {"input_tokens": 1000, "cached_input_tokens": 800, "cache_write_input_tokens": 0, "output_tokens": 50}}),
+      cx("2026-10-01T09:10:00.000Z", "event_msg", {"type": "item_completed", "item": {"type": "CommandExecution", "id": "ce1", "command": "ls"}}),
+      cx("2026-10-01T09:20:00.000Z", "event_msg", {"type": "item_completed", "item": {"type": "FileChange", "id": "fc2", "status": "completed", "changes": {"src/x.ts": {"type": "update", "unified_diff": X_DIFF, "move_path": None}}}}),
+      #   失敗した変更は数えない
+      cx("2026-10-01T09:21:00.000Z", "event_msg", {"type": "item_completed", "item": {"type": "FileChange", "id": "fc3", "status": "failed", "changes": {"src/x.ts": {"type": "add", "content": "export const failed = 0;\n"}}}}),
+      cx("2026-10-01T09:20:01.000Z", "token_usage_record", {"response_id": "r2", "usage": {"input_tokens": 500, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 70}})]
+write_log(LOGS3 / "codex" / "sessions" / "2026" / "10" / "01" / "rollout-2026-10-01T09-00-00-cx-1.jsonl", CX)
+#   Gemini：y.py を write_to_file（4行）→ replace_file_content で return 'one' を return 'uno' に。今の y.py＝その4行
+#   → 書いた 5・残った 4・自分で書き直し 1（return 'one'）。出力 30＋40＋10＋0＝80（重ねて残った step は1回）
+#   同じ step が 3 か所に重ねて残る（transcript.jsonl・chunks/transcript・chunks/transcript_full）。main の step 2 は tool_calls が切られている＝full を使う。
+#   chunks の写しは値が JSON の文字列でもう一段包まれている。step 4 は main にしか無く切られている（ほどけない）＝数えず、読めなかった編集 1件
+CONV = "11111111-2222-4333-8444-555555555555"
+G1 = "def first():\n    return 'one'\ndef third():\n    return 'three'\n"
+G_REP_OLD = "def first():\n    return 'one'\n"
+G_REP_NEW = "def first():\n    return 'uno'\n"
+G_NOW = "def first():\n    return 'uno'\ndef third():\n    return 'three'\n"
+YP = f"{MULTI}/src/y.py"
+def gstep(i, typ, ts, **kw):
+    o = {"step_index": i, "type": typ, "source": "MODEL", "status": "DONE", "created_at": ts}
+    o.update(kw); return o
+def wcall(path, content, q=False):
+    a = {"TargetFile": path, "CodeContent": content, "Overwrite": "true", "Description": "x", "toolAction": "w", "toolSummary": "w"}
+    if q: a = {k: json.dumps(v) for k, v in a.items()}
+    return {"name": "write_to_file", "args": a}
+def rcall(path, old, new, q=False):
+    a = {"TargetFile": path, "TargetContent": old, "ReplacementContent": new, "StartLine": 1, "EndLine": 2, "AllowMultiple": False, "Instruction": "x", "Description": "x", "toolAction": "r", "toolSummary": "r"}
+    if q: a = {k: (json.dumps(v) if isinstance(v, str) else v) for k, v in a.items()}
+    return {"name": "replace_file_content", "args": a}
+s0 = gstep(0, "USER_INPUT", "2026-10-02T10:00:00Z", content="<USER_REQUEST>\ny.py を作って\n</USER_REQUEST>")
+s1 = gstep(1, "PLANNER_RESPONSE", "2026-10-02T10:00:10Z", content="作ります", input_tokens=300, output_tokens=30, cache_read_tokens=1000, tool_calls=[{"name": "run_command", "args": {"CommandLine": "ls", "Cwd": MULTI}}])
+s2 = gstep(2, "PLANNER_RESPONSE", "2026-10-02T10:01:00Z", content="", input_tokens=400, output_tokens=40, cache_read_tokens=2000, tool_calls=[wcall(YP, G1)])
+s2_cut = dict(s2, truncated_fields=["tool_calls"], tool_calls=[wcall(YP, G1[:20])])
+s3 = gstep(3, "PLANNER_RESPONSE", "2026-10-02T10:02:00Z", content="", input_tokens=100, output_tokens=10, cache_read_tokens=0, tool_calls=[rcall(YP, G_REP_OLD, G_REP_NEW)])
+s4_cut = gstep(4, "PLANNER_RESPONSE", "2026-10-02T10:03:00Z", content="", input_tokens=0, output_tokens=0, cache_read_tokens=0, truncated_fields=["tool_calls"],
+               tool_calls=[{"name": "write_to_file", "args": {"TargetFile": json.dumps(YP), "CodeContent": '"def cut(', "Overwrite": '"true"'}}])
+#   step 5：本文が " で始まる値（包まれていない）＝そのまま数える（Codex の指摘 PR #20：値の頭の " で包まれたと決めない）。書いた 2・残った 2
+ZP = f"{MULTI}/src/z.js"
+Z_NOW = '"use strict";\nconst zed = 1;\n'
+s5 = gstep(5, "PLANNER_RESPONSE", "2026-10-02T10:04:00Z", content="", input_tokens=0, output_tokens=0, cache_read_tokens=0, tool_calls=[wcall(ZP, Z_NOW)])
+GB = LOGS3 / "gemini" / "antigravity" / "brain" / CONV / ".system_generated" / "logs"
+write_log(GB / "transcript.jsonl", [s0, s1, s2_cut, s3, s4_cut, s5])
+write_log(GB / "chunks" / "transcript" / "00000000.jsonl", [s0, s1, dict(s3, tool_calls=[rcall(YP, G_REP_OLD, G_REP_NEW, q=True)])])
+write_log(GB / "chunks" / "transcript_full" / "00000000.jsonl", [s1, dict(s2, tool_calls=[wcall(YP, G1, q=True)])])
+def put3(rel, data):
+    p = PROJ3 / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data.encode("utf-8"))
+put3("src/x.ts", X_NOW)
+put3("src/y.py", G_NOW)
+put3("src/z.js", Z_NOW)
+put3("README.md", "# multi\n")
+
+
+# ---------- 文脈とトークン（logs4・プロジェクトは要らない） ----------
+# 手で数えた期待値は e2e_seizon.py の HAND_TOKENS。文脈＝入力＋キャッシュ読み＋キャッシュ書き込み
+LOGS4 = HERE / "logs4"
+def tk(ts, mid, inp, cr, cw, out=100, sid="t1", side=False, cw1h=None):
+    u = {"input_tokens": inp, "output_tokens": out, "cache_read_input_tokens": cr, "cache_creation_input_tokens": cw}
+    if cw1h is not None:
+        u["cache_creation"] = {"ephemeral_5m_input_tokens": cw - cw1h, "ephemeral_1h_input_tokens": cw1h}
+    return {"parentUuid": None, "isSidechain": side, "userType": "external", "cwd": "/Users/t/dev/tok", "sessionId": sid, "version": "2.1.0", "type": "assistant",
+            "message": {"id": mid, "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [{"type": "text", "text": "ok"}], "usage": u},
+            "uuid": U(), "timestamp": ts}
+T1 = [tk("2026-09-20T09:00:00.000Z", "tm1", 3, 0, 30000),            # 文脈 30,003（〜5万）
+      tk("2026-09-20T09:05:00.000Z", "tm2", 3, 30000, 140000),       # 170,003（15〜20万）
+      tk("2026-09-20T09:05:01.000Z", "tm2", 3, 30000, 140000, out=40),   # 同じ応答の途中の行＝1回
+      tk("2026-09-20T09:10:00.000Z", "tm3", 3, 170000, 50000),       # 220,003（20〜40万）
+      tk("2026-09-20T10:00:00.000Z", "tm6", 3, 0, 100, out=10, side=True),   # サブエージェント（103・〜5万）＝再開の判定には入れない
+      #   2時間あけて再開：読めたのは 1万（前の文脈 220,003 の 2割未満）・書き込み 20万（半分超）＝検出条件に一致
+      tk("2026-09-20T11:10:00.000Z", "tm4", 3, 10000, 200000, cw1h=200000),   # 210,003（20〜40万）
+      #   3時間あけて再開：キャッシュが読めている＝一致しない
+      tk("2026-09-20T14:10:00.000Z", "tm5", 3, 200000, 5000)]        # 205,003（20〜40万）
+write_log(LOGS4 / "projects" / "-Users-t-dev-tok" / "t1.jsonl", T1)
+CX4 = [cx("2026-09-21T09:00:00.000Z", "session_meta", {"id": "cx-t", "cwd": "/Users/t/dev/tok"}),
+       cx("2026-09-21T09:00:05.000Z", "token_usage_record", {"response_id": "tr1", "usage": {"input_tokens": 160000, "cached_input_tokens": 150000, "cache_write_input_tokens": 0, "output_tokens": 50}}),   # 160,000
+       #   2時間あけて、キャッシュが読めていない（Codex はキャッシュ書き込みが記録に無い＝一致しない。再開としては数える）
+       cx("2026-09-21T11:00:05.000Z", "token_usage_record", {"response_id": "tr2", "usage": {"input_tokens": 170000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 60}})]   # 170,000
+write_log(LOGS4 / "codex" / "sessions" / "2026" / "09" / "21" / "rollout-2026-09-21T09-00-00-cx-t.jsonl", CX4)

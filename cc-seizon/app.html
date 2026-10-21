@@ -1,5 +1,5 @@
-<title>Claude Code 生存率</title>
-<meta name="description" content="Claude Code が書いた行のうち、今も残っている行はどれだけか。ログと手元のフォルダをブラウザの中だけで突き合わせ、会話ごとの「残った1行あたりの出力トークン」で、どの頼み方が高くついて消えたかも出します。ファイルは外に送信されません。">
+<title>AI 開発ログマップ</title>
+<meta name="description" content="Claude Code・Codex・Antigravity のログから、応答ごとの文脈の大きさと、時間をあけた再開での大量のキャッシュ作成を数えます。手元のフォルダも入れると、AI が書いた行のうち残った割合と、書き直しが集中したファイルも。ブラウザの中だけで数え、ファイルは外に送信されません。">
 <style>
 /* 設計：暗い机に、罫線で区切った解析票。
    色は無彩色＋低彩度の青緑（主要な数値・選択状態・主要操作だけ）。測った物（数・ファイル名・日付・トークン）は等幅、説明は和文ゴシック。
@@ -215,30 +215,67 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 
 .colophon{margin-top:56px;padding-top:16px;border-top:1px solid var(--rule);display:grid;gap:6px;font-size:12.5px;color:var(--ink-3);max-width:46rem}
 .colophon p{margin:0}
+/* タブ（文脈とトークン／コードの手直し） */
+.tabs{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--rule);background:var(--bg-2)}
+.tab{appearance:none;border:0;background:none;color:var(--ink-2);font:inherit;font-weight:600;font-size:14.5px;padding:10px 14px;text-align:left;cursor:pointer;display:grid;gap:0;border-bottom:2px solid transparent}
+.tab + .tab{border-left:1px solid var(--rule)}
+.tab small{font-weight:400;font-size:12px;color:var(--ink-3);font-family:var(--f-mono)}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);background:var(--accent-wash)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* 文脈の大きさの分布 */
+.bins{list-style:none;margin:12px 0;padding:0;display:grid;gap:6px}
+.bins li{display:grid;grid-template-columns:86px 1fr 72px;gap:10px;align-items:center;font-size:13px}
+.bins .lab{font-family:var(--f-mono);color:var(--ink-2)}
+.bins .bar{height:12px;background:var(--well, #222A35);border-radius:2px;overflow:hidden}
+.bins .bar i{display:block;height:100%;background:#4E6E73}
+.bins li.hi .bar i{background:var(--accent)}
+.bins b{font-family:var(--f-mono);font-weight:500;text-align:right;color:var(--ink-2)}
+.big-line .n small{font-size:.45em;color:var(--ink-2)}
+.latest{margin-top:10px}
+/* 書き直しの各回 */
+.rwlist summary{cursor:pointer;color:var(--ink-2);font-size:13.5px;margin:10px 0}
+.rwevs{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.rwev{border-left:2px solid var(--rule);padding:6px 0 6px 12px;display:grid;gap:4px;min-width:0}
+.rwev .meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-family:var(--f-mono);font-size:12.5px;color:var(--ink-3)}
+.rwev .pr{font-size:13.5px;color:var(--ink-2);min-width:0;overflow-wrap:anywhere}
+.rwev .pr .when{display:block;font-size:12px;color:var(--ink-3)}
+.rwev .pr q{quotes:"「" "」"}
+.rwev .ba{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}
+.rwev .ba div{display:grid;gap:2px;min-width:0}
+.rwev .ba code{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;padding:1px 6px;border-radius:2px}
+.rwev .ba code.b{background:rgba(208,124,118,.10);color:var(--ink-2)}
+.rwev .ba code.a{background:rgba(111,184,173,.10);color:var(--ink)}
+@media (max-width:560px){.rwev .ba{grid-template-columns:1fr}}
+/* 機械で防ぐ案・本人の印・日時の絞り込み */
+.rule.guard span:last-child{color:var(--ink)}
+.mark{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:var(--ink-2);margin-top:8px}
+.mark select,.since input{background:var(--bg-2);color:var(--ink);border:1px solid var(--rule);font:inherit;font-size:13px;padding:3px 6px;border-radius:2px}
+.since{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
 <div class="page">
   <header class="masthead">
-    <h1>Claude Code <em>生存率</em></h1>
-    <p class="lead">Claude が書いたコードのうち、今も残っている行はどれだけか。Claude Code のログと、手元のプロジェクトのフォルダを、このページに落とすだけ。「残った」「Claude が自分で書き直した」「人が消した」「ファイルごと消えた」に分けて、1枚の画像にします。会話ごとに、最初の指示と「残った1行あたりの出力トークン」を並べて、どの頼み方が高くついて消えたかも出します。</p>
+    <h1>AI 開発ログマップ</h1>
+    <p class="lead">Claude Code・Codex・Antigravity の会話ログを、このページに落とすだけ。<b>文脈とトークン</b>では、応答ごとの文脈の大きさと、間をあけて再開した時に何が起きたかを、ログだけで数えます。<b>コードの手直し</b>では、手元のプロジェクトのフォルダも入れて、AI が書いた行のその後（残った・AI が自分で書き直した・ログの外で変わった・ファイルごと消えた）と、書き直しが集中した所、繰り返した直しの型を出します。</p>
     <p class="facts"><span>ブラウザの中だけで突き合わせ</span><span>通信なし</span><span>無料</span></p>
   </header>
 
   <main class="layout">
-    <section class="sheet-col" aria-label="生存率カード">
+    <section class="sheet-col" aria-label="共有用のカード">
       <div class="intakes">
         <div class="intake" id="zoneLog">
           <div class="intake-head">
             <div>
-              <p class="intake-title"><span class="step">1</span>Claude Code のログ</p>
-              <p class="intake-sub"><code>~/.claude/projects</code> のフォルダをここにドロップ</p>
+              <p class="intake-title"><span class="step">1</span>AI のログ</p>
+              <p class="intake-sub">Claude Code の <code>~/.claude/projects</code>・Codex の <code>~/.codex/sessions</code>・Antigravityの <code>~/.gemini</code> をここにドロップ。別の AI のログを続けて入れると足します</p>
             </div>
             <label class="btn primary" for="logInput">フォルダを選ぶ</label>
             <input type="file" id="logInput" webkitdirectory directory multiple hidden>
           </div>
           <p class="state" id="logState">未読込</p>
           <p class="loaded" id="logLoaded" hidden></p>
+          <button type="button" class="btn ghost" id="logClear" hidden>入れたログを外す</button>
           <details class="howto">
             <summary>ログの場所と開き方</summary>
             <ol>
@@ -247,15 +284,16 @@ td .mini span{display:block;height:100%;background:var(--alive)}
               <li><span>Windows はエクスプローラーのアドレス欄に貼って Enter。</span>
                 <span class="cmd"><code id="cmdWin">%USERPROFILE%\.claude\projects</code><button type="button" class="copy" data-copy="cmdWin">コピー</button></span></li>
               <li><span>開いた projects フォルダを、そのままこのページにドラッグします（「フォルダを選ぶ」で指定しても読めます）。</span></li>
+              <li><span>Codex は <code>open ~/.codex/sessions</code>、Antigravityは <code>open ~/.gemini</code> で開いて、同じ枠にドラッグします。<code>.gemini</code> の中の会話ログは隠しフォルダ（<code>.system_generated</code>）の下にあります。「フォルダを選ぶ」で記録が見つからない時は、ドラッグで入れてください。</span></li>
             </ol>
-            <p class="note">Claude Code は古いログを自動で消します（初期設定は30日）。測れるのは、手元に残っているログの期間に Claude が書いた分だけです。</p>
+            <p class="note">Claude Code は古いログを自動で消します（初期設定は30日）。測れるのは、手元に残っているログの期間に AI が書いた分だけです。</p>
           </details>
         </div>
         <div class="intake" id="zoneProj">
           <div class="intake-head">
             <div>
               <p class="intake-title"><span class="step">2</span>プロジェクトのフォルダ</p>
-              <p class="intake-sub">Claude Code で作業したリポジトリのフォルダをここにドロップ</p>
+              <p class="intake-sub">AI と作業したリポジトリのフォルダをここにドロップ（「コードの手直し」で使います）</p>
             </div>
             <label class="btn primary" for="projInput">フォルダを選ぶ</label>
             <input type="file" id="projInput" webkitdirectory directory multiple hidden>
@@ -271,18 +309,23 @@ td .mini span{display:block;height:100%;background:var(--alive)}
         <p id="progressText">読み込み中</p>
       </div>
 
-      <p class="status" aria-live="polite"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のデータで表示しています。ログとフォルダを入れると、あなたの生存率に変わります。</span></p>
+      <div class="tabs" role="tablist" aria-label="見るもの">
+        <button type="button" role="tab" class="tab" data-tab="tokens" aria-selected="true">文脈とトークン<small>ログだけ</small></button>
+        <button type="button" role="tab" class="tab" data-tab="rework" aria-selected="false">コードの手直し<small>ログ＋フォルダ</small></button>
+      </div>
+      <p class="status" aria-live="polite"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のデータで表示しています。AI のログを入れると、あなたの数字に変わります。</span></p>
 
       <figure class="card">
-        <img id="cardImg" width="1080" height="1350" alt="生存率カードの画像">
+        <img id="cardImg" width="1080" height="1350" alt="共有用のカードの画像">
       </figure>
 
       <div class="opts" aria-label="表示の設定">
-        <label><input type="checkbox" id="optStrict">厳密モード（空白の違いも別の行として数える）</label>
-        <label><input type="checkbox" id="optHideFiles">ファイル名を隠す</label>
-        <label><input type="checkbox" id="optHideProject">プロジェクト名を隠す</label>
-        <label><input type="checkbox" id="optExamples">典型的な行を1つずつ載せる</label>
-        <label><input type="checkbox" id="optHidePrompts">指示の冒頭を隠す</label>
+        <label data-only="rework"><input type="checkbox" id="optStrict">厳密モード（空白の違いも別の行として数える）</label>
+        <label data-only="rework"><input type="checkbox" id="optHideFiles">ファイル名を隠す</label>
+        <label data-only="rework"><input type="checkbox" id="optHideProject">プロジェクト名を隠す</label>
+        <label data-only="rework"><input type="checkbox" id="optExamples">典型的な行を1つずつ載せる</label>
+        <label data-only="rework"><input type="checkbox" id="optHidePrompts">指示の冒頭を隠す</label>
+        <label class="since" data-only="rework">この日時以降に入った行だけで数える<input type="datetime-local" id="optSince"><button type="button" class="btn small ghost" id="clearSince">外す</button></label>
       </div>
       <div class="actions">
         <div class="share">
@@ -307,7 +350,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 
   <footer class="colophon">
     <p>ログとファイルはブラウザの中で読み、数えた結果だけを画面に出します。このページはサーバーと通信しません。</p>
-    <p>「Claude が書いた行」は、Claude Code の Edit・Write で新しく入った行です。Bash のコマンド（ヒアドキュメントなど）で書かれた行や、ログの期間より前に書かれた行は数えません。</p>
+    <p>「AI が書いた行」は、Claude Code の Edit・Write、Codex のファイル変更（FileChange）、Antigravity の write_to_file・replace_file_content で新しく入った行です。シェルのコマンド（ヒアドキュメントなど）で書かれた行や、ログの期間より前に書かれた行は数えません。</p>
     <p>個人が作った非公式のツールです。Anthropic 社とは関係ありません。数字の書体は IBM Plex Mono（SIL Open Font License 1.1）をページに埋め込んでいます。</p>
   </footer>
 </div>
@@ -361,7 +404,27 @@ const normPath = p => String(p).replace(/\\/g, '/');
 const USE_NAMES = new Set(['Edit', 'MultiEdit', 'Write', 'Read']);
 const RX_NUMBERED = /^\s*\d+(?:→|\t)/;
 const LOG_SKIP_DIRS = new Set(['node_modules', '.git', 'plugins', 'shell-snapshots', 'statsig', 'todos', 'debug', 'file-history', 'session-env', 'backups', 'ide']);
-function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), resp: new Map(), sessLink: [] }; }
+function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), resp: new Map(), sessLink: [], cur: newFileState(''), cxSeen: new Set(), gem: new Map(), gmSkipped: 0, prompts: new Map() }; }
+/* 会話ごとの「本人が打った指示」（時刻・冒頭 160 字）。書き直しの前の指示を出すため */
+function addPrompt(acc, sid, ts, text){
+  if (!sid || !Number.isFinite(ts) || !text) return;
+  let a = acc.prompts.get(sid); if (!a) { a = []; acc.prompts.set(sid, a); }
+  a.push({ ts, text });
+}
+/* 読んでいる最中のファイルの状態（Codex は会話の ID と作業フォルダがファイルの頭にだけ書かれる・Gemini は会話の ID がフォルダ名にある） */
+/* 別の AI のログを足す：AI が違えば会話の ID も記録の ID も重ならないので、そのまま合わせる */
+function mergeAcc(a, b){
+  for (const k of ['uses', 'results', 'sess', 'msgSid', 'resp', 'gem', 'prompts']) for (const [x, v] of b[k]) if (!a[k].has(x)) a[k].set(x, v);
+  for (const x of b.cxSeen) a.cxSeen.add(x);
+  a.sessLink.push(...b.sessLink);
+  a.files += b.files; a.lines += b.lines; a.bad += b.bad;
+  return a;
+}
+function accTools(acc){ const s = new Set(); for (const sid of acc.sess.keys()) s.add(toolOf(sid)); if (acc.gem.size) s.add('gemini'); return s; }
+function newFileState(path){ return { path: String(path || ''), sid: '', cwd: '' }; }
+/* どの AI の会話か：会話の ID の頭で分ける（Claude Code はそのまま・Codex は codex:・Gemini は gemini:） */
+const TOOL_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Antigravity' };
+const toolOf = sid => (String(sid).startsWith('codex:') ? 'codex' : String(sid).startsWith('gemini:') ? 'gemini' : 'claude');
 /* 再開したセッション（--resume）のログは、前のセッションの message を同じ uuid・新しい sessionId で写している。
    同じ uuid が別の sessionId で出たら「同じ会話」として後でまとめる（sessLink）。使用量は最初に見た方に足し、まとめる時に移す */
 function resolveSessions(acc){
@@ -395,12 +458,12 @@ function sessOf(acc, sid){
 }
 const RX_TAG = /<[^<>]{1,80}>/g;
 /* Claude Code 自身の記録（/clear などのコマンド・その出力・system-reminder）は指示ではない */
-const RX_RECORD = /^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|system-reminder)\b/;
+const RX_RECORD = /^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|system-reminder|task-notification|bash-input|bash-stdout|bash-stderr)\b/;
 /* 指示の冒頭：タグ（<pasted_content …> など）を外し、空白をそろえて 100 字。空なら無し */
-function promptHead(text){
+function promptHead(text, n = 100){
   if (RX_RECORD.test(text)) return '';
   const t = String(text).replace(RX_TAG, ' ').replace(/\s+/g, ' ').trim();
-  return t.length > 100 ? t.slice(0, 100) + '…' : t;
+  return t.length > n ? t.slice(0, n) + '…' : t;
 }
 function toolResultText(content){
   if (typeof content === 'string') return content;
@@ -410,11 +473,15 @@ function toolResultText(content){
 function handleLogLine(line, acc){
   acc.lines++;
   if (line.length < 40) return;
-  // 読むのは user／assistant の message だけ（tool_use・tool_result・usage・最初の指示）。それ以外の行（summary・progress 等）は飛ばす
-  if (line.indexOf('"message"') < 0) return;
+  // 読むのは Claude Code の user／assistant の message・Codex の payload・Gemini の step だけ。それ以外の行（summary・progress 等）は飛ばす
+  if (line.indexOf('"message"') < 0 && line.indexOf('"payload"') < 0 && line.indexOf('"step_index"') < 0) return;
   let o;
   try { o = JSON.parse(line); } catch (e) { acc.bad++; return; }
-  if (!o || typeof o !== 'object' || !o.message || typeof o.message !== 'object') return;
+  if (!o || typeof o !== 'object') return;
+  // 形で見分ける（本文に "payload" などの語が入っていても取り違えない）
+  if (!o.message && o.payload && typeof o.payload === 'object' && typeof o.type === 'string') { handleCodex(o, acc); return; }
+  if (!o.message && typeof o.step_index === 'number' && typeof o.type === 'string') { handleGemini(o, acc); return; }
+  if (!o.message || typeof o.message !== 'object') return;
   const sid = typeof o.sessionId === 'string' ? o.sessionId : '';
   const tsRaw = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
   if (sid && Number.isFinite(tsRaw)) { const sv = sessOf(acc, sid); if (tsRaw < sv.start) sv.start = tsRaw; if (tsRaw > sv.end) sv.end = tsRaw; if (!sv.cwd && typeof o.cwd === 'string') sv.cwd = normPath(o.cwd); }
@@ -426,6 +493,12 @@ function handleLogLine(line, acc){
     if (typeof c === 'string') h = promptHead(c);
     else if (Array.isArray(c)) for (const b of c) { if (b && b.type === 'text' && typeof b.text === 'string') { h = promptHead(b.text); if (h) break; } }
     if (h && Number.isFinite(tsRaw) && tsRaw < sv.firstTs) { sv.first = h; sv.firstTs = tsRaw; }
+    if (!o.isMeta) {
+      let full = '';
+      if (typeof c === 'string') full = promptHead(c, 160);
+      else if (Array.isArray(c)) for (const b of c) { if (b && b.type === 'text' && typeof b.text === 'string') { full = promptHead(b.text, 160); if (full) break; } }
+      addPrompt(acc, sid, tsRaw, full);
+    }
   }
   if (!Array.isArray(c)) return;
   if (o.type === 'assistant') {
@@ -442,11 +515,17 @@ function handleLogLine(line, acc){
       if (r && r.sid !== sid) { acc.sessLink.push([r.sid, sid]); r = null; }   // 同じ応答が別の sessionId で出た＝写し。足さない
       else {
         const sv = sessOf(acc, sid);
-        if (!r) { r = { sid, out: 0, inp: 0, cache: 0 }; acc.resp.set(mid, r); sv.msgs++; }
+        if (!r) { r = { sid, out: 0, inp: 0, cache: 0, cr: 0, cw: 0, cw1h: 0, ts, side: !!o.isSidechain, u: false }; acc.resp.set(mid, r); sv.msgs++; }
         const u = o.message.usage;
-        if (u && typeof u === 'object') for (const [k, v] of [['out', u.output_tokens], ['inp', u.input_tokens], ['cache', (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)]]) {
-          const n = typeof v === 'number' && v > 0 ? v : 0;
-          if (n > r[k]) { sv[k] += n - r[k]; r[k] = n; }
+        if (u && typeof u === 'object') {
+          r.u = true;
+          for (const [k, v] of [['out', u.output_tokens], ['inp', u.input_tokens], ['cache', (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)]]) {
+            const n = typeof v === 'number' && v > 0 ? v : 0;
+            if (n > r[k]) { sv[k] += n - r[k]; r[k] = n; }
+          }
+          // 文脈とトークンの節：キャッシュの読み・書き（1時間のキャッシュの書き込みは別に）を応答ごとに
+          const cc = u.cache_creation && typeof u.cache_creation === 'object' ? u.cache_creation : {};
+          r.cr = Math.max(r.cr, posNum(u.cache_read_input_tokens)); r.cw = Math.max(r.cw, posNum(u.cache_creation_input_tokens)); r.cw1h = Math.max(r.cw1h, posNum(cc.ephemeral_1h_input_tokens));
         }
         for (const b of c) if (b && b.type === 'tool_use' && b.name === 'Bash') sv.bash++;
       }
@@ -477,6 +556,149 @@ function handleLogLine(line, acc){
   }
 }
 
+/* ---------- Codex（~/.codex/sessions/年/月/日/rollout-*.jsonl） ----------
+   ファイルの変更は item_completed の FileChange に残る：add＝中身の全文、update＝unified_diff、delete。
+   Claude Code の Write／Edit と同じ形に直して uses に入れる（後ろの計算は共通）。
+   使用トークンは token_usage_record に応答ごと（response_id）。input_tokens はキャッシュから読んだ分を含む＝引いて数える */
+const posNum = v => (typeof v === 'number' && v > 0 ? v : 0);
+function absPath(p, cwd){ p = normPath(p); return (p.startsWith('/') || /^[A-Za-z]:\//.test(p) || !cwd) ? p : normPath(cwd + '/' + p); }
+/* unified diff を「前の行」と「後の行」に分ける（前後に共通の行は両方へ） */
+function diffSides(diff){
+  const oldL = [], newL = [];
+  let inHunk = false;
+  for (const l of String(diff).split('\n')) {
+    if (l.startsWith('@@')) { inHunk = true; continue; }
+    if (!inHunk) continue;   // --- a/… +++ b/… の見出し
+    if (l.startsWith('\\')) continue;   // \ No newline at end of file
+    if (l.startsWith('+')) newL.push(l.slice(1));
+    else if (l.startsWith('-')) oldL.push(l.slice(1));
+    else { const t = l.startsWith(' ') ? l.slice(1) : l; oldL.push(t); newL.push(t); }
+  }
+  return { oldS: oldL.join('\n'), newS: newL.join('\n') };
+}
+function addUse(acc, id, name, input, ts, sid, cwd, tur){
+  if (acc.uses.has(id)) return;
+  acc.uses.set(id, { id, name, input, ts, sid, cwd: cwd || '' });
+  acc.results.set(id, { isError: false, text: '', tur: tur || null });
+}
+function sessTouch(acc, sid, ts, cwd){
+  const sv = sessOf(acc, sid);
+  if (Number.isFinite(ts)) { if (ts < sv.start) sv.start = ts; if (ts > sv.end) sv.end = ts; }
+  if (!sv.cwd && cwd) sv.cwd = cwd;
+  return sv;
+}
+function handleCodex(o, acc){
+  const st = acc.cur, p = o.payload;
+  if (o.type === 'session_meta') { if (!st.sid && typeof p.id === 'string' && p.id) st.sid = 'codex:' + p.id; if (!st.cwd && typeof p.cwd === 'string') st.cwd = normPath(p.cwd); }
+  else if (o.type === 'turn_context' && typeof p.cwd === 'string') st.cwd = normPath(p.cwd);
+  const sid = st.sid || ('codex:' + (st.path || '?'));
+  const ts = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
+  const sv = sessTouch(acc, sid, ts, st.cwd);
+  if (o.type === 'token_usage_record') {
+    const u = p.usage;
+    const rid = 'cx:' + (typeof p.response_id === 'string' && p.response_id ? p.response_id : sid + ':' + (o.timestamp || ''));
+    if (!u || typeof u !== 'object' || acc.resp.has(rid)) return;
+    const cached = posNum(u.cached_input_tokens);
+    acc.resp.set(rid, { sid, ts, out: posNum(u.output_tokens), inp: Math.max(0, posNum(u.input_tokens) - cached), cr: cached, cw: posNum(u.cache_write_input_tokens), cw1h: 0, side: false });
+    sv.msgs++;
+    sv.out += posNum(u.output_tokens); sv.inp += Math.max(0, posNum(u.input_tokens) - cached); sv.cache += cached + posNum(u.cache_write_input_tokens);
+    return;
+  }
+  if (o.type !== 'event_msg' || p.type !== 'item_completed' || !p.item || typeof p.item !== 'object') return;
+  const it = p.item;
+  const iid = typeof it.id === 'string' && it.id ? it.id : sid + ':' + (o.timestamp || '') + ':' + it.type;
+  if (acc.cxSeen.has(iid)) return;   // 同じログを2回入れた時に数を重ねない
+  acc.cxSeen.add(iid);
+  if (it.type === 'UserMessage') {
+    const c = it.content;
+    let h = '';
+    if (typeof c === 'string') h = promptHead(c);
+    else if (Array.isArray(c)) for (const b of c) { if (b && typeof b.text === 'string') { h = promptHead(b.text); if (h) break; } }
+    if (h && Number.isFinite(ts) && ts < sv.firstTs) { sv.first = h; sv.firstTs = ts; }
+    let full = '';
+    if (typeof c === 'string') full = promptHead(c, 160);
+    else if (Array.isArray(c)) for (const b of c) { if (b && typeof b.text === 'string') { full = promptHead(b.text, 160); if (full) break; } }
+    addPrompt(acc, sid, ts, full);
+  } else if (it.type === 'CommandExecution') sv.bash++;
+  else if (it.type === 'FileChange' && (it.status === undefined || it.status === 'completed') && it.changes && typeof it.changes === 'object') {
+    let i = 0;
+    for (const fp of Object.keys(it.changes)) {
+      const ch = it.changes[fp], id = 'cx:' + iid + ':' + (i++);
+      if (!ch || typeof ch !== 'object') continue;
+      const path = absPath(typeof ch.move_path === 'string' && ch.move_path ? ch.move_path : fp, st.cwd);
+      if (ch.type === 'add' && typeof ch.content === 'string') addUse(acc, id, 'Write', { file_path: path, content: ch.content }, ts, sid, st.cwd, { type: 'create' });
+      else if (ch.type === 'update' && typeof ch.unified_diff === 'string') { const d = diffSides(ch.unified_diff); addUse(acc, id, 'Edit', { file_path: path, old_string: d.oldS, new_string: d.newS }, ts, sid, st.cwd, null); }
+      else if (ch.type === 'delete') addUse(acc, id, 'Write', { file_path: path, content: '' }, ts, sid, st.cwd, { type: 'update' });
+    }
+  }
+}
+/* ---------- Gemini（Antigravity：~/.gemini/antigravity（-cli）/brain/〈会話〉/.system_generated/logs/…/*.jsonl） ----------
+   同じ会話の同じ step が、transcript.jsonl・chunks/transcript・chunks/transcript_full に重ねて残る。中身が切られた写し（truncated_fields）もある。
+   step ごとに「切られていない・full を優先」の1つを選んでから数える（全部のファイルを読んだ後＝finalizeGemini）。
+   値が JSON の文字列としてもう一段包まれた写しがある＝ほどく。ほどけない値（途中で切れた）は数えず、件数だけ残す */
+const GEM_RANK = path => (/transcript_full/.test(path) ? 0 : /chunks/.test(path) ? 2 : 1);
+function handleGemini(o, acc){
+  const path = acc.cur.path;
+  const m = /brain\/([0-9A-Za-z-]{8,})/.exec(path);
+  const conv = m ? m[1] : (path || '?');
+  const key = conv + '\u0000' + o.step_index;
+  const truncated = Array.isArray(o.truncated_fields) && o.truncated_fields.indexOf('tool_calls') >= 0;
+  const score = (truncated ? 10 : 0) + GEM_RANK(path);
+  const prev = acc.gem.get(key);
+  if (!prev || score < prev.score) acc.gem.set(key, { score, o, conv });
+}
+/* 値が JSON の文字列でもう一段包まれているかは、呼び出しごとに決める（本文が " で始まる値もあるので、値の頭では決めない）。
+   包まれた写しは TargetFile も包まれている＝パスが " で始まれば、その呼び出しの値は全部包まれている（Codex の指摘 PR #20） */
+function gemValue(v, wrapped){
+  if (typeof v !== 'string') return null;
+  if (!wrapped) return v;
+  try { const x = JSON.parse(v); return typeof x === 'string' ? x : null; } catch (e) { return null; }
+}
+function finalizeGemini(acc){
+  // 何度呼んでも同じ結果になるように、Gemini の分は毎回作り直す（ログを後から足した時に、より良い写しへ入れ替わる）
+  for (const id of [...acc.uses.keys()]) if (id.startsWith('gm:')) { acc.uses.delete(id); acc.results.delete(id); }
+  for (const sid of [...acc.sess.keys()]) if (sid.startsWith('gemini:')) acc.sess.delete(sid);
+  for (const sid of [...acc.prompts.keys()]) if (sid.startsWith('gemini:')) acc.prompts.delete(sid);
+  for (const k of [...acc.resp.keys()]) if (k.startsWith('gm:')) acc.resp.delete(k);
+  acc.gmSkipped = 0;
+  const steps = [...acc.gem.values()].sort((a, b) => cmpStr(a.conv, b.conv) || a.o.step_index - b.o.step_index);
+  for (const { o, conv } of steps) {
+    const sid = 'gemini:' + conv;
+    const ts = typeof o.created_at === 'string' ? Date.parse(o.created_at) : NaN;
+    const sv = sessTouch(acc, sid, ts, '');
+    if (o.type === 'USER_INPUT' && typeof o.content === 'string') {
+      const h = promptHead(o.content);
+      if (h && Number.isFinite(ts) && ts < sv.firstTs) { sv.first = h; sv.firstTs = ts; }
+      addPrompt(acc, sid, ts, promptHead(o.content, 160));
+    }
+    if (o.type !== 'PLANNER_RESPONSE') continue;
+    sv.msgs++;
+    sv.out += posNum(o.output_tokens); sv.inp += posNum(o.input_tokens); sv.cache += posNum(o.cache_read_tokens);
+    acc.resp.set('gm:' + conv + ':' + o.step_index, { sid, ts, out: posNum(o.output_tokens), inp: posNum(o.input_tokens), cr: posNum(o.cache_read_tokens), cw: 0, cw1h: 0, side: false });
+    const calls = Array.isArray(o.tool_calls) ? o.tool_calls : [];
+    calls.forEach((t, i) => {
+      if (!t || typeof t !== 'object') return;
+      let a = t.args;
+      if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = null; } }
+      if (!a || typeof a !== 'object') return;
+      if (t.name === 'run_command') { sv.bash++; const c = gemValue(a.Cwd, typeof a.Cwd === 'string' && a.Cwd.startsWith('"')); if (!sv.cwd && c) sv.cwd = normPath(c); return; }
+      if (t.name !== 'write_to_file' && t.name !== 'replace_file_content') return;
+      const wrapped = typeof a.TargetFile === 'string' && a.TargetFile.startsWith('"');
+      const file = gemValue(a.TargetFile, wrapped);
+      const id = 'gm:' + conv + ':' + o.step_index + ':' + i;
+      if (t.name === 'write_to_file') {
+        const content = gemValue(a.CodeContent, wrapped);
+        if (!file || content === null) { acc.gmSkipped++; return; }
+        addUse(acc, id, 'Write', { file_path: absPath(file, sv.cwd), content }, ts, sid, sv.cwd, null);
+      } else {
+        const oldS = gemValue(a.TargetContent, wrapped), newS = gemValue(a.ReplacementContent, wrapped);
+        if (!file || oldS === null || newS === null) { acc.gmSkipped++; return; }
+        addUse(acc, id, 'Edit', { file_path: absPath(file, sv.cwd), old_string: oldS, new_string: newS }, ts, sid, sv.cwd, null);
+      }
+    });
+  }
+}
+
 /* Read の結果から行を取り出す。toolUseResult.file.content があればそれ、無ければ「番号→行」の形から番号を外す。 */
 function readContent(res){
   const f = res.tur && res.tur.file;
@@ -491,7 +713,7 @@ function readContent(res){
       Edit：new 側にあって old 側に無い行を足す。old 側にあって new 側に無い行は「Claude が後で消した」印
       Write：中身の行のうち、それまでに Read で見えていた行（と originalFile の行）を除いて足す。前に書いた行で今回の中身に無いものは「Claude が後で消した」印
    2. ログの絶対パスと、落としたフォルダの相対パスを末尾一致で照合し、一番多く一致した場所を root にする
-   3. root の下のファイルごとに、残った／Claude が書き直した／人が消した を数える */
+   3. root の下のファイルごとに、残った／Claude が書き直した／ログの外で消えた を数える */
 function buildEvents(acc){
   const evs = [];
   for (const u of acc.uses.values()) if (Number.isFinite(u.ts)) evs.push(u);
@@ -501,19 +723,24 @@ function buildEvents(acc){
 }
 function applyEvents(evs, acc, strict){
   const claude = new Map(), known = new Map();
+  // 書き直し＝AI が前に書いた行を、後の Edit／Write で AI 自身が消した。編集（seq）とファイルごとに1件
+  const rw = new Map(), addedBy = new Map();
+  const evKey = (p, ev) => ev.seq + '\u0000' + p;
+  const noteGone = (p, k, ev, rec) => { const key = evKey(p, ev); let e = rw.get(key); if (!e) { e = { path: p, ts: ev.ts, sid: ev.sid, seq: ev.seq, gone: [], goneTs: [] }; rw.set(key, e); } e.gone.push(k); e.goneTs.push(rec.ts); };   // goneTs＝消えた行が入った時刻（日時で区切る時に、区切りより前に入った行を外す）
   const knownAdd = (p, keys) => { let s = known.get(p); if (!s) { s = new Set(); known.set(p, s); } for (const k of keys) s.add(k); };
   const claudeAdd = (p, k, ev) => {
     let m = claude.get(p); if (!m) { m = new Map(); claude.set(p, m); }
+    { const key = evKey(p, ev); let a = addedBy.get(key); if (!a) { a = []; addedBy.set(key, a); } a.push(k); }
     const rec = m.get(k);
     // 一度消えた行をあとで入れ直したら、今ある行はその時の Edit／Write のもの（頼み方の節で会話ごとに数えるため・Codex の指摘 PR #17）
     if (rec) { if (rec.removed) { rec.ts = ev.ts; rec.sid = ev.sid; rec.seq = ev.seq; } rec.removed = false; }
     else m.set(k, { ts: ev.ts, sid: ev.sid, seq: ev.seq, removed: false });
   };
-  const claudeRemove = (p, k) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) rec.removed = true; };
+  const claudeRemove = (p, k, ev) => { const m = claude.get(p); const rec = m && m.get(k); if (rec) { if (!rec.removed) noteGone(p, k, ev, rec); rec.removed = true; } };
   const applyEdit = (p, oldS, newS, ev) => {
     const oldK = new Set(lineKeys(oldS, strict)), newK = new Set(lineKeys(newS, strict));
     for (const k of newK) if (!oldK.has(k)) claudeAdd(p, k, ev);
-    for (const k of oldK) if (!newK.has(k)) claudeRemove(p, k);
+    for (const k of oldK) if (!newK.has(k)) claudeRemove(p, k, ev);
     knownAdd(p, newK);
   };
   const applied = [];
@@ -540,12 +767,13 @@ function applyEvents(evs, acc, strict){
       else if (tur && typeof tur.originalFile === 'string') for (const k of lineKeys(tur.originalFile, strict)) pre.add(k);
       for (const k of cur) if (!pre.has(k)) claudeAdd(p, k, ev);
       const m = claude.get(p);
-      if (m) for (const [k, rec] of m) if (!cur.has(k)) rec.removed = true;
+      if (m) for (const [k, rec] of m) if (!cur.has(k)) { if (!rec.removed) noteGone(p, k, ev, rec); rec.removed = true; }
       known.set(p, new Set(cur));
     } else continue;
     applied.push({ path: p, ts: ev.ts, sid: ev.sid, name: ev.name, cwd: ev.cwd });
   }
-  return { claude, applied };
+  const rewrites = [...rw.entries()].map(([key, e]) => ({ ...e, added: addedBy.get(key) || [] }));
+  return { claude, applied, rewrites };
 }
 const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 /* ログの絶対パスと、落としたフォルダの相対パスを末尾で照合して root を決める。
@@ -590,9 +818,12 @@ function pickExample(cands){
   return ok.length ? ok[0] : null;
 }
 
-function analyzeParsed(acc, project, projectName, strict){
+function analyzeParsed(acc, project, projectName, strict, since){
+  finalizeGemini(acc);
   const evs = buildEvents(acc);
-  const { claude, applied } = applyEvents(evs, acc, strict);
+  const { claude, applied, rewrites } = applyEvents(evs, acc, strict);
+  // この日時以降に入った行・編集だけで数える（前後比較用）。それより前の編集も、行の今の状態を決めるためには全部当てる
+  const sinceMs = Number.isFinite(since) ? since : -Infinity;
   const cwds = new Map();
   for (const a of applied) if (a.cwd) cwds.set(a.cwd, (cwds.get(a.cwd) || 0) + 1);
   const cwdTop = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).map(e => e[0])[0] || '';
@@ -603,7 +834,8 @@ function analyzeParsed(acc, project, projectName, strict){
     projectFiles: project.size, projectLines: 0, otherProjectFiles: 0, missingFiles: [],
     written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, droppedWritten: 0, aiLines: 0,
     period: null, files: [], top: [], examples: { alive: null, human: null }, rootCandidates: candidates, rootMatched: matched,
-    habits: { lines: 0, matched: 0, items: [] },
+    habits: { lines: 0, matched: 0, items: [] }, tools: {}, gmSkipped: acc.gmSkipped, since: Number.isFinite(since) ? new Date(since).toISOString() : null,
+    rewriteTotal: { events: 0, lines: 0, files: 0 }, rewriteFiles: [], rewriteEvents: [],
     sessionStats: { outTotal: 0, outGone: 0, goneShare: 0, rows: [], costly: [], cheap: [] },
   };
   if (!root) return R;
@@ -614,17 +846,19 @@ function analyzeParsed(acc, project, projectName, strict){
   const repSid = sid => repOf.get(sid) || sid;
   const psOf = sid => { sid = repSid(sid); let v = perSess.get(sid); if (!v) { v = { written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, edits: 0, writtenAll: 0 }; perSess.set(sid, v); } return v; };
   let tmin = Infinity, tmax = -Infinity;
-  for (const a of applied) { if (!a.path.startsWith(prefix)) continue; R.edits++; sids.add(repSid(a.sid)); psOf(a.sid).edits++; if (a.ts < tmin) tmin = a.ts; if (a.ts > tmax) tmax = a.ts; }
+  for (const a of applied) { if (!a.path.startsWith(prefix) || a.ts < sinceMs) continue; R.edits++; sids.add(repSid(a.sid)); psOf(a.sid).edits++; if (a.ts < tmin) tmin = a.ts; if (a.ts > tmax) tmax = a.ts; }
   R.sessions = sids.size;
   if (R.edits) R.period = { start: dateKey(new Date(tmin)), end: dateKey(new Date(tmax)), days: daysBetween(dateKey(new Date(tmin)), dateKey(new Date(tmax))) + 1 };
   const aliveC = [], humanC = [];
   const habitIn = [];   // 直し癖の材料＝今もあるファイルの、人が消した・直した Claude の行（どのセッションで書いたかも）
   const seenRel = new Set();
-  for (const [p, m] of claude) {
+  for (const [p, mAll] of claude) {
     if (!p.startsWith(prefix)) { R.otherProjectFiles++; continue; }
+    const m = sinceMs === -Infinity ? mAll : new Map([...mAll].filter(([, rec]) => rec.ts >= sinceMs));
     const rel = p.slice(prefix.length);
     seenRel.add(rel);
     const text = project.get(rel);
+    if (!m.size && text === undefined) continue;   // この日時より後に書いた行が無い・今は無いファイル
     // 行は「種類」で数える（同じ内容の行は1つ）。Claude の行も今の行も同じ数え方＝AI率の分子は「残った」と同じ数
     const curSet = text === undefined ? new Set() : new Set(lineKeys(text, strict));
     const row = { file: rel, exists: text !== undefined, lines: curSet.size, written: m.size, alive: 0, rewritten: 0, human: 0, ai: 0 };
@@ -653,6 +887,10 @@ function analyzeParsed(acc, project, projectName, strict){
     R.projectLines += n;
     if (!seenRel.has(rel)) R.files.push({ file: rel, exists: true, lines: n, written: 0, alive: 0, rewritten: 0, human: 0, ai: 0 });
   }
+  // AI ごとの内訳（会話の ID の頭で分ける）：書いた行・残った行・編集回数・会話の数
+  for (const a of applied) { if (!a.path.startsWith(prefix)) continue; const t = toolOf(a.sid); const v = R.tools[t] || (R.tools[t] = { written: 0, alive: 0, edits: 0, sessions: 0 }); v.edits++; }
+  for (const sid of sids) { const t = toolOf(sid); const v = R.tools[t] || (R.tools[t] = { written: 0, alive: 0, edits: 0, sessions: 0 }); v.sessions++; }
+  for (const [sid, ps] of perSess) { const t = toolOf(sid); const v = R.tools[t]; if (v) { v.written += ps.written; v.alive += ps.alive; } }
   R.files.sort((a, b) => b.written - a.written || b.lines - a.lines || cmpStr(a.file, b.file));
   R.missingFiles.sort((a, b) => b.written - a.written || cmpStr(a.file, b.file));
   assignAliases(R);
@@ -661,7 +899,26 @@ function analyzeParsed(acc, project, projectName, strict){
   R.examples = { alive: pickExample(aliveC), human: pickExample(humanC) };
   R.habits = analyzeHabits(habitIn);
   // 頼み方：セッション全体の出力トークンを「そのセッションで Claude が書いた行のうち、このリポジトリの行の割合」で按分し、今は無い行の分を見積もる
-  for (const m of claude.values()) for (const rec of m.values()) { const ps = perSess.get(repSid(rec.sid)); if (ps) ps.writtenAll++; }
+  for (const m of claude.values()) for (const rec of m.values()) { if (rec.ts < sinceMs) continue; const ps = perSess.get(repSid(rec.sid)); if (ps) ps.writtenAll++; }
+  // 書き直しの集中：このリポジトリの書き直しをファイルごとに数え、上位3ファイルの各回に「書き直す前の本人の指示」を添える（理由は決めない）
+  // 日時で区切った時は、区切りより後に入った行の書き直しだけ（区切りより前に入った行を後で消した分は数えない・Codex の指摘 PR #21）
+  const rwIn = rewrites.filter(e => e.path.startsWith(prefix) && e.ts >= sinceMs)
+    .map(e => sinceMs === -Infinity ? e : Object.assign({}, e, { gone: e.gone.filter((_, i) => e.goneTs[i] >= sinceMs) })).filter(e => e.gone.length);
+  const byFile = new Map();
+  for (const e of rwIn) { const f = e.path.slice(prefix.length); let v = byFile.get(f); if (!v) { v = { file: f, events: 0, lines: 0, sids: new Set() }; byFile.set(f, v); } v.events++; v.lines += e.gone.length; v.sids.add(repSid(e.sid)); }
+  const aliasOfFile = new Map([...R.files, ...R.missingFiles].map(f => [f.file, f.alias]));
+  const ranked = [...byFile.values()].sort((a, b) => b.events - a.events || b.lines - a.lines || cmpStr(a.file, b.file));
+  R.rewriteTotal = { events: rwIn.length, lines: rwIn.reduce((a, e) => a + e.gone.length, 0), files: byFile.size };
+  R.rewriteFiles = ranked.slice(0, 5).map(v => ({ file: v.file, alias: aliasOfFile.get(v.file) || '', events: v.events, lines: v.lines, sessions: v.sids.size }));
+  const prompts = new Map();
+  const promptsOf = sid => { let a = prompts.get(sid); if (!a) { a = [...(acc.prompts.get(sid) || [])].sort((x, y) => x.ts - y.ts); prompts.set(sid, a); } return a; };
+  const topFiles = new Set(ranked.slice(0, 3).map(v => v.file));
+  R.rewriteEvents = rwIn.filter(e => topFiles.has(e.path.slice(prefix.length))).sort((a, b) => a.ts - b.ts || a.seq - b.seq || cmpStr(a.path, b.path)).map(e => {
+    const ps = promptsOf(e.sid);
+    let pr = null;
+    for (let i = ps.length - 1; i >= 0; i--) if (ps[i].ts <= e.ts) { pr = { text: ps[i].text, minutes: Math.round((e.ts - ps[i].ts) / 60000), first: i === 0 }; break; }
+    return { file: e.path.slice(prefix.length), ts: new Date(e.ts).toISOString(), sid: repSid(e.sid), tool: toolOf(e.sid), goneN: e.gone.length, addedN: e.added.length, gone: e.gone.slice(0, 3), added: e.added.slice(0, 3), prompt: pr };
+  });
   R.sessionStats = sessionStats(perSess, sessMerged);
   return R;
 }
@@ -676,7 +933,7 @@ function sessionStats(perSess, sess){
     const gone = ps.written - ps.alive;
     const outGoneRepo = Math.round(outRepo * gone / ps.written);
     outTotal += outRepo; outGone += outGoneRepo;
-    rows.push({ sid, first: sv.first || '', start: Number.isFinite(sv.start) ? dateKey(new Date(sv.start)) : '', end: Number.isFinite(sv.end) ? dateKey(new Date(sv.end)) : '',
+    rows.push({ sid, tool: toolOf(sid), first: sv.first || '', start: Number.isFinite(sv.start) ? dateKey(new Date(sv.start)) : '', end: Number.isFinite(sv.end) ? dateKey(new Date(sv.end)) : '',
       out: sv.out, outRepo, share, msgs: sv.msgs, bash: sv.bash, members: sv.members || 1, edits: ps.edits, written: ps.written, alive: ps.alive, rewritten: ps.rewritten, human: ps.human, dropped: ps.dropped,
       perAlive: ps.alive ? Math.round(outRepo / ps.alive) : null });
   }
@@ -686,6 +943,62 @@ function sessionStats(perSess, sess){
   const costly = big.filter(r => r.perAlive === null || r.alive / r.written < 0.7).sort((a, b) => (a.perAlive === null) !== (b.perAlive === null) ? (a.perAlive === null ? -1 : 1) : (a.perAlive === null ? b.outRepo - a.outRepo : b.perAlive - a.perAlive) || cmpStr(a.sid, b.sid)).slice(0, 3);
   const cheap = big.filter(r => r.perAlive !== null && r.alive / r.written >= 0.7).sort((a, b) => a.perAlive - b.perAlive || cmpStr(a.sid, b.sid)).slice(0, 3);
   return { outTotal, outGone, goneShare: outTotal ? outGone / outTotal : 0, rows, costly: costly.map(r => r.sid), cheap: cheap.map(r => r.sid) };
+}
+
+/* ---------- 文脈とトークン（ログだけで出す・プロジェクトのフォルダは要らない） ----------
+   応答ごと（同じ応答の重複は1回）：文脈＝入力＋キャッシュ読み＋キャッシュ書き込み（その応答で読んだ・書いた分の合計）。
+   再開＝同じ会話（サブエージェントは除く）で、前の応答から1時間より長くあいた次の応答。
+   検出条件＝前の応答の文脈が2万を超え、次の応答のキャッシュ読みが前の文脈の2割未満で、キャッシュ書き込みが前の文脈の半分を超える（キャッシュ期限切れと断定はしない）。
+   料金比の内訳は「API の料金の比（入力1・書き込み 5分 1.25／1時間 2・読み 0.1・出力 5）で重みづけた推定」。定額の利用枠の減り方とは別 */
+const CTX_EDGES = [50000, 100000, 150000, 200000, 400000, 700000];
+const CTX_LABELS = ['〜5万', '5〜10万', '10〜15万', '15〜20万', '20〜40万', '40〜70万', '70万〜'];
+const GAP_MS = 3600 * 1000;
+const r6 = x => Math.floor(x * 1e6 + 0.5) / 1e6;
+function tokenStats(acc){
+  const rs = [...acc.resp.values()].filter(r => Number.isFinite(r.ts) && r.u !== false);   // usage の無い応答（記録の行だけ）は数えない
+  const ctxOf = r => (r.inp || 0) + (r.cr || 0) + (r.cw || 0);
+  const bins = CTX_LABELS.map(label => ({ label, n: 0 }));
+  const by = {};
+  const w = { out: 0, inp: 0, cw: 0, cr: 0 };
+  let over = 0, tmin = Infinity, tmax = -Infinity;
+  for (const r of rs) {
+    const c = ctxOf(r);
+    let i = 0; while (i < CTX_EDGES.length && c >= CTX_EDGES[i]) i++;
+    bins[i].n++;
+    const t = toolOf(r.sid), v = by[t] || (by[t] = { n: 0, over: 0, resumes: 0, matched: 0 });
+    v.n++; if (c >= 150000) { v.over++; over++; }
+    w.out += (r.out || 0) * 5; w.inp += r.inp || 0; w.cw += ((r.cw || 0) - (r.cw1h || 0)) * 1.25 + (r.cw1h || 0) * 2; w.cr += (r.cr || 0) * 0.1;
+    if (r.ts < tmin) tmin = r.ts; if (r.ts > tmax) tmax = r.ts;
+  }
+  // 再開：会話ごと・サブエージェントを除いて時刻順
+  // 再開（--resume）で写った応答は、どちらのファイルを先に読んだかで r.sid が変わる＝つないだ会話の代表でまとめる（読む順に左右されない）
+  const { repOf } = resolveSessions(acc);
+  const bySid = new Map();
+  for (const r of rs) { if (r.side) continue; const k = repOf.get(r.sid) || r.sid; let a = bySid.get(k); if (!a) { a = []; bySid.set(k, a); } a.push(r); }
+  let resumes = 0; const matched = [];
+  for (const [sid, a] of [...bySid.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
+    a.sort((x, y) => x.ts - y.ts || ctxOf(x) - ctxOf(y));
+    for (let i = 1; i < a.length; i++) {
+      const p = a[i - 1], q = a[i];
+      if (q.ts - p.ts <= GAP_MS) continue;
+      resumes++; by[toolOf(sid)].resumes++;
+      const prev = ctxOf(p);
+      if (prev > 20000 && (q.cr || 0) < 0.2 * prev && (q.cw || 0) > 0.5 * prev) {
+        matched.push({ sid, ts: q.ts, gapMin: Math.round((q.ts - p.ts) / 60000), prevCtx: prev, cr: q.cr || 0, cw: q.cw || 0 });
+        by[toolOf(sid)].matched++;
+      }
+    }
+  }
+  const cws = matched.map(m => m.cw).sort((x, y) => x - y);
+  const latest = matched.length ? [...matched].sort((x, y) => y.ts - x.ts || cmpStr(x.sid, y.sid))[0] : null;
+  const wt = w.out + w.inp + w.cw + w.cr;
+  return {
+    n: rs.length, over, bins, by,
+    period: rs.length ? { start: dateKey(new Date(tmin)), end: dateKey(new Date(tmax)) } : null,
+    resumes, matched: matched.length, matchedMedianCw: cws.length ? cws[Math.floor(cws.length / 2)] : 0,
+    latest: latest ? { sid: latest.sid, tool: toolOf(latest.sid), ts: new Date(latest.ts).toISOString(), gapMin: latest.gapMin, prevCtx: latest.prevCtx, cr: latest.cr, cw: latest.cw } : null,
+    weighted: wt ? { out: r6(w.out / wt), inp: r6(w.inp / wt), cw: r6(w.cw / wt), cr: r6(w.cr / wt) } : null,   // 足す順で末尾の桁が揺れる＝6桁に丸める
+  };
 }
 
 /* ---------- 直し癖（人が直した Claude の行 → 今の行 → 直しの型 → CLAUDE.md の1行） ----------
@@ -871,7 +1184,16 @@ function daysBetween(a, b){
 const rate = (a, b) => b > 0 ? a / b : 0;
 
 /* ---------- 判定と所見 ---------- */
+/* 画面とカードで「誰が書いたか」の呼び名：書いた行のある AI が1つならその名前、2つ以上なら「AI」 */
+let AI = 'Claude';
+const aiSet = R => Object.keys((R && R.tools) || {}).filter(k => R.tools[k].written > 0).sort();
+function aiLabel(R){
+  const ks = aiSet(R);
+  return ks.length === 1 ? TOOL_NAME[ks[0]] : ks.length > 1 ? 'AI' : 'Claude';
+}
+const titleOf = () => 'AI 開発ログマップ・コードの手直し' + (AI === 'AI' ? '' : `（${AI}）`);
 function judge(R){
+  AI = aiLabel(R);
   // 4分類：残った／Claude が自分で書き直した／人が消した・直した（行単位）／ファイルごと消えた
   // 判定の「人が手を入れた」には、ファイルごと消えた分を入れない（捨てた試作や名前の変更は、Claude の行の出来とは別の話）
   const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human - R.dropped, w), sd = rate(R.dropped, w);
@@ -886,10 +1208,10 @@ function judge(R){
   // excl＝ファイルごと消えた分を除いた生存率の1文（カードの所見にも載せる）
   const excl = (w && R.dropped && w > R.droppedWritten) ? `ファイルごと消えた分を除くと、残った行は${pct(rate(R.alive, w - R.droppedWritten))}。` : '';
   if (w) {
-    lines.push(`Claude が書いた${fmt(w)}行のうち、${fmt(R.alive)}行がそのまま残り、${fmt(R.rewritten)}行は Claude 自身が書き直し、${fmt(R.human - R.dropped)}行は人が消した・直した${R.dropped ? `、${fmt(R.dropped)}行はファイルごと消えた` : ''}行です。`);
+    lines.push(`${AI} が書いた${fmt(w)}行のうち、${fmt(R.alive)}行がそのまま残り、${fmt(R.rewritten)}行は ${AI} 自身が書き直し、${fmt(R.human - R.dropped)}行はログの外で変わった・消えた${R.dropped ? `、${fmt(R.dropped)}行はファイルごと消えた` : ''}行です。`);
     if (excl) lines.push(excl);
     if (R.top.length) lines.push(`いちばん手が入ったのは ${baseName(R.top[0].file)}（${fmt(R.top[0].human)}行）。`);
-  } else lines.push('この期間に Claude が書いた行は見つかりませんでした。');
+  } else lines.push(`この期間に ${AI} が書いた行は見つかりませんでした。`);
   return { title: t, comments: lines, excl };
 }
 
@@ -927,6 +1249,12 @@ function sampleResult(){
   R.sessionStats = sessionStats(
     new Map(srows.map(r => [r.sid, { written: r.written, alive: r.alive, rewritten: r.rewritten, human: r.human, dropped: r.dropped, edits: r.edits, writtenAll: r.written }])),
     new Map(srows.map(r => [r.sid, { out: r.outRepo, inp: 0, cache: 0, msgs: r.msgs, first: r.first, start: Date.parse(r.start + 'T10:00:00+09:00'), end: Date.parse(r.end + 'T18:00:00+09:00'), bash: r.bash, members: 1 }])));
+  R.rewriteTotal = { events: 64, lines: 418, files: 19 };
+  R.rewriteFiles = [{ file: 'src/components/Editor.tsx', alias: 'ファイルB.tsx', events: 17, lines: 121, sessions: 3 }, { file: 'src/lib/db.ts', alias: 'ファイルA.ts', events: 11, lines: 64, sessions: 4 }, { file: 'src/app/page.tsx', alias: 'ファイルD.tsx', events: 8, lines: 39, sessions: 2 }];
+  R.rewriteEvents = [
+    { file: 'src/components/Editor.tsx', ts: '2026-10-14T01:12:00.000Z', sid: 'x1', tool: 'claude', goneN: 9, addedN: 11, gone: ['const [text, setText] = useState(note.body);', 'onChange={e => setText(e.target.value)}'], added: ['const { text, setText, dirty } = useDraft(note);', 'onChange={e => setText(e.target.value)}'], prompt: { text: '保存してないのに閉じると消える。下書きを残して', minutes: 3, first: false } },
+    { file: 'src/lib/db.ts', ts: '2026-10-15T08:40:00.000Z', sid: 'x2', tool: 'claude', goneN: 4, addedN: 5, gone: ['return db.notes.toArray();'], added: ["return db.notes.where({ userId }).sortBy('updatedAt');"], prompt: { text: 'ノートを自分のだけ、更新が新しい順に出して', minutes: 1, first: true } },
+  ];
   R.habits = { lines: 287, matched: 103, items: [   // 合計＝人が直した 287 行（書き換え 103・削除 184）
     hx('debug', 41, 9, 7, true, [{ before: "console.log('notes', notes.length);", after: null, file: 'src/app/api/notes/route.ts' }, { before: "console.log('render', props);", after: null, file: 'src/components/Editor.tsx' }]),
     hx('comment', 23, 6, 8, true, [{ before: '// Fetch all notes for the current user', after: null, file: 'src/lib/db.ts' }, { before: '// Handle the submit event', after: null, file: 'src/components/Editor.tsx' }]),
@@ -978,6 +1306,53 @@ function ellipsize(x, text, maxW){
 function rrect(x, x0, y0, w, h, r){
   x.beginPath(); x.moveTo(x0 + r, y0); x.arcTo(x0 + w, y0, x0 + w, y0 + h, r); x.arcTo(x0 + w, y0 + h, x0, y0 + h, r); x.arcTo(x0, y0 + h, x0, y0, r); x.arcTo(x0, y0, x0 + w, y0, r); x.closePath();
 }
+function drawTokenCard(T){
+  const W = 1080, H = 1350, L = 72, Rr = W - 72, CW = Rr - L;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  const text = (s, tx, ty, font, color, align = 'left', base = 'alphabetic') => { x.font = font; x.fillStyle = color; x.textAlign = align; x.textBaseline = base; x.fillText(s, tx, ty); };
+  x.fillStyle = P.bg; x.fillRect(0, 0, W, H);
+  text('AI 開発ログマップ・文脈とトークン', L, 96, `600 22px ${GOTHIC}`, P.ink2);
+  text(T.period ? `${T.period.start.replace(/-/g, '.')} - ${T.period.end.replace(/-/g, '.')}` : '', Rr, 96, `400 21px ${MONO}`, P.ink2, 'right');
+  x.fillStyle = P.rule2; x.fillRect(L, 124, CW, 1);
+  const share = T.n ? T.over / T.n : 0;
+  text('15万トークンを超える文脈での応答', L, 212, `600 28px ${GOTHIC}`, P.ink);
+  const big = T.n ? String(Math.round(share * 100)) : '—';
+  x.font = `500 230px ${NUM}`; const bw = x.measureText(big).width;
+  text(big, L - 8, 432, `500 230px ${NUM}`, P.accent);
+  if (T.n) text('%', L - 8 + bw + 8, 432, `400 84px ${NUM}`, P.accent);
+  x.font = `500 36px ${GOTHIC}`;
+  const lead = wrapJa(x, T.n ? `応答の ${Math.round(share * 100)}% が、15万トークンを超える文脈で動いていた` : 'ログに、応答ごとのトークンの記録がありません', CW).slice(0, 2);
+  lead.forEach((ln, i) => text(ln, L, 506 + i * 52, `500 36px ${GOTHIC}`, P.ink));
+  const tools = Object.keys(T.by || {}).sort();
+  text(`全 ${fmt(T.n)} 応答${tools.length > 1 ? `（${tools.map(k => TOOL_NAME[k] + ' ' + fmt(T.by[k].n)).join('・')}）` : ''}`, L, 506 + lead.length * 52 + 8, `400 22px ${GOTHIC}`, P.ink2);
+  const bY = 650;
+  x.save(); rrect(x, L, bY, CW, 56, 3); x.clip();
+  x.fillStyle = '#3B4A57'; x.fillRect(L, bY, CW, 56); x.fillStyle = P.accent; x.fillRect(L, bY, CW * share, 56); x.restore();
+  text('15万超', L + 22, bY + 96, `400 22px ${GOTHIC}`, P.ink2); x.font = `400 22px ${GOTHIC}`; const lw = x.measureText('15万超').width;
+  text(fmt(T.over), L + 22 + lw + 12, bY + 96, `500 24px ${MONO}`, P.ink);
+  x.fillStyle = P.accent; x.fillRect(L, bY + 82, 13, 13);
+  text(fmt(T.n - T.over), Rr, bY + 96, `500 24px ${MONO}`, P.ink, 'right'); x.font = `500 24px ${MONO}`; const rw = x.measureText(fmt(T.n - T.over)).width;
+  text('15万以下', Rr - rw - 12, bY + 96, `400 22px ${GOTHIC}`, P.ink2, 'right'); x.font = `400 22px ${GOTHIC}`; const rl = x.measureText('15万以下').width;
+  x.fillStyle = '#3B4A57'; x.fillRect(Rr - rw - 12 - rl - 22, bY + 82, 13, 13);
+  // 再開（観測値だけ）
+  const rY = 830;
+  x.fillStyle = P.rule; x.fillRect(L, rY - 34, CW, 1);
+  text('1時間以上あけて再開した時', L, rY + 10, `600 24px ${GOTHIC}`, P.ink2);
+  text(fmt(T.matched), L, rY + 82, `500 60px ${NUM}`, P.ink); x.font = `500 60px ${NUM}`; const mw = x.measureText(fmt(T.matched)).width;
+  text(`／ ${fmt(T.resumes)} 回のうち`, L + mw + 14, rY + 82, `500 30px ${GOTHIC}`, P.ink2);
+  x.font = `400 24px ${GOTHIC}`;
+  wrapJa(x, `大量のキャッシュ作成が記録された回数${T.matched ? `（作成量の中央値 ${fmtTok(T.matchedMedianCw)} トークン）` : ''}`, CW).slice(0, 2).forEach((ln, i) => text(ln, L, rY + 128 + i * 34, `400 24px ${GOTHIC}`, P.ink2));
+  // 自分のログで確かめる
+  const uY = 1056;
+  x.fillStyle = P.panel; x.fillRect(L, uY, CW, 88); x.fillStyle = P.accent; x.fillRect(L, uY, 3, 88);
+  text('自分のログでも、文脈の大きさと直近の再開1件を確かめられます。', L + 30, uY + 54, `500 26px ${GOTHIC}`, P.ink);
+  x.fillStyle = P.rule; x.fillRect(L, 1226, CW, 1);
+  x.font = `400 16px ${GOTHIC}`;
+  wrapJa(x, 'ログに残ったトークンの記録で、利用枠の消費量ではありません。文脈＝読み直した会話・道具の定義・読んだファイルの合計。15万は区切りの1つで、良し悪しの境目ではありません。キャッシュ切れと断定はしません。ログはブラウザの中で読み、外に出ません。', CW - 80).slice(0, 3).forEach((ln, i) => text(ln, L, 1256 + i * 24, `400 16px ${GOTHIC}`, P.ink2));
+  text(T.sample ? '見本' : '#AI開発ログマップ', Rr, 1256, `500 17px ${MONO}`, P.sub, 'right');
+  return cv;
+}
 function drawCard(R, opts){
   const W = 1080, H = 1350;
   const cv = document.createElement('canvas');
@@ -995,7 +1370,7 @@ function drawCard(R, opts){
   const L = 72, Rr = W - 72, CW = Rr - L;
 
   // 題（左）と期間（右）、その下にプロジェクト名。罫線で頭を締める
-  text('Claude Code 生存率', L, 78, `600 22px ${GOTHIC}`, P.sub);
+  text(titleOf(), L, 78, `600 22px ${GOTHIC}`, P.sub);
   const per = R.period ? `${R.period.start.replace(/-/g, '.')} - ${R.period.end.replace(/-/g, '.')}  ${R.period.days}日` : '記録なし';
   text(per, Rr, 78, `400 21px ${MONO}`, P.sub, 'right');
   if (!opts.hideProject && R.projectName) {
@@ -1005,7 +1380,7 @@ function drawCard(R, opts){
   hline(158, L, Rr, P.rule2);
 
   // 主指標：視線の中心。数字だけ青緑
-  text(w ? `Claude が書いた ${fmt(w)} 行のうち、今も残っている行` : 'この期間に Claude が書いた行は見つかりませんでした', L, 212, `500 27px ${GOTHIC}`, P.ink2);
+  text(w ? `${AI} が書いた ${fmt(w)} 行のうち、今も残っている行` : `この期間に ${AI} が書いた行は見つかりませんでした`, L, 212, `500 27px ${GOTHIC}`, P.ink2);
   const bigStr = w ? String(Math.round(sa * 100)) : '—';
   x.font = `500 272px ${NUM}`;
   const bigW = x.measureText(bigStr).width;
@@ -1024,7 +1399,7 @@ function drawCard(R, opts){
   }
   x.restore();
   // 凡例（幅に収まらなければ2段）。数は等幅
-  const legend = [['残った', R.alive, sa, P.alive], ['Claude が自分で書き直した', R.rewritten, sr, P.rewrite], ['人が消した・直した', R.human - R.dropped, sh, P.human]];
+  const legend = [['残った', R.alive, sa, P.alive], [`${AI} が自分で書き直した`, R.rewritten, sr, P.rewrite], ['ログの外で変わった・消えた', R.human - R.dropped, sh, P.human]];
   if (R.dropped) legend.push(['ファイルごと消えた', R.dropped, sd, P.drop]);
   const legW = legend.map(([lab, n, r]) => { x.font = `500 21px ${GOTHIC}`; const a = x.measureText(lab + '  ').width; x.font = `400 21px ${MONO}`; return [a, x.measureText(`${fmt(n)} ${pct(r)}`).width]; });
   const legTotal = legW.reduce((a, [p, q]) => a + 24 + p + q + 34, 0);
@@ -1052,7 +1427,7 @@ function drawCard(R, opts){
   };
   const touched = R.files.filter(f => f.written > 0).length + R.missingFiles.length;
   const S = R.sessionStats || { outTotal: 0, outGone: 0, goneShare: 0 };
-  tile(L, 'AI率（この期間に Claude が書いた分）', R.projectLines ? pct(ai) : '—', '', `${fmt(R.projectLines)} 行中 ${fmt(R.aiLines)} 行が Claude の行`, 0);
+  tile(L, `AI率（この期間に ${AI} が書いた分）`, R.projectLines ? pct(ai) : '—', '', `${fmt(R.projectLines)} 行中 ${fmt(R.aiLines)} 行が ${AI} の行`, 0);
   tile(L + tW + 56, '今は無いコードに使った出力トークン', S.outTotal ? pct(S.goneShare) : '—', '', S.outTotal ? `${fmtTok(S.outGone)} / ${fmtTok(S.outTotal)} トークン（按分）` : 'ログに usage の記録なし', 1);
   tile(L + 2 * (tW + 56), 'ログの記録', fmt(R.edits), '回の編集', `${fmt(R.sessions)} セッション・${fmt(touched)} ファイル・${R.period ? R.period.days + '日' : '—'}`, 2);
   hline(tY + tH + 8, L, Rr);
@@ -1072,14 +1447,14 @@ function drawCard(R, opts){
       x.fillRect(cx, sY, ww - 1, sH); cx += ww;
     }
   }
-  text(`今のコードをファイルごとに並べた図・明るいほど Claude の行が多い（${fmt(rows.length)} ファイル）`, L, 893, `400 17px ${GOTHIC}`, P.ink2);
+  text(`今のコードをファイルごとに並べた図・明るいほど ${AI} の行が多い（${fmt(rows.length)} ファイル）`, L, 893, `400 17px ${GOTHIC}`, P.ink2);
 
   // 人が消した行が多いファイル
   hline(930, L, Rr);
-  text('人が消した行が多いファイル', L, 962, `600 22px ${GOTHIC}`, P.ink);
-  text('人が書き直した場所', Rr, 962, `400 18px ${GOTHIC}`, P.ink2, 'right');
+  text('ログの外で変わった行が多いファイル', L, 962, `600 22px ${GOTHIC}`, P.ink);
+  text('ログの外で書き直された場所', Rr, 962, `400 18px ${GOTHIC}`, P.ink2, 'right');
   const rowY0 = 994, rowH = 52;
-  if (!R.top.length) text(w ? (R.dropped ? '行単位で人が直したファイルはありません（ファイルごと消えた分は上の内訳）。' : '人が消した行はありません。') : '—', L, rowY0 + 24, `400 21px ${GOTHIC}`, P.ink2);
+  if (!R.top.length) text(w ? (R.dropped ? '行単位でログの外で直されたファイルはありません（ファイルごと消えた分は上の内訳）。' : 'ログの外で消えた行はありません。') : '—', L, rowY0 + 24, `400 21px ${GOTHIC}`, P.ink2);
   R.top.forEach((f, i) => {
     const yy = rowY0 + i * rowH;
     text(String(i + 1), L, yy + 26, `400 22px ${MONO}`, P.sub);
@@ -1118,11 +1493,11 @@ function drawCard(R, opts){
 
   // 足元：測り方・通信なし・タグ
   hline(1296, L, Rr);
-  const how = `測り方：Edit/Write で新しく入った行が、今も同じ行で残っている割合（${R.strict ? '空白もそのまま' : '空白違いは同じ'}・4文字未満は数えない・人が少し直した行は数えない＝下限）`;
+  const how = `測り方：Edit/Write で新しく入った行が、今も同じ行で残っている割合（${R.strict ? '空白もそのまま' : '空白違いは同じ'}・4文字未満は数えない・少し直された行は数えない＝下限）`;
   const hs = fitFont(x, how, 400, 17, GOTHIC, CW, 12);
   text(how, L, 1313, `400 ${hs}px ${GOTHIC}`, P.ink2);
   text('ログもコードも端末の外に出ていません', L, 1337, `400 17px ${GOTHIC}`, P.ink2);
-  text('#ClaudeCode生存率', Rr, 1337, `500 18px ${MONO}`, P.sub, 'right');
+  text('#AI開発ログマップ', Rr, 1337, `500 18px ${MONO}`, P.sub, 'right');
 
   if (R.sample) {
     x.save();
@@ -1141,38 +1516,79 @@ function drawCard(R, opts){
 
 /* ---------- 内訳（HTML） ---------- */
 const sec = (kicker, title, body, aside) => `<section class="sec" data-kicker="${esc(kicker)}"><header><span class="kicker">${kicker}</span><h2>${title}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</header>${body}</section>`;
+/* 文脈とトークンの見本（架空のデータ） */
+function sampleTokens(){
+  return { sample: true, n: 9240, over: 5820, by: { claude: { n: 6100, over: 3900, resumes: 64, matched: 41 }, codex: { n: 3140, over: 1920, resumes: 22, matched: 0 } },
+    bins: [{ label: '〜5万', n: 980 }, { label: '5〜10万', n: 1260 }, { label: '10〜15万', n: 1180 }, { label: '15〜20万', n: 1040 }, { label: '20〜40万', n: 2650 }, { label: '40〜70万', n: 1430 }, { label: '70万〜', n: 700 }],
+    period: { start: '2026-09-01', end: '2026-09-30' }, resumes: 86, matched: 41, matchedMedianCw: 286000,
+    latest: { sid: 'sample', tool: 'claude', ts: '2026-09-29T00:40:00.000Z', gapMin: 214, prevCtx: 412000, cr: 18000, cw: 395000 },
+    weighted: { out: 0.15, inp: 0.01, cw: 0.24, cr: 0.60 } };
+}
+const pctOf = (a, b) => (b ? Math.round(a / b * 100) + '%' : '—');
+const localTime = iso => { const d = new Date(iso); return `${dateKey(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const hoursMin = m => (m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`);
+function tokenDetailsHTML(T){
+  if (!T || !T.n) return '<p class="fine">ログに、応答ごとの使用トークン（usage）の記録がありません。</p>';
+  const tools = Object.keys(T.by).sort();
+  const maxBin = Math.max(...T.bins.map(b => b.n), 1);
+  const bins = `<ul class="bins">${T.bins.map((b, i) => `<li${i >= 3 ? ' class="hi"' : ''}><span class="lab">${b.label}</span><span class="bar"><i style="width:${(b.n / maxBin * 100).toFixed(1)}%"></i></span><b>${fmt(b.n)}</b></li>`).join('')}</ul>`;
+  const byTool = tools.length > 1 ? `<ul class="rows">${tools.map(k => `<li><span>${TOOL_NAME[k]}</span><b>${fmt(T.by[k].n)} 応答・15万超 ${pctOf(T.by[k].over, T.by[k].n)}</b></li>`).join('')}</ul>` : '';
+  const ctx = `<div class="big-line"><span class="n">${pctOf(T.over, T.n)}</span><span class="l">15万トークンを超える文脈での応答（全 ${fmt(T.n)} 応答${T.period ? `・${T.period.start} 〜 ${T.period.end}` : ''}）</span></div>${bins}${byTool}
+  <p class="fine">文脈＝その応答で読み直した会話・道具の定義・システムの指示・読んだファイルの合計（入力＋キャッシュ読み＋キャッシュ書き込み）。15万は区切りの1つで、良し悪しの境目ではありません。ログに残っている期間の分だけです。</p>`;
+  const L = T.latest;
+  const noCw = tools.filter(k => k !== 'claude' && T.by[k].resumes && !T.by[k].matched).map(k => TOOL_NAME[k]);
+  const resume = `<div class="big-line"><span class="n">${fmt(T.matched)}<small> / ${fmt(T.resumes)}</small></span><span class="l">1時間以上あけて再開した ${fmt(T.resumes)} 回のうち、大量のキャッシュ作成が記録された回数（${pctOf(T.matched, T.resumes)}${T.matched ? `・作成量の中央値 ${fmtTok(T.matchedMedianCw)} トークン` : ''}）</span></div>
+  ${L ? `<div class="latest"><h3 class="sub">直近の1件</h3><ul class="rows"><li><span>再開した時刻</span><b>${localTime(L.ts)}${tools.length > 1 ? `（${TOOL_NAME[L.tool]}）` : ''}</b></li><li><span>その前の応答からの間</span><b>${hoursMin(L.gapMin)}</b></li><li><span>その前の応答の文脈</span><b>${fmtTok(L.prevCtx)} トークン</b></li><li><span>再開した応答で、キャッシュから読めた分</span><b>${fmtTok(L.cr)} トークン</b></li><li><span>再開した応答で、キャッシュに書き込んだ分</span><b>${fmtTok(L.cw)} トークン</b></li></ul><p class="fine">この時刻に何の作業を再開したかを思い出して、次に同じような作業をする時に「続ける」か「要点を渡して新しい会話で始める」かを比べてみてください（比べるのは再開の1回だけでなく、作業が終わるまでの使用量と手戻りです）。</p></div>` : ''}
+  <p class="fine">数えたのは、同じ会話（サブエージェントは除く）で前の応答から1時間より長くあいた次の応答。そのうち<b>検出条件</b>＝前の応答の文脈が2万を超え、次の応答でキャッシュから読めた分が前の文脈の2割未満、キャッシュに書き込んだ分が前の文脈の半分を超える、に一致したものです。キャッシュの有効期間は、キャッシュを読み書きしたリクエストから数えるので、操作の間隔と同じではありません＝キャッシュ切れと断定はしません。${noCw.length ? `${esc(noCw.join('・'))} はキャッシュへの書き込みが記録に残らないので、一致の数には入りません（再開の回数には入ります）。` : ''}</p>`;
+  const W = T.weighted;
+  const wt = W ? `<ul class="rows"><li><span>キャッシュ読み（文脈を毎回読み直す分）</span><b>${pct(W.cr)}</b></li><li><span>キャッシュ書き込み</span><b>${pct(W.cw)}</b></li><li><span>出力</span><b>${pct(W.out)}</b></li><li><span>入力（キャッシュ以外）</span><b>${pct(W.inp)}</b></li></ul>
+  <p class="fine"><b>料金の比で重みづけた推定</b>です（入力 1・キャッシュ書き込み 5分 1.25／1時間 2・キャッシュ読み 0.1・出力 5 の共通の比。モデルごとの単価の違いは入れていません）。トークンの量そのものの割合でも、定額プランの利用枠の減り方でもありません（定額の枠の数え方は公開されていません）。</p>` : '';
+  return sec('文脈', '文脈の大きさ', ctx) + sec('再開', '1時間以上あけた再開', resume) + (wt ? sec('内訳', '使い道の内訳（料金比の推定）', wt) : '') +
+    sec('測り方', '何を数えて、何を数えないか', `<p class="fine">ログ（Claude Code の usage・Codex の token_usage_record・Antigravity の step）の応答ごとの使用量を、同じ応答の重複は1回にして数えています。プロジェクトのフォルダは使いません。ログはブラウザの中で読み、外に出しません。</p>`);
+}
+function tokenShareText(T){
+  if (!T.n) return '';
+  const lines = ['自分の AI コーディングのログで、応答ごとの文脈の大きさを数えました',
+    `・15万トークンを超える文脈での応答：${pctOf(T.over, T.n)}（全 ${fmt(T.n)} 応答）`,
+    `・1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で、大量のキャッシュ作成${T.matched ? `（中央値 ${fmtTok(T.matchedMedianCw)} トークン）` : ''}`,
+    '（ログに残ったトークンの記録で、利用枠の消費量ではありません）', '#AI開発ログマップ'];
+  if (TOOL_URL) lines.push(TOOL_URL);
+  return lines.join('\n');
+}
 function stackHTML(R){
   const w = R.written, sa = rate(R.alive, w), sr = rate(R.rewritten, w), sh = rate(R.human - R.dropped, w), sd = rate(R.dropped, w);
   const J = judge(R);
-  return `<div class="big-line"><span class="n">${w ? pct1(sa) : '—'}</span><span class="l">Claude が書いた ${fmt(w)} 行のうち、そのまま残っている行</span></div>
-  <div class="stack"><div class="track" role="img" aria-label="残った${pct(sa)}、Claude が書き直した${pct(sr)}、人が消した${pct(sh)}、ファイルごと消えた${pct(sd)}"><span class="a" style="width:${(sa * 100).toFixed(2)}%"></span><span class="r" style="width:${(sr * 100).toFixed(2)}%"></span><span class="h" style="width:${(sh * 100).toFixed(2)}%"></span><span class="d" style="width:${(sd * 100).toFixed(2)}%"></span></div>
-  <ul class="legend"><li class="a"><i></i><span><b>${fmt(R.alive)}</b> 行 ${pct1(sa)}<br><small>残った</small></span></li><li class="r"><i></i><span><b>${fmt(R.rewritten)}</b> 行 ${pct1(sr)}<br><small>Claude が自分で書き直した</small></span></li><li class="h"><i></i><span><b>${fmt(R.human - R.dropped)}</b> 行 ${pct1(sh)}<br><small>人が消した・直した（行単位）</small></span></li><li class="d"><i></i><span><b>${fmt(R.dropped)}</b> 行 ${pct1(sd)}<br><small>ファイルごと消えた（${fmt(R.missingFiles.length)} ファイル）</small></span></li></ul></div>
+  return `<div class="big-line"><span class="n">${w ? pct1(sa) : '—'}</span><span class="l">${AI} が書いた ${fmt(w)} 行のうち、そのまま残っている行</span></div>
+  <div class="stack"><div class="track" role="img" aria-label="残った${pct(sa)}、${AI} が書き直した${pct(sr)}、ログの外で変わった${pct(sh)}、ファイルごと消えた${pct(sd)}"><span class="a" style="width:${(sa * 100).toFixed(2)}%"></span><span class="r" style="width:${(sr * 100).toFixed(2)}%"></span><span class="h" style="width:${(sh * 100).toFixed(2)}%"></span><span class="d" style="width:${(sd * 100).toFixed(2)}%"></span></div>
+  <ul class="legend"><li class="a"><i></i><span><b>${fmt(R.alive)}</b> 行 ${pct1(sa)}<br><small>残った</small></span></li><li class="r"><i></i><span><b>${fmt(R.rewritten)}</b> 行 ${pct1(sr)}<br><small>${AI} が自分で書き直した</small></span></li><li class="h"><i></i><span><b>${fmt(R.human - R.dropped)}</b> 行 ${pct1(sh)}<br><small>ログの外で変わった・消えた（行単位）</small></span></li><li class="d"><i></i><span><b>${fmt(R.dropped)}</b> 行 ${pct1(sd)}<br><small>ファイルごと消えた（${fmt(R.missingFiles.length)} ファイル）</small></span></li></ul></div>
   ${J.excl ? `<p class="def">${esc(J.excl)}</p>` : ''}
-  <p class="fine">「Claude が自分で書き直した」は、Claude が書いた行を、後の Edit の old 側や Write の書き換えで Claude 自身が消したもの。「人が消した・直した」は、今もあるファイルの中で、どちらにも当たらず今のコードに無い行（Bash のコマンドで消した場合もここに入ります）。「ファイルごと消えた」は、ファイル自体が今のフォルダに無いもの＝捨てた試作や、名前を変えたファイルが入ります。Claude の行の出来とは別の話なので、判定ではこれを「人が手を入れた」に数えません。</p>`;
+  <p class="fine">「${AI} が自分で書き直した」は、${AI} が書いた行を、後の Edit の old 側や Write の書き換えで ${AI} 自身が消したもの。「ログの外で変わった・消えた」は、今もあるファイルの中で、どちらにも当たらず今のコードに無い行（Bash のコマンドで消した場合もここに入ります）。「ファイルごと消えた」は、ファイル自体が今のフォルダに無いもの＝捨てた試作や、名前を変えたファイルが入ります。${AI} の行の出来とは別の話なので、判定ではこれを「ログの外で手が入った」に数えません。</p>`;
 }
 function aiHTML(R){
   const ai = rate(R.aiLines, R.projectLines);
-  return `<div class="big-line"><span class="n">${R.projectLines ? pct1(ai) : '—'}</span><span class="l">今のコード ${fmt(R.projectLines)} 行のうち、Claude が書いたまま残っている ${fmt(R.aiLines)} 行</span></div>
-  <p class="fine">${R.period ? `${R.period.start} 〜 ${R.period.end}（${R.period.days}日）のログにある分だけです。` : ''}それより前に Claude が書いた行や、人が少し直した行は「人の行」として数えています＝下限の値です。Anthropic が公表した「約9割」は自社製品のコードベースについての数字で、ここで出す行単位の下限値とは測り方が違います。</p>`;
+  return `<div class="big-line"><span class="n">${R.projectLines ? pct1(ai) : '—'}</span><span class="l">今のコード ${fmt(R.projectLines)} 行のうち、${AI} が書いたまま残っている ${fmt(R.aiLines)} 行</span></div>
+  <p class="fine">${R.period ? `${R.period.start} 〜 ${R.period.end}（${R.period.days}日）のログにある分だけです。` : ''}それより前に ${AI} が書いた行や、少し直された行は「人の行」として数えています＝下限の値です。Anthropic が公表した「約9割」は自社製品のコードベースについての数字で、ここで出す行単位の下限値とは測り方が違います。</p>`;
 }
 function filesHTML(R, hide){
   const rows = R.files.filter(f => f.written > 0).slice(0, 40);
   const tr = rows.map(f => `<tr><td title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : f.file)}</td><td>${fmt(f.lines)}</td><td>${fmt(f.written)}</td><td>${fmt(f.alive)}</td><td>${fmt(f.rewritten)}</td><td>${fmt(f.human)}</td><td><span class="mini"><span style="width:${(rate(f.ai, f.lines) * 100).toFixed(1)}%"></span></span>${f.lines ? pct(rate(f.ai, f.lines)) : '—'}</td></tr>`).join('');
-  const miss = R.missingFiles.length ? `<h3 style="margin:14px 0 6px;font-size:13.5px;color:var(--muted)">ファイルごと消えた・名前が変わった（${fmt(R.missingFiles.length)} ファイル・${fmt(R.droppedWritten)} 行）</h3><ul class="rows">${R.missingFiles.slice(0, 12).map(f => `<li><span><code>${esc(hide ? f.alias : f.file)}</code></span><b>${fmt(f.written)}行</b></li>`).join('')}</ul><p class="fine">これらの行は、Claude が後で消した印があるものを除いて「ファイルごと消えた」に数えています（「人が消した・直した」とは別）。名前を変えただけのファイルも、ここに入ります。</p>` : '';
-  return `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>今の行数</th><th>Claude が書いた</th><th>残った</th><th>書き直し</th><th>人が消した</th><th>AI率</th></tr></thead><tbody>${tr || '<tr><td colspan="7">Claude が書いた行があるファイルはありません</td></tr>'}</tbody></table></div>
-  <p class="fine">Claude が書いた行が多い順に、${rows.length < R.files.filter(f => f.written > 0).length ? '上位40件' : '全部'}。行数は、4文字未満や記号だけの行を除き、同じ内容の行を1つに数えた数です。</p>${miss}`;
+  const miss = R.missingFiles.length ? `<h3 style="margin:14px 0 6px;font-size:13.5px;color:var(--muted)">ファイルごと消えた・名前が変わった（${fmt(R.missingFiles.length)} ファイル・${fmt(R.droppedWritten)} 行）</h3><ul class="rows">${R.missingFiles.slice(0, 12).map(f => `<li><span><code>${esc(hide ? f.alias : f.file)}</code></span><b>${fmt(f.written)}行</b></li>`).join('')}</ul><p class="fine">これらの行は、${AI} が後で消した印があるものを除いて「ファイルごと消えた」に数えています（「ログの外で変わった・消えた」とは別）。名前を変えただけのファイルも、ここに入ります。</p>` : '';
+  return `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>今の行数</th><th>${AI} が書いた</th><th>残った</th><th>書き直し</th><th>ログの外で消えた</th><th>AI率</th></tr></thead><tbody>${tr || `<tr><td colspan="7">${AI} が書いた行があるファイルはありません</td></tr>`}</tbody></table></div>
+  <p class="fine">${AI} が書いた行が多い順に、${rows.length < R.files.filter(f => f.written > 0).length ? '上位40件' : '全部'}。行数は、4文字未満や記号だけの行を除き、同じ内容の行を1つに数えた数です。</p>${miss}`;
 }
 function topHTML(R, hide){
-  if (!R.top.length) return `<p class="fine">${R.dropped ? '行単位で人が直したファイルはありません。ファイルごと消えた分は、上の内訳と「ファイルごとの内訳」の末尾に。' : '人が消した行はありません。'}</p>`;
+  if (!R.top.length) return `<p class="fine">${R.dropped ? '行単位でログの外で直されたファイルはありません。ファイルごと消えた分は、上の内訳と「ファイルごとの内訳」の末尾に。' : 'ログの外で消えた行はありません。'}</p>`;
   const max = Math.max(...R.top.map(f => f.human), 1);
-  return '<ul class="bars">' + R.top.map(f => `<li><span class="name" title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : baseName(f.file))}</span><span class="track"><span class="fill" style="width:${Math.max(2, f.human / max * 100).toFixed(1)}%"></span></span><span class="n">${fmt(f.human)} / ${fmt(f.written)}</span></li>`).join('') + '</ul><p class="fine">今もあるファイルの中で、人が行単位で消した・直した行の多い順。右は「人が消した行 / Claude が書いた行」。ここが、人が書き直した場所＝レビューの急所です（ファイルごと消えたものは入れていません）。</p>';
+  return '<ul class="bars">' + R.top.map(f => `<li><span class="name" title="${esc(hide ? f.alias : f.file)}">${esc(hide ? f.alias : baseName(f.file))}</span><span class="track"><span class="fill" style="width:${Math.max(2, f.human / max * 100).toFixed(1)}%"></span></span><span class="n">${fmt(f.human)} / ${fmt(f.written)}</span></li>`).join('') + `</ul><p class="fine">今もあるファイルの中で、ログの外で行単位に消した・直した行の多い順。右は「ログの外で消えた行 / ${AI} が書いた行」。ここが、ログの外で書き直された場所＝レビューの急所です（ファイルごと消えたものは入れていません）。</p>`;
 }
 function recordHTML(R){
   const li = (k, v) => `<li><span>${k}</span><b>${v}</b></li>`;
   return `<div class="words"><div><ul class="rows">
     ${li('ログのファイル', fmt(R.logFiles))}
     ${li('読んだ行', fmt(R.logLines) + (R.logBad ? `（読めなかった行 ${fmt(R.logBad)}）` : ''))}
-    ${li('Edit・Write・Read の記録', fmt(R.uses))}
+    ${li('ファイルを書いた・読んだ記録', fmt(R.uses))}
+    ${Object.keys(R.tools || {}).filter(k => R.tools[k].written > 0).map(k => li(TOOL_NAME[k] + ' が書いた行', `${fmt(R.tools[k].written)}（残った ${fmt(R.tools[k].alive)}・${pct(rate(R.tools[k].alive, R.tools[k].written))}・${fmt(R.tools[k].sessions)} 会話）`)).join('')}
+    ${R.gmSkipped ? li('Antigravity の記録で読めなかった編集', fmt(R.gmSkipped) + '件（記録が途中で切れていた）') : ''}
     ${li('このプロジェクトへの編集', fmt(R.edits) + '回')}
     ${li('セッション', fmt(R.sessions))}
     ${li('期間', R.period ? `${R.period.start} 〜 ${R.period.end}（${R.period.days}日）` : '—')}
@@ -1183,16 +1599,16 @@ function recordHTML(R){
     ${li('他のプロジェクトのファイル（除外）', fmt(R.otherProjectFiles))}
     ${li('照合に使ったファイル', fmt(R.rootMatched))}
   </ul></div></div>
-  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方 → ログの作業フォルダ（cwd）と同じ方 → 浅い方、の順に選びます）` : ''}。${R.rootAmbiguous ? '<b>候補が同数で決めきれなかった</b>ので、上の順で選びました。違う場合は、リポジトリの一番上のフォルダを選び直してください。' : ''}${R.rootFrom === 'cwd' ? '<b>Claude が触ったファイルが今のフォルダに1つも無い</b>ので、ログの作業フォルダ（cwd）の名前がフォルダ名と同じことを根拠に場所を決めました。書いた行は全部「ファイルごと消えた」に入ります。' : ''}</p>`;
+  <p class="fine">ログの絶対パスと、落としたフォルダの相対パスを末尾で照合し、いちばん多く一致した場所を「ログ側の場所」にしています${R.rootCandidates > 1 ? `（候補は${fmt(R.rootCandidates)}か所。同じ名前のフォルダが別の場所にもある時は、一致が多い方 → ログの作業フォルダ（cwd）と同じ方 → 浅い方、の順に選びます）` : ''}。${R.rootAmbiguous ? '<b>候補が同数で決めきれなかった</b>ので、上の順で選びました。違う場合は、リポジトリの一番上のフォルダを選び直してください。' : ''}${R.rootFrom === 'cwd' ? `<b>${AI} が触ったファイルが今のフォルダに1つも無い</b>ので、ログの作業フォルダ（cwd）の名前がフォルダ名と同じことを根拠に場所を決めました。書いた行は全部「ファイルごと消えた」に入ります。` : ''}</p>`;
 }
 function howHTML(R){
-  return `<p class="def"><b>測り方</b>：Claude Code の Edit／Write で<b>新しく入った行</b>（Edit の new 側にあって old 側に無い行。Write は、それまでに Read で見えていた行を除いた行）が、今も同じ行として残っている割合。</p>
+  return `<p class="def"><b>測り方</b>：Claude Code の Edit／Write で<b>新しく入った行</b>（Edit の new 側にあって old 側に無い行。Write は、それまでに Read で見えていた行を除いた行）が、今も同じ行として残っている割合。Codex はファイル変更（FileChange）の追加・差分、Antigravity は write_to_file・replace_file_content を、同じ形に直して数えます。</p>
   <ul class="ul">
     <li>行の比べ方：${R.strict ? '<b>厳密モード</b>＝行末の改行コードだけ除いて、そのまま比べます。' : '前後の空白を落とし、タブと連続する空白を1つの空白にそろえて比べます（厳密モードで切り替え）。'}</li>
     <li>数えない行：前後の空白を除いて4文字未満の行、文字と数字を1つも含まない行（<code>}</code> や <code>);</code> など）、記号と予約語1つだけの行（<code>} else {</code>・<code>break;</code>・<code>return;</code> など）、閉じタグだけの行（<code>&lt;/div&gt;</code> など）。</li>
-    <li>行は「種類」で数えます＝同じ内容の行はファイルの中で1つに数え、Claude が書いた行も今の行も同じ数え方です（AI率の分子は「残った」と同じ数）。人が少し直した行は「残った」に入りません＝生存率も AI率も<b>下限</b>です。</li>
+    <li>行は「種類」で数えます＝同じ内容の行はファイルの中で1つに数え、${AI} が書いた行も今の行も同じ数え方です（AI率の分子は「残った」と同じ数）。少し直された行は「残った」に入りません＝生存率も AI率も<b>下限</b>です。</li>
     <li>拾わないもの：Bash のコマンドで書いたファイル（ヒアドキュメントなど）、NotebookEdit、ログの期間より前に書かれた行、結果がエラーになった Edit、結果の記録が無い Edit／Write。</li>
-    <li>Write で既存のファイルを丸ごと書き直した場合、それより前に Read していない行は Claude の行として数えます（過大になることがあります）。</li>
+    <li>Write で既存のファイルを丸ごと書き直した場合、それより前に Read していない行は ${AI} の行として数えます（過大になることがあります）。</li>
     <li>ログは初期設定で30日より古いものが消えます。カードの期間は、手元に残っているログの範囲です。</li>
   </ul>`;
 }
@@ -1200,35 +1616,60 @@ function examplesHTML(R, hide){
   const a = R.examples.alive, h = R.examples.human;
   if (!a && !h) return '<p class="fine">載せられる行がありませんでした。</p>';
   const li = (tag, cls, ex) => ex ? `<li><span class="tag ${cls}">${tag}</span><code>${esc(ex.key)}</code><small>${esc(hide ? '（ファイル名は隠しています）' : ex.file)}</small></li>` : '';
-  return `<ul class="ex">${li('残った行', 'a', a)}${li('人が消した行', 'h', h)}</ul><p class="fine">鍵や秘密らしい行は除いて、12〜72文字の中から長いものを1つ選んでいます。カードに載せるのは「典型的な行を1つずつ載せる」をオンにした時だけです。</p>`;
+  return `<ul class="ex">${li('残った行', 'a', a)}${li('ログの外で消えた行', 'h', h)}</ul><p class="fine">鍵や秘密らしい行は除いて、12〜72文字の中から長いものを1つ選んでいます。カードに載せるのは「典型的な行を1つずつ載せる」をオンにした時だけです。</p>`;
 }
 /* 直し癖 → CLAUDE.md の1行 */
+function rewritesHTML(R, hideFiles, hidePrompts){
+  const T = R.rewriteTotal || { events: 0, lines: 0, files: 0 };
+  if (!R.written) return `<p class="fine">この期間に ${AI} が書いた行が無いので、書き直しは出せません。</p>`;
+  if (!T.events) return `<p class="fine">${AI} が前に書いた行を、後の編集で自分で消した記録はありませんでした。</p>`;
+  const name = f => esc(hideFiles ? (f.alias || 'ファイル') : f.file);
+  const top = R.rewriteFiles[0];
+  const head = `<div class="big-line"><span class="n">${fmt(top.events)}<small> 回</small></span><span class="l">書き直しがいちばん多かったファイル＝<b>${name(top)}</b>（${fmt(top.lines)} 行・${fmt(top.sessions)} 会話）。全体は ${fmt(T.events)} 回・${fmt(T.lines)} 行・${fmt(T.files)} ファイル</span></div>
+  <p class="def">「直すべき場所」ではなく、<b>振り返る候補</b>です。試作・仕様の変更・作り直しでも書き直しは起きます。下の各回で、書き直す前の本人の指示と、消えた行・入った行を見て、何が起きたかを確かめてください。</p>`;
+  const list = `<ul class="rows">${R.rewriteFiles.map(f => `<li><span>${name(f)}</span><b>${fmt(f.events)} 回・${fmt(f.lines)} 行・${fmt(f.sessions)} 会話</b></li>`).join('')}</ul>`;
+  const alias = new Map(R.rewriteFiles.map(f => [f.file, f]));
+  const pr = e => hidePrompts ? '<i class="dim">（指示の冒頭を隠しています）</i>' : e.prompt ? `<span class="when">${e.prompt.first ? '最初の依頼' : '書き直す前の本人の指示'}・${e.prompt.minutes < 1 ? '直前' : hoursMin(e.prompt.minutes) + '前'}</span><q>${esc(e.prompt.text)}</q>` : '<i class="dim">対応する本人の指示を確認できません</i>';
+  const lines = (ks, cls) => ks.length ? ks.map(k => `<code class="${cls}">${esc(k)}</code>`).join('') : '<i class="dim">—</i>';
+  const evs = (R.rewriteEvents || []).slice(-30).map(e => `<li class="rwev"><div class="meta"><span>${localTime(e.ts)}</span><span>${name(alias.get(e.file) || { file: e.file })}</span><span>消えた ${fmt(e.goneN)} 行 → 入った ${fmt(e.addedN)} 行</span></div><div class="pr">${pr(e)}</div>${hideFiles ? '' : `<div class="ba"><div>${lines(e.gone, 'b')}</div><div>${lines(e.added, 'a')}</div></div>`}</li>`).join('');
+  return head + list + `<details class="rwlist"${R.rewriteEvents.length <= 6 ? ' open' : ''}><summary>上位3ファイルの書き直し ${fmt(R.rewriteEvents.length)} 回を時刻順に${R.rewriteEvents.length > 30 ? '（新しい30回）' : ''}</summary><ul class="rwevs">${evs}</ul></details>
+  <p class="fine">書き直し＝${AI} が前に書いた行を、後の Edit／Write で ${AI} 自身が消したもの（同じ編集・同じファイルは1回）。書き直す前の本人の指示＝同じ会話で、その編集より前の最後の、本人が打った指示（作業の報告やコマンドの記録は除く）。経過時間が長いことだけで「AI が自分から直した」とは言えません。指示の冒頭とコードは画面だけで、カード・共有文・保存する JSON には入りません。</p>`;
+}
+/* 直しの型ごとの、機械で防ぐ案（CLAUDE.md の1行より先に試す）。案であって効果は未確認 */
+const GUARD = {
+  debug: 'lint で禁止する（例：ESLint の no-console）', quote: 'フォーマッター（Prettier など）でそろえる', semi: 'フォーマッター（Prettier など）でそろえる',
+  const: 'lint で指摘させる（例：ESLint の prefer-const）', any: '型の検査で禁止する（例：@typescript-eslint/no-explicit-any）', import: 'lint の import のルールでそろえる（拡張子・パス）',
+};
+const MARKS = [['', '印なし'], ['prevent', '繰り返し防ぎたい'], ['spec', '仕様の変更'], ['proto', '意図した試作'], ['unknown', '分からない']];
+let marks = {};
 function habitsHTML(R, hide){
   const H = R.habits || { lines: 0, matched: 0, items: [] };
   const alias = new Map(R.files.map(f => [f.file, f.alias || f.file]));
   const fname = f => esc(hide ? (alias.get(f) || 'ファイル') : f);
-  if (!R.written) return '<p class="fine">この期間に Claude が書いた行が無いので、直し癖は出せません。</p>';
-  if (!H.lines) return `<p class="fine">今もあるファイルの中で、人が行単位で直した Claude の行がありません${R.dropped ? '（ファイルごと消えた分は、直しの型になりません）' : ''}。直し癖は、人が直した行から読みます。</p>`;
+  if (!R.written) return `<p class="fine">この期間に ${AI} が書いた行が無いので、直し癖は出せません。</p>`;
+  if (!H.lines) return `<p class="fine">今もあるファイルの中で、ログの外で行単位に直された ${AI} の行がありません${R.dropped ? '（ファイルごと消えた分は、直しの型になりません）' : ''}。直し癖は、ログの外で直された行から読みます。</p>`;
   const pair = e => `<li><code class="b">${esc(e.before)}</code><span class="arrow${e.after === null ? ' del' : ''}">${e.after === null ? '削除' : '→'}</span>${e.after === null ? '<span></span>' : `<code class="a">${esc(e.after)}</code>`}<small>${fname(e.file)}</small></li>`;
   const cands = H.items.filter(it => it.candidate), weak = H.items.filter(it => !it.candidate && !it.generic), generic = H.items.filter(it => it.generic);
   const blockN = (H.items.find(it => it.id === 'block') || { count: 0 }).count;
-  const intro = `<p class="def">人が直した <b>${fmt(H.lines)} 行</b>を、同じファイルの今の行と突き合わせました（書き換え ${fmt(H.matched)}・削除 ${fmt(H.lines - H.matched)}${blockN ? `・うち <b>${fmt(blockN)} 行</b>は3行以上まとまって消えた・書き直された所＝作り直しで、癖には数えません` : ''}）。<b>3回以上・2セッション以上</b>で出た型だけを候補にしています。</p>`;
+  const intro = `<p class="def">ログの外で直された <b>${fmt(H.lines)} 行</b>を、同じファイルの今の行と突き合わせました（書き換え ${fmt(H.matched)}・削除 ${fmt(H.lines - H.matched)}${blockN ? `・うち <b>${fmt(blockN)} 行</b>は3行以上まとまって消えた・書き直された所＝作り直しで、癖には数えません` : ''}）。<b>3回以上・2セッション以上</b>で出た型だけを候補にしています。</p>`;
   const cardsHtml = cands.length ? cands.map(it => `<article class="habit${it.kind === 'content' ? ' content' : ''}">
     <header><b>${esc(it.label)}</b><span>${fmt(it.count)}回 ・ ${fmt(it.sessions)}セッション ・ ${fmt(it.files)}ファイル${it.kind === 'content' ? ' ・ 内容の直し（癖とは限らない）' : ''}</span></header>
     <ul class="pairs">${it.examples.map(pair).join('')}</ul>
-    <div class="rule"><span class="k">${it.kind === 'content' ? '観察と案' : 'CLAUDE.md に'}</span><code>${esc(it.rule)}</code><button type="button" class="btn small copy-rule" data-rule="${esc(it.rule)}">コピー</button></div>
+    ${GUARD[it.id] ? `<div class="rule guard"><span class="k">機械で防ぐ</span><span>${esc(GUARD[it.id])}</span></div>` : ''}
+    <div class="rule"><span class="k">${it.kind === 'content' ? '観察と案' : (GUARD[it.id] ? 'それでも残れば CLAUDE.md に' : 'CLAUDE.md に')}</span><code>${esc(it.rule)}</code><button type="button" class="btn small copy-rule" data-rule="${esc(it.rule)}">コピー</button></div>
+    <label class="mark">この型は<select data-mark="${esc(it.id)}">${MARKS.map(([v, l]) => `<option value="${v}"${(marks[it.id] || '') === v ? ' selected' : ''}>${l}</option>`).join('')}</select><small>（任意・保存する JSON に入ります）</small></label>
   </article>`).join('') : `<p class="fine"><b>候補なし</b>＝3回以上・2セッション以上で出た型はありませんでした${weak.length ? '（回数が足りない型は下に）' : ''}。</p>`;
   const weakHtml = weak.length ? `<h3 class="sub">回数が足りない型（参考）</h3><ul class="rows">${weak.map(it => `<li><span>${esc(it.label)}<small class="dim">　${it.examples[0] ? esc(it.examples[0].before) : ''}</small></span><b>${fmt(it.count)}回 ・ ${fmt(it.sessions)}セッション</b></li>`).join('')}</ul>` : '';
   const genHtml = generic.length ? `<h3 class="sub">型にならない直し</h3><ul class="rows">${generic.map(it => `<li><span>${esc(it.label)}<small class="dim">　${it.examples[0] ? esc(it.examples[0].before) : ''}</small></span><b>${fmt(it.count)}回</b></li>`).join('')}</ul>` : '';
   const styleC = cands.filter(it => it.kind === 'style');
   const all = styleC.map(it => '- ' + it.rule).join('\n');
   const allHtml = styleC.length ? `<div class="rule-all"><textarea class="share-text" rows="${Math.min(6, styleC.length + 1)}" readonly aria-label="CLAUDE.md に足す行">${esc(all)}</textarea><button type="button" class="btn copy-rule" data-rule="${esc(all)}">CLAUDE.md の行を全部コピー</button></div>` : '';
-  return intro + cardsHtml + allHtml + weakHtml + genHtml + `<p class="fine">型は決め打ちの規則で判定しています（会話の内容は見ていません）。置き換え先は、Claude が書いた並びの前後で今も残っている行を目印に、その間にある今の行（Claude の行でないもの）から、語の重なりで1対1に探します。目印が無い（塊ごと消えた）時だけファイル全体から厳しめに探します。3行以上まとめて消えた・書き直された所は「まとまった削除・書き直し」＝癖ではなく作り直しとして、型に数えません。<b>「人が直した」には、このログに無い経路で変わった行（git pull・別の作業コピーやクラウドのセッション・Bash）も入ります</b>＝人の直しの上限です。ファイルごと消えた行は入りません。1行は案です。CLAUDE.md に入れたら「結果を保存」で今の数字を残し、次に測った時に「前回と比べる」で、その型が減ったかを見てください。</p>`;
+  return intro + cardsHtml + allHtml + weakHtml + genHtml + `<p class="fine">型は決め打ちの規則で判定しています（会話の内容は見ていません）。置き換え先は、${AI} が書いた並びの前後で今も残っている行を目印に、その間にある今の行（${AI} の行でないもの）から、語の重なりで1対1に探します。目印が無い（塊ごと消えた）時だけファイル全体から厳しめに探します。3行以上まとめて消えた・書き直された所は「まとまった削除・書き直し」＝癖ではなく作り直しとして、型に数えません。<b>「ログの外で直された」には、人の手のほか、このログに無い経路で変わった行（git pull・別の作業コピーやクラウドのセッション・シェル）も入ります</b>＝誰が直したかは決めていません。ファイルごと消えた行は入りません。1行は案です。CLAUDE.md に入れたら「結果を保存」で今の数字を残し、次に測った時に「前回と比べる」で、その型が減ったかを見てください。</p>`;
 }
 /* 前回と比べる：結果を JSON（数だけ・行の中身は入れない）で保存し、次に測った時に読み込んで差を見る */
 let prevSnap = null;
 function snapshotOf(R){
-  return { tool: 'cc-seizon', v: 1, savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
+  return { tool: 'cc-seizon', v: 1, ai: aiLabel(R), ais: aiSet(R), since: R.since || null, marks: { ...marks }, savedAt: dateKey(new Date()), projectName: R.projectName, strict: !!R.strict, period: R.period,
     written: R.written, alive: R.alive, rewritten: R.rewritten, human: R.human, dropped: R.dropped, droppedWritten: R.droppedWritten,
     aiLines: R.aiLines, projectLines: R.projectLines, edits: R.edits, sessions: R.sessions,
     outTotal: R.sessionStats ? R.sessionStats.outTotal : 0, outGone: R.sessionStats ? R.sessionStats.outGone : 0,
@@ -1246,12 +1687,19 @@ function compareHTML(R){
   const per = x => x && x.period ? `${x.period.start}〜${x.period.end}` : '—';
   const r = (a, b) => b > 0 ? a / b : 0;
   const pctN = x => (x * 100).toFixed(1) + '%';
+  // 前回と今回で書いた AI の組が違うなら、呼び名は「AI」にして注意する（Codex の指摘 PR #20）。ais の無い JSON は ai の名前から、それも無い古い JSON は Claude とみなす
+  const keyOf = { Claude: 'claude', Codex: 'codex', Antigravity: 'gemini' };
+  const prevSet = Array.isArray(p.ais) ? [...p.ais].sort() : (p.ai && keyOf[p.ai] ? [keyOf[p.ai]] : (p.ai === 'AI' ? null : ['claude']));
+  const curSet = aiSet(R);
+  const sameAI = prevSet !== null && prevSet.join(',') === curSet.join(',');
+  const who = sameAI ? AI : 'AI';
+  const names = xs => xs && xs.length ? xs.map(k => TOOL_NAME[k] || k).join('＋') : '不明';
   const rows = [
     li('期間', `<b>${per(p)} → ${per(R)}</b>`),
-    li('Claude が書いた行', num(p.written, R.written, fmt)),
+    li(`${who} が書いた行`, num(p.written, R.written, fmt)),
     li('残った（生存率）', num(r(p.alive, p.written), r(R.alive, R.written), pctN)),
-    li('Claude が自分で書き直した', num(r(p.rewritten, p.written), r(R.rewritten, R.written), pctN, true)),
-    li('人が消した・直した（行単位）', num(r(p.human - (p.dropped || 0), p.written), r(R.human - R.dropped, R.written), pctN, true)),
+    li(`${who} が自分で書き直した`, num(r(p.rewritten, p.written), r(R.rewritten, R.written), pctN, true)),
+    li('ログの外で変わった・消えた（行単位）', num(r(p.human - (p.dropped || 0), p.written), r(R.human - R.dropped, R.written), pctN, true)),
     li('ファイルごと消えた', num(r(p.dropped || 0, p.written), r(R.dropped, R.written), pctN, true)),
     li('AI率（下限）', num(r(p.aiLines, p.projectLines), r(R.aiLines, R.projectLines), pctN)),
     li('今は無いコードに使った出力トークン', num(r(p.outGone || 0, p.outTotal || 0), r(R.sessionStats.outGone, R.sessionStats.outTotal), pctN, true)),
@@ -1260,16 +1708,19 @@ function compareHTML(R){
   for (const h of p.habits) ids.set(h.id, { id: h.id, label: h.label, a: h.count, b: 0 });
   for (const h of R.habits.items) { const o = ids.get(h.id) || { id: h.id, label: h.label, a: 0, b: 0 }; o.b = h.count; o.label = h.label; ids.set(h.id, o); }
   const hab = [...ids.values()].filter(o => !(HABITS[o.id] && HABITS[o.id].generic)).sort((x, y) => (y.a + y.b) - (x.a + x.b) || cmpStr(x.label, y.label));
-  const habRows = hab.length ? hab.map(o => li(o.label, num(o.a, o.b, fmt, true))).join('') : '<li><span>直しの型</span><b>—</b></li>';
+  const markLabel = id => { const m = MARKS.find(x => x[0] === marks[id]); return m && m[0] ? `<small class="dim">（${m[1]}）</small>` : ''; };
+  const habRows = hab.length ? hab.map(o => li(esc(o.label) + markLabel(o.id), num(o.a, o.b, fmt, true))).join('') : '<li><span>直しの型</span><b>—</b></li>';
   const warn = p.projectName && R.projectName && p.projectName !== R.projectName ? `<p class="fine"><b>前回は別のプロジェクト（${esc(p.projectName)}）の結果です。</b>同じプロジェクトの JSON を選んでください。</p>` : '';
   const strictWarn = !!p.strict !== !!R.strict ? '<p class="fine"><b>厳密モードの設定が前回と違います。</b>同じ設定で比べてください。</p>' : '';
-  return sec('前回', '前回と比べる', `${warn}${strictWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
-  <p class="fine">前回＝${esc(p.savedAt || '—')} に保存した JSON（${esc(p.projectName || '—')}）。ログは30日で消えるので、期間は重ならないことがあります。「人が消した・直した」と「直しの型」は減った方が良い＝緑。</p>`, `<button type="button" class="btn small ghost" id="clearPrev">前回を外す</button>`);
+  const sinceWarn = (p.since || null) !== (R.since || null) ? `<p class="fine"><b>「この日時以降」の区切りが前回と違います</b>（前回 ${p.since ? esc(localTime(p.since)) + ' 以降' : '区切りなし'}・今回 ${R.since ? esc(localTime(R.since)) + ' 以降' : '区切りなし'}）。数えた行の範囲が違うので、同じ区切りで比べてください。</p>` : '';   // Codex の指摘 PR #21
+  const aiWarn = !sameAI ? `<p class="fine"><b>前回は ${esc(names(prevSet))} の結果、今回は ${esc(names(curSet))} の結果です。</b>書いた AI が違うので、数の差は AI の違いも含みます。</p>` : '';
+  return sec('前回', '前回と比べる', `${warn}${strictWarn}${sinceWarn}${aiWarn}<div class="words"><div><h3>数字</h3><ul class="rows">${rows.join('')}</ul></div><div><h3>直しの型（回数）</h3><ul class="rows">${habRows}</ul></div></div>
+  <p class="fine">前回＝${esc(p.savedAt || '—')} に保存した JSON（${esc(p.projectName || '—')}）。ログは30日で消えるので、期間は重ならないことがあります。「ログの外で変わった・消えた」と「直しの型」は減った方が良い＝緑。</p>`, `<button type="button" class="btn small ghost" id="clearPrev">前回を外す</button>`);
 }
 /* 頼み方 × 残った1行あたりの出力トークン：どの頼み方が高くついて消えたか、安くて残ったか */
 function sessionsHTML(R, hidePrompts){
   const S = R.sessionStats || { outTotal: 0, outGone: 0, goneShare: 0, rows: [], costly: [], cheap: [] };
-  if (!R.written) return '<p class="fine">この期間に Claude が書いた行が無いので、頼み方は出せません。</p>';
+  if (!R.written) return `<p class="fine">この期間に ${AI} が書いた行が無いので、頼み方は出せません。</p>`;
   if (!S.rows.length) return '<p class="fine">セッションの記録がありません。</p>';
   const q = r => hidePrompts ? '<i class="dim">（指示の冒頭を隠しています）</i>' : (r.first ? `<q title="${esc(r.first)}">${esc(r.first.length > 72 ? r.first.slice(0, 72) + '…' : r.first)}</q>` : '<i class="dim">（最初の指示が記録にない）</i>');
   const per = r => r.perAlive === null ? '<b class="bad">残った行なし</b>' : `<b>${fmtTok(r.perAlive)}</b> トークン／行`;
@@ -1279,21 +1730,24 @@ function sessionsHTML(R, hidePrompts){
     ? `<div class="big-line"><span class="n">${pct(S.goneShare)}</span><span class="l">今は無いコードに使った出力トークン ＝ <b>${fmtTok(S.outGone)}</b> ／ ${fmtTok(S.outTotal)}（${fmt(S.rows.length)} セッション・按分）</span></div>`
     : '<p class="fine"><b>ログに使用トークン（usage）の記録がありません</b>。古い形式のログか、別の経路の記録です。行の数だけで並べます。</p>';
   const worst = S.costly.length ? byId.get(S.costly[0]) : null;
-  const lead = worst && S.outTotal ? `<p class="def">いちばん高くついたのは ${q(worst)} で始めたセッション＝出力 <b>${fmtTok(worst.outRepo)}</b> トークンで ${fmt(worst.written)} 行書いて、残った行は <b>${fmt(worst.alive)}</b>${worst.dropped ? `（${fmt(worst.dropped)} 行はファイルごと消えた）` : ''}。</p>` : '';
+  const lead = worst && S.outTotal ? `<p class="def">いちばん出力が大きく残らなかったのは ${q(worst)} で始めたセッション＝出力 <b>${fmtTok(worst.outRepo)}</b> トークンで ${fmt(worst.written)} 行書いて、残った行は <b>${fmt(worst.alive)}</b>${worst.dropped ? `（${fmt(worst.dropped)} 行はファイルごと消えた）` : ''}。</p>` : '';
   const card = (title, ids, cls) => `<div class="sesscol ${cls}"><h3 class="sub">${title}</h3>${ids.length ? ids.map(id => { const r = byId.get(id); return `<article class="sessrow">${q(r)}<div class="nums"><span>${esc(r.start)}</span><span>出力 <b>${fmtTok(r.outRepo)}</b></span><span>書いた ${fmt(r.written)} → 残った <b>${fmt(r.alive)}</b></span>${r.dropped ? `<span>ファイルごと消えた ${fmt(r.dropped)}</span>` : ''}${r.rewritten ? `<span>自分で書き直し ${fmt(r.rewritten)}</span>` : ''}${r.members > 1 ? `<span>再開 ${fmt(r.members - 1)} 回を含む</span>` : ''}</div><div class="per">${per(r)}</div></article>`; }).join('') : '<p class="fine">該当なし（20行以上書いたセッションが対象）</p>'}</div>`;
-  const cols = S.outTotal ? `<div class="sesscols">${card('高くて消えた', S.costly, 'costly')}${card('安くて残った', S.cheap, 'cheap')}</div>` : '';
-  const tr = S.rows.map(r => `<tr><td>${esc(r.start)}${r.members > 1 ? `<br><small class="dim">再開 ${fmt(r.members - 1)} 回を含む</small>` : ''}</td><td class="q">${q(r)}</td><td>${S.outTotal ? fmtTok(r.outRepo) : '—'}</td><td>${fmt(r.written)}</td><td>${fmt(r.alive)}</td><td>${fmt(r.rewritten)}</td><td>${fmt(r.human)}</td><td>${fmt(r.dropped)}</td><td>${S.outTotal ? (r.perAlive === null ? '—' : fmtTok(r.perAlive)) : '—'}</td><td>${fmt(r.edits)}</td></tr>`).join('');
-  const table = `<div class="table-wrap"><table><thead><tr><th>開始</th><th class="q">最初の指示（冒頭）</th><th>出力トークン（按分）</th><th>書いた</th><th>残った</th><th>自分で書き直し</th><th>人が直した</th><th>ファイルごと消えた</th><th>残った1行あたり</th><th>編集</th></tr></thead><tbody>${tr}</tbody></table></div>`;
-  return head + lead + cols + table + `<p class="fine">1行＝1つの会話。--resume で再開したセッションは、前の記録が写っているので同じ会話にまとめ、写った分は1回だけ数えます。出力トークンは assistant の usage（output_tokens）を応答ごとに1回数えて会話ごとに足し（1つの応答が複数の行に分かれて書かれている分は1回）、そのセッションで Claude が書いた行のうち、このリポジトリの行の割合で按分しています（別のリポジトリにも触ったセッションの分は、その割合だけ）。「今は無いコードに使った」は、按分した出力トークン × 残っていない行の割合。入力トークン（キャッシュ読みを含む）は数えていません＝費用そのものではなく、Claude が書いた量の目安です。試作を捨てるのは悪いことではありません。この表は「どの頼み方が高くついたか」を自分のログで見るためのものです。指示の冒頭は端末の外に出ません（カード・共有文にも載りません）。</p>`;
+  const cols = S.outTotal ? `<div class="sesscols">${card('出力が大きく、残らなかった会話', S.costly, 'costly')}${card('出力が小さく、残った会話', S.cheap, 'cheap')}</div>` : '';
+  const multi = new Set(S.rows.map(r => r.tool)).size > 1;
+  const tr = S.rows.map(r => `<tr><td>${esc(r.start)}${multi ? `<br><small class="dim">${TOOL_NAME[r.tool] || ''}</small>` : ''}${r.members > 1 ? `<br><small class="dim">再開 ${fmt(r.members - 1)} 回を含む</small>` : ''}</td><td class="q">${q(r)}</td><td>${S.outTotal ? fmtTok(r.outRepo) : '—'}</td><td>${fmt(r.written)}</td><td>${fmt(r.alive)}</td><td>${fmt(r.rewritten)}</td><td>${fmt(r.human)}</td><td>${fmt(r.dropped)}</td><td>${S.outTotal ? (r.perAlive === null ? '—' : fmtTok(r.perAlive)) : '—'}</td><td>${fmt(r.edits)}</td></tr>`).join('');
+  const table = `<div class="table-wrap"><table><thead><tr><th>開始</th><th class="q">最初の指示（冒頭）</th><th>出力トークン（按分）</th><th>書いた</th><th>残った</th><th>自分で書き直し</th><th>ログの外で直された</th><th>ファイルごと消えた</th><th>残った1行あたり</th><th>編集</th></tr></thead><tbody>${tr}</tbody></table></div>`;
+  return head + lead + cols + table + `<p class="fine">1行＝1つの会話。--resume で再開したセッションは、前の記録が写っているので同じ会話にまとめ、写った分は1回だけ数えます。出力トークンは応答ごとの使用量（Claude Code は assistant の usage・Codex は token_usage_record・Antigravity は step の output_tokens）を1回ずつ数えて会話ごとに足し（1つの応答が複数の行に分かれて書かれている分は1回）、そのセッションで ${AI} が書いた行のうち、このリポジトリの行の割合で按分しています（別のリポジトリにも触ったセッションの分は、その割合だけ）。「今は無いコードに使った」は、按分した出力トークン × 残っていない行の割合。入力トークン（キャッシュ読みを含む）は数えていません＝費用そのものではなく、${AI} が書いた量の目安です。試作を捨てるのは悪いことではありません。この表は「どの頼み方が高くついたか」を自分のログで見るためのものです。指示の冒頭は端末の外に出ません（カード・共有文にも載りません）。</p>`;
 }
 function renderDetails(R, opts){
+  AI = aiLabel(R);
   const html = [
-    sec('一手', '頼み方と、残った1行あたりの出力トークン', sessionsHTML(R, opts.hidePrompts)),
-    sec('癖', '直し癖 → CLAUDE.md に足す1行', habitsHTML(R, opts.hideFiles)),
+    sec('書き直し', 'AI の書き直しが集中した所', rewritesHTML(R, opts.hideFiles, opts.hidePrompts)),
+    sec('癖', '繰り返した直しの型と、試す対策', habitsHTML(R, opts.hideFiles)),
+    sec('会話', '出力が大きかった会話と、残った1行あたりの出力トークン', sessionsHTML(R, opts.hidePrompts)),
     compareHTML(R),
     sec('生存率', '残った・書き直した・消した', stackHTML(R)),
-    sec('AI率', '今のコードのうち Claude の行', aiHTML(R)),
-    sec('急所', '人が消した行が多いファイル', topHTML(R, opts.hideFiles)),
+    sec('AI率', `今のコードのうち ${AI} の行`, aiHTML(R)),
+    sec('急所', 'ログの外で変わった行が多いファイル', topHTML(R, opts.hideFiles)),
     sec('ファイル', 'ファイルごとの内訳', filesHTML(R, opts.hideFiles)),
     sec('典型', '典型的な行', examplesHTML(R, opts.hideFiles)),
     sec('記録', '読み込んだものと照合', recordHTML(R)),
@@ -1304,50 +1758,77 @@ function renderDetails(R, opts){
 
 /* ---------- 共有 ---------- */
 function shareText(R){
+  AI = aiLabel(R);
   const w = R.written;
   const lines = [
-    'Claude Code のログと手元のコードを突き合わせました',
-    `・${R.period ? 'この' + R.period.days + '日間' : 'ログの期間'}に Claude が書いた行：${fmt(w)}`,
+    `${AI === 'Claude' ? 'Claude Code' : AI === 'AI' ? 'AI' : AI} のログと手元のコードを突き合わせました`,
+    `・${R.period ? 'この' + R.period.days + '日間' : 'ログの期間'}に ${AI} が書いた行：${fmt(w)}`,
     `・そのまま残っている：${pct(rate(R.alive, w))}`,
-    `・Claude が自分で書き直した：${pct(rate(R.rewritten, w))}`,
-    `・自分が消した・直した：${pct(rate(R.human - R.dropped, w))}`,
+    `・${AI} が自分で書き直した：${pct(rate(R.rewritten, w))}`,
+    `・ログの外で変わった・消えた：${pct(rate(R.human - R.dropped, w))}`,
   ];
   if (R.dropped) lines.push(`・ファイルごと消えた：${pct(rate(R.dropped, w))}`);
   lines.push(`・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`);
   if (R.sessionStats && R.sessionStats.outTotal) lines.push(`・今は無いコードに使った出力トークン：${pct(R.sessionStats.goneShare)}（${fmtTok(R.sessionStats.outGone)}／${fmtTok(R.sessionStats.outTotal)}）`);
-  lines.push('#ClaudeCode生存率');
+  lines.push('#AI開発ログマップ');
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');
 }
 
 /* ---------- 画面 ---------- */
 let current = sampleResult();
+let currentT = sampleTokens();
+let tab = (typeof location !== 'undefined' && location.hash === '#rework') ? 'rework' : 'tokens';
 let lastCanvas = null;
 let inputs = { acc: null, project: null, projectName: '' };   // 読み込み済みの生データ（厳密モードの切り替えで再計算する）
 const opts = () => ({ strict: $('#optStrict').checked, hideFiles: $('#optHideFiles').checked, hideProject: $('#optHideProject').checked, examples: $('#optExamples').checked, hidePrompts: $('#optHidePrompts').checked });
 
 function renderCard(){
+  if (tab === 'tokens') {
+    const cv = drawTokenCard(currentT);
+    lastCanvas = cv;
+    $('#cardImg').src = cv.toDataURL('image/png');
+    $('#cardImg').alt = `文脈とトークンのカード：応答の${pctOf(currentT.over, currentT.n)}が15万トークンを超える文脈。1時間以上あけた再開${fmt(currentT.resumes)}回のうち${fmt(currentT.matched)}回で大量のキャッシュ作成。` + (currentT.sample ? '（見本・架空のデータ）' : '');
+    const t = tokenShareText(currentT);
+    $('#shareText').value = t;
+    $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent(t);
+    return;
+  }
   const o = opts();
   const out = drawCard(current, o);
   lastCanvas = out.canvas;
   const img = $('#cardImg');
   img.src = out.canvas.toDataURL('image/png');
-  img.alt = `生存率カード：Claude が書いた${fmt(current.written)}行のうち${pct(rate(current.alive, current.written))}が残っている。判定「${out.title}」。` + (current.sample ? '（見本・架空のデータ）' : '');
+  img.alt = `生存率カード：${AI} が書いた${fmt(current.written)}行のうち${pct(rate(current.alive, current.written))}が残っている。判定「${out.title}」。` + (current.sample ? '（見本・架空のデータ）' : '');
   const txt = shareText(current);
   $('#shareText').value = txt;
   $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent(txt);
 }
 function renderAll(){
+  for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+  for (const el of document.querySelectorAll('[data-only]')) el.hidden = el.dataset.only !== tab;
   renderCard();
-  renderDetails(current, opts());
   const pill = $('#statusPill'), st = $('#statusText');
-  if (current.sample) {
+  if (tab === 'tokens') {
+    $('#details').innerHTML = tokenDetailsHTML(currentT);
+    if (currentT.sample) { pill.textContent = '見本'; pill.className = 'pill'; st.textContent = '架空のデータで表示しています。AI のログを入れると、あなたの数字に変わります（プロジェクトのフォルダは要りません）。'; }
+    else { pill.textContent = 'あなたのログ'; pill.className = 'pill mine'; st.textContent = currentT.n ? `${fmt(currentT.n)} 応答のログから作りました。` : 'ログを読みましたが、応答ごとのトークンの記録がありませんでした。「コードの手直し」は使えます。'; }
+    $('#resetBtn').hidden = !!currentT.sample;
+    $('#snapRow').hidden = true;
+    return;
+  }
+  renderDetails(current, opts());
+  if (current.sample && !current.reset && (inputs.acc || inputs.project)) {
+    pill.textContent = 'あと1つ'; pill.className = 'pill mine';
+    st.textContent = inputs.acc ? 'ログを読みました。「コードの手直し」は、次にプロジェクトのフォルダを入れてください。' : 'フォルダを読みました。次に AI のログを入れてください。';
+    $('#resetBtn').hidden = true;
+  } else if (current.sample) {
     pill.textContent = '見本'; pill.className = 'pill';
     st.textContent = '架空のデータで表示しています。ログとフォルダを入れると、あなたの生存率に変わります。';
     $('#resetBtn').hidden = true;
   } else {
     pill.textContent = 'あなたのコード'; pill.className = 'pill mine';
-    st.textContent = `${fmt(current.edits)}回の編集と${fmt(current.projectFiles)}個のファイルから作りました。`;
+    st.textContent = `${fmt(current.edits)}回の編集と${fmt(current.projectFiles)}個のファイルから作りました。${current.since ? `（${localTime(current.since)} 以降に入った行だけ）` : ''}`;
     $('#resetBtn').hidden = false;
   }
   $('#snapRow').hidden = !!current.sample;
@@ -1376,7 +1857,8 @@ $('#cmpInput').addEventListener('change', e => {
 function loadPrev(obj){
   if (!isSnapshot(obj)) { setError('この JSON は、このページの「結果を保存」で作ったものではないようです。'); return false; }
   prevSnap = obj;
-  renderDetails(current, opts());
+  if (obj.marks && typeof obj.marks === 'object') for (const [k, v] of Object.entries(obj.marks)) if (!marks[k] && MARKS.some(m => m[0] === v)) marks[k] = v;
+  if (tab !== 'rework') { tab = 'rework'; renderAll(); } else renderDetails(current, opts());
   const secEl = document.querySelector('#details .sec[data-kicker="前回"]');
   if (secEl && secEl.scrollIntoView) secEl.scrollIntoView({ block: 'start' });
   return true;
@@ -1419,11 +1901,12 @@ async function readLogFile(file, acc, onChunk){
     for (const line of text.split('\n')) handleLogLine(line, acc);
   }
 }
-async function loadLogs(files){
-  const acc = newLogAcc();
+async function loadLogs(files, base){
+  const acc = base || newLogAcc();   // 2回目以降は足していく（Claude Code・Codex・Gemini のログを別々に入れられるように）
   const total = files.reduce((a, f) => a + f.size, 0) || 1;
   let doneBytes = 0, lastTick = performance.now();
   for (let i = 0; i < files.length; i++) {
+    acc.cur = newFileState(normPath(files[i]._path || files[i].webkitRelativePath || files[i].name));
     await readLogFile(files[i], acc, b => showProgress('ログを読み込み中', i, files.length, (doneBytes + b) / total));
     doneBytes += files[i].size; acc.files++;
     if (performance.now() - lastTick > 60) { await tick(); lastTick = performance.now(); }
@@ -1469,17 +1952,27 @@ function topFolder(paths){
 }
 
 let busy = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function handleLogs(list){
   const files = [...list].filter(f => /\.jsonl$/i.test(f.name) && !(f._path || f.webkitRelativePath || '').split('/').some(seg => LOG_SKIP_DIRS.has(seg)));
-  if (!files.length) { setError('JSONL ファイルが見つかりませんでした。~/.claude/projects フォルダか、その中身を選んでください。'); return; }
-  if (busy) return; busy = true;
+  if (!files.length) { setError('JSONL ファイルが見つかりませんでした。~/.claude/projects・~/.codex/sessions・~/.gemini のフォルダか、その中身を選んでください。'); return; }
+  while (busy) await sleep(50);   // 読み込み中に入れた分は捨てずに、前の読み込みが終わってから読む
+  busy = true;
   try {
-    const acc = await loadLogs(files);
-    if (!acc.uses.size) { setError(`${fmt(files.length)}個のログを読みましたが、Edit・Write の記録が見つかりませんでした。`); return; }
+    // 同じ AI のログを入れ直した時は置き換え、別の AI のログなら足す（Claude Code と Codex を両方入れて比べられるように）
+    let acc = await loadLogs(files, null);
+    const prev = inputs.acc;
+    if (prev) { const a = accTools(prev), b = accTools(acc); if (b.size && ![...b].some(t => a.has(t))) acc = mergeAcc(prev, acc); }
+    finalizeGemini(acc);
+    if (!acc.uses.size && !acc.resp.size) { setError(`${fmt(files.length)}個のログを読みましたが、ファイルを書いた記録も、応答ごとのトークンの記録も見つかりませんでした。`); return; }
     inputs.acc = acc;
     const z = $('#zoneLog'); z.classList.add('done');
     const lo = $('#logLoaded'); lo.hidden = false;
-    lo.textContent = `読み込み済み：${fmt(acc.files)}ファイル・Edit／Write／Read の記録 ${fmt(acc.uses.size)}件`;
+    const by = { claude: 0, codex: 0, gemini: 0 };
+    for (const u of acc.uses.values()) if (u.name !== 'Read') by[toolOf(u.sid)]++;
+    const parts = Object.keys(by).filter(k => by[k]).map(k => `${TOOL_NAME[k]} ${fmt(by[k])}件`);
+    $('#logClear').hidden = false;
+    lo.textContent = `読み込み済み：${fmt(acc.files)}ファイル・${parts.length ? '書いた記録 ' + parts.join('・') : 'ファイルを書いた記録なし（文脈とトークンだけ見られます）'}（別の AI のログを続けて入れると足します。同じ AI のログは入れ直しです）`;
     await maybeAnalyze();
   } catch (e) { setError('ログの読み込みの途中で止まりました：' + (e && e.message ? e.message : String(e))); }
   finally { busy = false; $('#progress').hidden = true; }
@@ -1500,14 +1993,15 @@ async function handleProject(list){
   }
   // ログのフォルダを右に入れた時（Claude のメモ .md を「コード」として数えてしまう）
   if (all.length && (jsonl > all.length * 0.3 || dashDirs > all.length * 0.5 || /^-[A-Za-z]/.test(top))) {
-    setError(`これは Claude Code のログのフォルダのようです（${top || 'このフォルダ'}：.jsonl のファイルや「-Users-…」のフォルダがあります）。ログは上の 1 の枠へ。ここには、Claude Code で作業したリポジトリの一番上のフォルダを入れてください。`);
+    setError(`これは Claude Code のログのフォルダのようです（${top || 'このフォルダ'}：.jsonl のファイルや「-Users-…」のフォルダがあります）。ログは上の 1 の枠へ。ここには、AI と作業したリポジトリの一番上のフォルダを入れてください。`);
     return;
   }
   if (!items.length) { setError('読めるテキストファイルが見つかりませんでした。プロジェクトのフォルダ（リポジトリの一番上）を選んでください。'); return; }
-  if (busy) return; busy = true;
+  while (busy) await sleep(50);
+  busy = true;
   try {
     const project = await loadProject(items);
-    inputs.project = project; inputs.projectName = top;
+    inputs.project = project; inputs.projectName = top; tab = 'rework';   // フォルダを入れた＝手直しを見たい
     const z = $('#zoneProj'); z.classList.add('done');
     const lo = $('#projLoaded'); lo.hidden = false;
     lo.textContent = `読み込み済み：${top ? top + '・' : ''}${fmt(project.size)}ファイル`;
@@ -1515,17 +2009,15 @@ async function handleProject(list){
   } catch (e) { setError('フォルダの読み込みの途中で止まりました：' + (e && e.message ? e.message : String(e))); }
   finally { busy = false; $('#progress').hidden = true; }
 }
+function sinceMs(){ const v = $('#optSince').value; const t = v ? new Date(v).getTime() : NaN; return Number.isFinite(t) ? t : undefined; }
 async function maybeAnalyze(){
-  if (!inputs.acc || !inputs.project) {
-    const pill = $('#statusPill'); pill.textContent = 'あと1つ'; pill.className = 'pill mine';
-    $('#statusText').textContent = inputs.acc ? 'ログを読みました。次にプロジェクトのフォルダを入れてください。' : 'フォルダを読みました。次に Claude Code のログを入れてください。';
-    return;
-  }
+  if (inputs.acc) { finalizeGemini(inputs.acc); currentT = tokenStats(inputs.acc); }   // 応答の記録が無くても見本の数は使わない（0 のまま・Codex の指摘 PR #21）
+  if (!inputs.acc || !inputs.project) { renderAll(); return; }
   showProgress('突き合わせ中', 1, 1, 1);
   await tick();
-  const R = analyzeParsed(inputs.acc, inputs.project, inputs.projectName, $('#optStrict').checked);
+  const R = analyzeParsed(inputs.acc, inputs.project, inputs.projectName, $('#optStrict').checked, sinceMs());
   if (!R.root) {
-    setError(`ログに記録されたファイルがこのフォルダに1つも無く、フォルダ名（${inputs.projectName || '—'}）もログの作業フォルダ${R.cwdTop ? `（${baseName(R.cwdTop)}）` : ''}と合いませんでした。Claude Code で作業したリポジトリの一番上のフォルダを選んでください。`);
+    setError(`ログに記録されたファイルがこのフォルダに1つも無く、フォルダ名（${inputs.projectName || '—'}）もログの作業フォルダ${R.cwdTop ? `（${baseName(R.cwdTop)}）` : ''}と合いませんでした。AI と作業したリポジトリの一番上のフォルダを選んでください。`);
     return;
   }
   current = R; renderAll();
@@ -1573,6 +2065,10 @@ document.addEventListener('drop', async e => {
   if (onLog || (!onProj && hasJsonl)) handleLogs(files); else handleProject(files);
 });
 $('#logInput').addEventListener('change', e => { handleLogs(e.target.files); e.target.value = ''; });
+$('#logClear').addEventListener('click', () => {
+  inputs.acc = null; $('#zoneLog').classList.remove('done'); $('#logLoaded').hidden = true; $('#logClear').hidden = true;
+  current = sampleResult(); currentT = sampleTokens(); renderAll();
+});
 $('#projInput').addEventListener('change', e => { handleProject(e.target.files); e.target.value = ''; });
 
 $('#optStrict').addEventListener('change', async () => {
@@ -1580,7 +2076,11 @@ $('#optStrict').addEventListener('change', async () => {
   if (inputs.acc && inputs.project) await maybeAnalyze();
 });
 for (const id of ['#optHideFiles', '#optHideProject', '#optExamples', '#optHidePrompts']) $(id).addEventListener('change', () => { renderCard(); renderDetails(current, opts()); });
-$('#resetBtn').addEventListener('click', () => { current = sampleResult(); renderAll(); });
+$('#resetBtn').addEventListener('click', () => { if (tab === 'tokens') currentT = sampleTokens(); else current = Object.assign(sampleResult(), { reset: true }); renderAll(); });   // 見本に戻した＝「あと1つ」は出さない
+for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => { tab = b.dataset.tab; try { history.replaceState(null, '', '#' + tab); } catch (e) {} renderAll(); });
+$('#optSince').addEventListener('change', () => { if (inputs.acc && inputs.project) maybeAnalyze(); });
+$('#clearSince').addEventListener('click', () => { $('#optSince').value = ''; if (inputs.acc && inputs.project) maybeAnalyze(); });
+$('#details').addEventListener('change', e => { const sel = e.target.closest && e.target.closest('select[data-mark]'); if (sel) { if (sel.value) marks[sel.dataset.mark] = sel.value; else delete marks[sel.dataset.mark]; } });
 
 async function copyText(text, btn){
   const done = () => { const o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(() => { btn.textContent = o; }, 1600); };
@@ -1615,9 +2115,16 @@ if (STANDALONE) {
 }
 
 /* テストと再利用のための入口：文字列から同じ計算をする */
-function analyzeTexts(logs, project, projectName, strict){
+function tokenTexts(logs){
   const acc = newLogAcc();
-  for (const { text } of logs) {
+  for (const { text, path } of logs) { acc.cur = newFileState(path || ''); for (const line of String(text).split('\n')) handleLogLine(line, acc); acc.files++; }
+  finalizeGemini(acc);
+  return tokenStats(acc);
+}
+function analyzeTexts(logs, project, projectName, strict, since){
+  const acc = newLogAcc();
+  for (const { text, path } of logs) {
+    acc.cur = newFileState(path || '');
     const parts = String(text).split('\n');
     if (parts.length && parts[parts.length - 1] === '') parts.pop();   // 末尾の改行の後ろは行に数えない（stream で読む時と同じ）
     for (const line of parts) handleLogLine(line, acc);
@@ -1625,9 +2132,9 @@ function analyzeTexts(logs, project, projectName, strict){
   }
   const pm = new Map();
   for (const { rel, text } of project) if (projectFilter(rel, String(text).length) && !looksBinary(String(text).slice(0, 4096))) pm.set(normPath(rel), String(text));
-  return analyzeParsed(acc, pm, projectName || '', !!strict);
+  return analyzeParsed(acc, pm, projectName || '', !!strict, since);
 }
-window.__seizon = { analyzeTexts, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
+window.__seizon = { analyzeTexts, tokenTexts, tokenStats, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get currentT(){ return currentT; }, get tab(){ return tab; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
 // 埋め込んだ等幅フォントが使えるようになってから最初の描画（canvas は読み込み前の書体で描いてしまう）
 const fontsReady = (document.fonts && document.fonts.load) ? Promise.all(['400 16px PlexMonoSub', '500 16px PlexMonoSub', '600 16px PlexMonoSub'].map(f => document.fonts.load(f))).catch(() => {}) : Promise.resolve();
 fontsReady.then(renderAll);

@@ -44,6 +44,24 @@ PROJ2 = HERE / "seizon" / "proj" / "habits"
 HAND_HABITS = [("debug", 3, 2, 2, True, False), ("rename", 3, 1, 1, False, False), ("any", 1, 1, 1, False, False), ("comment", 1, 1, 1, False, False),
                ("import", 1, 1, 1, False, False), ("quote", 1, 1, 1, False, False), ("string", 1, 1, 1, False, False),
                ("block", 5, 1, 1, False, True), ("delete", 1, 1, 1, False, True), ("other", 1, 1, 1, False, True)]
+LOGS3 = HERE / "seizon" / "logs3"
+PROJ3 = HERE / "seizon" / "proj" / "multi"
+# Codex：x.ts を作って差分で two→five（書いた5・残った3・書き直し1・人が消した1・出力 50＋70・同じ response_id は1回・失敗した変更は数えない）
+# Gemini：y.py を書いて return 'one'→'uno'（書いた5・残った4・書き直し1）。3か所に重ねて残った step は1回・切られた写しは full を使う・ほどけない値は数えず1件
+# z.js：本文が " で始まる包まれていない値（"use strict";）もそのまま数える＝Antigravity は書いた 7・残った 6・出力 80・msgs 5。今は無い分 80×1/7＝11・1行あたり 80/6＝13
+HAND_MULTI = dict(written=12, alive=9, rewritten=2, human=1, edits=5, sessions=2, uses=5, gmSkipped=1, root="/Users/t/dev/multi",
+                  tools={"codex": {"written": 5, "alive": 3, "edits": 2, "sessions": 1}, "gemini": {"written": 7, "alive": 6, "edits": 3, "sessions": 1}},
+                  rows=[("codex:cx-1", "codex", "x.ts を作って", 120, 2, 1, 5, 3, 40), ("gemini:11111111-2222-4333-8444-555555555555", "gemini", "y.py を作って", 80, 5, 1, 7, 6, 13)])
+# 文脈とトークン（logs4・フォルダ無し）：Claude 6 応答（tm2 の2行は1応答）＋ Codex 2 応答＝8。15万超＝tm2・tm3・tm4・tm5・tr1・tr2＝6
+# 再開（1時間以上あけた・サブエージェントは除く）＝t1 の 09:10→11:10・11:10→14:10、cx-t の 09:00→11:00＝3。一致＝tm4 だけ（前 220,003・読めた 1万＜2割・書いた 20万＞半分）
+HAND_TOKENS = dict(n=8, over=6, bins=[2, 0, 0, 3, 3, 0, 0], resumes=3, matched=1, matchedMedianCw=200000,
+                   by={"claude": {"n": 6, "over": 4, "resumes": 2, "matched": 1}, "codex": {"n": 2, "over": 2, "resumes": 1, "matched": 0}},
+                   latest={"sid": "t1", "tool": "claude", "ts": "2026-09-20T11:10:00.000Z", "gapMin": 120, "prevCtx": 220003, "cr": 10000, "cw": 200000})
+LOGS4 = HERE / "seizon" / "logs4"
+# 書き直し（alpha）：a.ts の toArray の行・gone.ts の LEGACY の行・multi.ts の exponential の行・re.ts の RE2 の行＝4か所・4行・4ファイル
+HAND_REWRITE = dict(total={"events": 4, "lines": 4, "files": 4}, files=["src/a.ts", "src/gone.ts", "src/multi.ts", "src/re.ts"],
+                    first=("src/a.ts", "return db.notes.where({ userId }).toArray();", "a.ts に listNotes を足して、並びは updatedAt にして", True))
+SINCE = 1788393600000   # 2026-09-03T00:00Z：s1（9/1）の行は数えない＝s2 の 6 行だけ・書き直しは 0
 failures = 0
 
 def check(name, got, want):
@@ -62,7 +80,7 @@ ROW_KEYS = ("file", "exists", "lines", "written", "alive", "rewritten", "human",
 def compare(label, cur, exp):
     ok = True
     for k in ("written", "alive", "rewritten", "human", "dropped", "droppedWritten", "aiLines", "projectLines", "projectFiles", "otherProjectFiles", "edits", "sessions",
-              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples", "habits", "sessionStats"):
+              "rootCandidates", "rootMatched", "rootFrom", "rootAmbiguous", "cwdTop", "uses", "logFiles", "logLines", "logBad", "root", "strict", "projectName", "period", "examples", "habits", "sessionStats", "since", "rewriteTotal", "rewriteFiles", "rewriteEvents"):
         ok &= check(f"{label} {k}", cur[k], exp[k])
     ok &= check(f"{label} files", [[r[k] for k in ROW_KEYS] for r in cur["files"]], [[r[k] for k in ROW_KEYS] for r in exp["files"]])
     ok &= check(f"{label} missingFiles", cur["missingFiles"], exp["missingFiles"])
@@ -98,6 +116,20 @@ def mk_write(path, content, ts, cwd, tid):
     return json.dumps(use) + "\n" + json.dumps(res) + "\n"
 
 IDX = "export const idx = 1;\nexport const idy = 2;\n"
+def mk_edit(path, old, new, orig, ts, cwd, tid):
+    use = {"type": "assistant", "cwd": cwd, "sessionId": "sx", "timestamp": ts, "uuid": "u-" + tid,
+           "message": {"role": "assistant", "content": [{"type": "tool_use", "id": tid, "name": "Edit", "input": {"file_path": path, "old_string": old, "new_string": new}}]}}
+    res = {"type": "user", "cwd": cwd, "sessionId": "sx", "timestamp": ts, "uuid": "r-" + tid,
+           "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "content": "The file has been updated."}]},
+           "toolUseResult": {"filePath": path, "oldString": old, "newString": new, "originalFile": orig, "structuredPatch": []}}
+    return json.dumps(use) + "\n" + json.dumps(res) + "\n"
+# 日時で区切った書き直し（Codex の指摘 PR #21）：9/1 に2行書き、9/5 に1行目を書き換え（区切りより前に入った行を消す）、9/6 に 9/5 の行を書き換え（区切りより後に入った行を消す）
+RW_V1 = "export const one = 1;\nexport const two = 2;\n"
+RW_V2 = "export const uno = 1;\nexport const two = 2;\n"
+RW_LOGS = (mk_write("/rw/x.ts", RW_V1, "2026-09-01T00:00:00.000Z", "/rw", "w1")
+           + mk_edit("/rw/x.ts", "export const one = 1;", "export const uno = 1;", RW_V1, "2026-09-05T00:00:00.000Z", "/rw", "w2")
+           + mk_edit("/rw/x.ts", "export const uno = 1;", "export const ichi = 1;", RW_V2, "2026-09-06T00:00:00.000Z", "/rw", "w3"))
+RW_PROJ = {"x.ts": "export const ichi = 1;\nexport const two = 2;\n"}
 SCENES = {
     # 同数の候補（/repo と /repo/src）＝cwd と同じ /repo を選ぶ
     "tie-cwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t1")],
@@ -129,13 +161,50 @@ with sync_playwright() as p:
         page.goto(URL)
         page.wait_for_function("document.getElementById('cardImg').src.startsWith('data:image/png')")
         page.screenshot(path=str(SHOTS / f"seizon-sample-{label}.png"), full_page=True)
+        check(f"{label} default tab tokens", (page.evaluate("window.__seizon.tab"), page.text_content("#statusPill")), ("tokens", "見本"))
+        page.click(".tab[data-tab=rework]"); page.wait_for_timeout(200)
+        page.screenshot(path=str(SHOTS / f"seizon-sample-rework-{label}.png"), full_page=True)
+        check(f"{label} rework sample rewrites shown", page.evaluate("document.querySelectorAll('#details .rwev').length > 0"), True)
+        check(f"{label} rework overflow", page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth"), False)
+        page.click(".tab[data-tab=tokens]"); page.wait_for_timeout(200)
         overflow = page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth")
         check(f"{label} horizontal overflow", overflow, False)
         if label == "desktop-light":
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "seizon-card-sample.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
-            # 1) ログだけ → 「あと1つ」
+            # 0a) 書いた記録はあるが応答のトークンの記録が無いログ＝見本の数を出さない（Codex の指摘 PR #21）
+            NOUSE = HERE / "seizon" / "nousage"; NOUSE.mkdir(parents=True, exist_ok=True)
+            (NOUSE / "x.jsonl").write_text(mk_write("/repo/a.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "nu1"), encoding="utf-8")
+            page.set_input_files("#logInput", str(NOUSE))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
+            t0 = page.evaluate("JSON.parse(JSON.stringify(window.__seizon.currentT))")
+            check("no usage tokens zero", (t0["n"], t0["over"], t0["resumes"], t0["matched"], t0.get("sample"), page.input_value("#shareText")), (0, 0, 0, 0, None, ""))
+            check("no usage status", "トークンの記録がありませんでした" in page.text_content("#statusText"), True)
+            page.click("#logClear")
+            # 0) 文脈とトークン：ログだけで数字が出る＝手計算 HAND_TOKENS ＝ Python ＝ Chromium
+            page.set_input_files("#logInput", str(LOGS4))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
+            curT = page.evaluate("JSON.parse(JSON.stringify(window.__seizon.currentT))")
+            expT = ref_seizon.run_tokens(sorted(LOGS4.rglob("*.jsonl")))
+            ok = True
+            for k in ("n", "over", "bins", "by", "period", "resumes", "matched", "matchedMedianCw", "latest", "weighted"):
+                ok &= check(f"tokens js=py {k}", curT[k], expT[k])
+            for k, v in HAND_TOKENS.items():
+                ok &= check(f"tokens hand {k}", [b["n"] for b in curT["bins"]] if k == "bins" else curT[k], v)
+            ok &= check("tokens weighted sums to 1", round(sum(curT["weighted"].values()), 6), 1.0)
+            tok_txt = page.input_value("#shareText")
+            ok &= check("tokens share text", ("75%" in tok_txt, "#AI開発ログマップ" in tok_txt, "t1" in tok_txt), (True, True, False))
+            ok &= check("tokens details latest", page.evaluate("(t => t.includes('2時間') && t.includes('20:10'))(document.querySelector('#details .latest').textContent)"), True)
+            page.screenshot(path=str(SHOTS / "seizon-tokens-mine.png"), full_page=True)
+            src = page.get_attribute("#cardImg", "src")
+            (SHOTS / "seizon-card-tokens.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
+            print("tokens share text:\n" + tok_txt)
+            page.click("#logClear")
+            ok &= check("tokens cleared to sample", page.text_content("#statusPill"), "見本")
+            # 1) ログだけ → 文脈とトークンは出る・手直しのタブは「あと1つ」
             page.set_input_files("#logInput", str(LOGS))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのログ'", timeout=20000)
+            page.click(".tab[data-tab=rework]")
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あと1つ'", timeout=20000)
             print("after logs:", page.locator("#logLoaded").text_content())
             # 2) フォルダ → 突き合わせ
@@ -143,7 +212,13 @@ with sync_playwright() as p:
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード'", timeout=20000)
             print("after project:", page.locator("#projLoaded").text_content(), "|", page.locator("#statusText").text_content())
             cur = page.evaluate(CURRENT)
-            ok = compare("normal", cur, expect[False]) & compare_hand("normal", cur, False)
+            ok &= compare("normal", cur, expect[False]) & compare_hand("normal", cur, False)
+            ok &= check("rewrite hand total", cur["rewriteTotal"], HAND_REWRITE["total"])
+            ok &= check("rewrite hand files", [f["file"] for f in cur["rewriteFiles"]], HAND_REWRITE["files"])
+            e0 = cur["rewriteEvents"][0]
+            ok &= check("rewrite hand first", (e0["file"], e0["gone"][0], e0["prompt"]["text"], e0["prompt"]["first"]), HAND_REWRITE["first"])
+            ok &= check("rewrite prompt on screen", page.evaluate("document.querySelector('#details .rwev') !== null && document.getElementById('details').textContent.includes('並びは updatedAt にして')"), True)
+            ok &= check("rewrite prompt not in share", "updatedAt" in page.input_value("#shareText"), False)
             page.screenshot(path=str(SHOTS / "seizon-mine-desktop-light.png"), full_page=True)
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "seizon-card-mine.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
@@ -168,6 +243,19 @@ with sync_playwright() as p:
             cur3 = page.evaluate("([l, p]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'alpha', false)))", [logs_js, proj_js])
             ok &= check("analyzeTexts written/alive/human", (cur3["written"], cur3["alive"], cur3["human"], cur3["aiLines"], cur3["projectFiles"]),
                         (expect[False]["written"], expect[False]["alive"], expect[False]["human"], expect[False]["aiLines"], expect[False]["projectFiles"]))
+            cur_s = page.evaluate("([l, p, t]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'alpha', false, t)))", [logs_js, proj_js, SINCE])
+            exp_s = ref_seizon.run(log_files, PROJ, strict=False, since=SINCE)
+            for k in ("written", "alive", "rewritten", "human", "since", "rewriteTotal", "files"):
+                ok &= check(f"since js=py {k}", cur_s[k], exp_s[k])
+            ok &= check("since hand", (cur_s["written"], cur_s["rewriteTotal"]["events"], cur_s["since"]), (6, 0, "2026-09-03T00:00:00.000Z"))
+            page.fill("#optSince", "2026-09-03T09:00")   # 東京の 9/3 9:00 ＝ SINCE
+            page.dispatch_event("#optSince", "change")
+            page.wait_for_function("window.__seizon.current.since === '2026-09-03T00:00:00.000Z'", timeout=20000)
+            ok &= check("since ui written", page.evaluate("window.__seizon.current.written"), 6)
+            ok &= check("since status note", "以降に入った行だけ" in page.text_content("#statusText"), True)
+            page.click("#clearSince")
+            page.wait_for_function("window.__seizon.current.since === null", timeout=20000)
+            ok &= check("since cleared written", page.evaluate("window.__seizon.current.written"), expect[False]["written"])
             # 6) 文字列だけの小さな場面（root の決め方）＝JS・Python・手の3つが一致
             for name, sc in SCENES.items():
                 js = page.evaluate("([l, p, n]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, n, false)))",
@@ -175,6 +263,11 @@ with sync_playwright() as p:
                 py = ref_seizon.run_texts(sc["logs"], sc["project"], sc["name"])
                 for k, v in sc["want"].items():
                     ok &= check(f"scene {name} {k}", (js[k], py[k]), (v, v))
+            for since, want in ((None, (2, 2)), (SINCE, (1, 1))):
+                js = page.evaluate("([l, p, t]) => JSON.parse(JSON.stringify(window.__seizon.analyzeTexts(l, p, 'rw', false, t)))", [[{"path": "x.jsonl", "text": RW_LOGS}], [{"rel": k, "text": v} for k, v in RW_PROJ.items()], since])
+                py = ref_seizon.run_texts([RW_LOGS], RW_PROJ, "rw", since=since)
+                ok &= check(f"rewrite since={since} js", (js["rewriteTotal"]["events"], js["rewriteTotal"]["lines"]), want)
+                ok &= check(f"rewrite since={since} py=js", (py["rewriteTotal"], py["rewriteEvents"], py["written"]), (js["rewriteTotal"], js["rewriteEvents"], js["written"]))
             # 7) ログのフォルダを右（プロジェクト）に入れた時＝「ログのフォルダのようです」で止まり、前の結果は残る（2026-10-20 に本人が踏んだ）
             page.set_input_files("#projInput", str(LOGS / "projects"))
             page.wait_for_function("document.getElementById('statusPill').textContent === '読めませんでした'", timeout=20000)
@@ -199,10 +292,30 @@ with sync_playwright() as p:
             ok &= check("habits sessionStats totals", (Sh["outTotal"], Sh["outGone"], Sh["costly"], Sh["cheap"], cur_h["sessions"]), (500, 307, [], [], 4))
             ok &= check("habits sessionStats rows", [(r["sid"], r["first"], r["out"], r["outRepo"], r["msgs"], r["members"], r["edits"], r["written"], r["alive"], r["perAlive"]) for r in Sh["rows"]],
                         [("h4", "tool.py を作って", 200, 200, 2, 2, 2, 5, 3, 67), ("h1", "app.ts を書いて", 100, 100, 1, 1, 1, 10, 3, 33), ("h2", "util.ts を書いて", 100, 100, 1, 1, 1, 7, 3, 33), ("h3", "キャッシュをとりあえず作って", 100, 100, 1, 1, 1, 5, 0, None)])
+            # 文脈とトークンは、ログを読む順に左右されない（h5 が h4 を --resume で写す＝どちらを先に読むかで応答の sid が変わる。実データで再開の数が 2 ずれた）
+            L2 = [{"path": str(f), "text": f.read_text(encoding="utf-8")} for f in sorted(LOGS2.rglob("*.jsonl"))]
+            t_fwd = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", L2)
+            t_rev = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", L2[::-1])
+            ok &= check("tokens order independent", {k: t_rev[k] for k in ("n", "resumes", "matched", "by", "latest")}, {k: t_fwd[k] for k in ("n", "resumes", "matched", "by", "latest")})
+            ok &= check("tokens py reversed", {k: ref_seizon.run_tokens(sorted(LOGS2.rglob("*.jsonl"))[::-1])[k] for k in ("n", "resumes", "matched", "by")}, {k: t_fwd[k] for k in ("n", "resumes", "matched", "by")})
+            # 写しの場面：a が 9:00・9:05 に応答、--resume した b が同じ2行（同じ uuid・message.id）を写して 11:00 に応答＝つないだ会話で 115 分あいた再開 1 回。
+            # 直す前は a を先に読むと 0 回・b を先に読むと 1 回だった
+            def tkl(sid, uid, mid, ts, cr, cw):
+                return json.dumps({"type": "assistant", "sessionId": sid, "uuid": uid, "timestamp": ts, "isSidechain": False,
+                                   "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 3, "output_tokens": 10, "cache_read_input_tokens": cr, "cache_creation_input_tokens": cw}}})
+            fa = "\n".join([tkl("ra", "u1", "m1", "2026-09-22T00:00:00.000Z", 0, 30000), tkl("ra", "u2", "m2", "2026-09-22T00:05:00.000Z", 30000, 1000)]) + "\n"
+            fb = "\n".join([tkl("rb", "u1", "m1", "2026-09-22T00:00:00.000Z", 0, 30000), tkl("rb", "u2", "m2", "2026-09-22T00:05:00.000Z", 30000, 1000), tkl("rb", "u3", "m3", "2026-09-22T02:00:00.000Z", 0, 31000)]) + "\n"
+            for nm, order in (("a→b", [fa, fb]), ("b→a", [fb, fa])):
+                tj = page.evaluate("l => JSON.parse(JSON.stringify(window.__seizon.tokenTexts(l)))", [{"path": f"{i}.jsonl", "text": t} for i, t in enumerate(order)])
+                ok &= check(f"resume copy {nm}", (tj["n"], tj["resumes"], tj["matched"], tj["latest"]["gapMin"] if tj["latest"] else None), (3, 1, 1, 115))
             ok &= check("habits resume shown", page.evaluate("document.getElementById('details').textContent.includes('再開 1 回を含む')"), True)
             ok &= check("habits rule text", [it["rule"] for it in cur_h["habits"]["items"] if it["candidate"]], ["デバッグ用の出力（console.log など）は残さない。"])
             ok &= check("habits rename dir", [it["dir"] for it in cur_h["habits"]["items"] if it["id"] == "rename"], ["total → sum"])
             ok &= check("habits cards rendered", page.evaluate("document.querySelectorAll('#details .habit').length"), 1)
+            ok &= check("habits guard shown", page.evaluate("document.querySelector('#details .habit').textContent.includes('機械で防ぐ')"), True)
+            page.select_option("#details select[data-mark=debug]", index=1)
+            mark_v = page.evaluate("document.querySelector('#details select[data-mark=debug]').value")
+            ok &= check("habits mark saved", page.evaluate("window.__seizon.snapshotOf(window.__seizon.current).marks"), {"debug": mark_v})
             # import の型の境界（Codex の指摘 #15・#16）：引用符の無い import・別名つきの一覧
             PAIRS = [("import foo as f, bar", "import foobar", "import"), ("import foo as f, bar", "import foo, bar", "other"), ("import os", "import os, sys", "import"),
                      ("from oldpkg.utils import foo", "from newpkg.utils import foo", "import"), ("from pkg import a", "from pkg import a, b", "other"),
@@ -212,8 +325,52 @@ with sync_playwright() as p:
             ok &= check("classifyPair import boundary js", js_ids, [w for _, _, w in PAIRS])
             ok &= check("classifyPair import boundary py", py_ids, [w for _, _, w in PAIRS])
             ok &= check("habits weak listed", page.evaluate("document.getElementById('details').textContent.includes('回数が足りない型')"), True)
-            # 頼み方の節：最初に出る・指示の冒頭が見える・隠すと消える・共有文に1行
-            ok &= check("sessions section first", page.evaluate("document.querySelector('#details .sec h2').textContent"), "頼み方と、残った1行あたりの出力トークン")
+            # 9) Codex と Gemini（logs3・multi）：Codex を入れてから Gemini を入れる＝別の AI なので足す。手計算 HAND_MULTI ＝ Python ＝ Chromium
+            page.click("#logClear")   # 前の Claude Code のログ（habits）を外してから（別の AI のログは足されるので）
+            ok &= check("log clear", page.evaluate("document.getElementById('logLoaded').hidden && window.__seizon.inputs.acc === null"), True)
+            page.set_input_files("#logInput", str(LOGS3 / "codex"))
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Codex 2件')", timeout=20000)
+            page.set_input_files("#logInput", str(LOGS3 / "gemini"))
+            page.wait_for_function("document.getElementById('logLoaded').textContent.includes('Antigravity 3件')", timeout=20000)
+            ok &= check("multi loaded both", "Codex 2件" in page.text_content("#logLoaded"), True)
+            page.set_input_files("#projInput", str(PROJ3))
+            page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'multi'", timeout=20000)
+            cur_m = page.evaluate(CURRENT)
+            exp_m = ref_seizon.run(sorted(LOGS3.rglob("*.jsonl")), PROJ3, strict=False)
+            for k in ("written", "alive", "rewritten", "human", "dropped", "edits", "sessions", "root", "uses", "gmSkipped", "tools", "period", "sessionStats", "files"):
+                ok &= check(f"multi js=py {k}", cur_m[k], exp_m[k])
+            for k, v in HAND_MULTI.items():
+                ok &= check(f"multi hand {k}", cur_m[k] if k != "rows" else [(r["sid"], r["tool"], r["first"], r["out"], r["msgs"], r["bash"], r["written"], r["alive"], r["perAlive"]) for r in cur_m["sessionStats"]["rows"]], v)
+            ok &= check("multi outGone", (cur_m["sessionStats"]["outTotal"], cur_m["sessionStats"]["outGone"]), (200, 59))
+            # 前回と比べる：前回が Claude の結果なら「AI」と書き、違いを注意する（Codex の指摘 PR #20）
+            snap_m = page.evaluate("window.__seizon.snapshotOf(window.__seizon.current)")
+            ok &= check("multi snapshot ai", (snap_m["ai"], snap_m["ais"]), ("AI", ["codex", "gemini"]))
+            prev_m = dict(snap_m, ai="Claude", savedAt="2026-09-01"); prev_m.pop("ais")
+            page.evaluate("s => window.__seizon.loadPrev(s)", prev_m)
+            ok &= check("multi compare warns other AI", page.evaluate("document.getElementById('details').textContent.includes('前回は Claude の結果、今回は Codex＋Antigravity の結果です')"), True)
+            page.click("#clearPrev")
+            # どちらも複数の AI でも、組が違えば注意する（Codex の指摘 PR #20：Claude＋Codex と Codex＋Antigravity は同じ「AI」ではない）
+            page.evaluate("s => window.__seizon.loadPrev(s)", dict(snap_m, ais=["claude", "codex"], savedAt="2026-09-01"))
+            ok &= check("multi compare warns other AI set", page.evaluate("document.getElementById('details').textContent.includes('前回は Claude＋Codex の結果、今回は Codex＋Antigravity の結果です')"), True)
+            page.click("#clearPrev")
+            page.evaluate("s => window.__seizon.loadPrev(s)", dict(snap_m, savedAt="2026-09-01"))
+            ok &= check("multi compare same AI set no warn", page.evaluate("document.getElementById('details').textContent.includes('書いた AI が違うので')"), False)
+            page.click("#clearPrev")
+            page.evaluate("s => window.__seizon.loadPrev(s)", dict(snap_m, savedAt="2026-09-01", since="2026-09-03T00:00:00.000Z"))
+            ok &= check("compare warns other since", page.evaluate("document.getElementById('details').textContent.includes('区切りが前回と違います')"), True)
+            page.click("#clearPrev")
+            ok &= check("multi card title", page.evaluate("document.getElementById('details').textContent.includes('Antigravity が書いた行')"), True)
+            ok &= check("multi label AI", "AI が書いた" in page.input_value("#shareText"), True)
+            # 同じ AI のログを入れ直すと置き換える（Codex だけになる）
+            page.set_input_files("#logInput", str(LOGS3 / "codex"))
+            page.wait_for_function("!document.getElementById('logLoaded').textContent.includes('Antigravity') && window.__seizon.current.written === 5", timeout=20000)
+            ok &= check("multi replace same tool", (page.evaluate("window.__seizon.current.written"), "Codex が書いた" in page.input_value("#shareText")), (5, True))
+            prev_c = dict(page.evaluate("window.__seizon.snapshotOf(window.__seizon.current)"), savedAt="2026-09-01")
+            page.evaluate("s => window.__seizon.loadPrev(s)", prev_c)
+            ok &= check("compare same AI keeps name", page.evaluate("[...document.querySelectorAll('#details .rows li')].some(li => li.textContent.includes('Codex が書いた行'))"), True)
+            page.click("#clearPrev")
+            # 会話の節：出る・指示の冒頭が見える・隠すと消える・共有文に1行
+            ok &= check("sessions section present", page.evaluate("[...document.querySelectorAll('#details .sec h2')].some(h => h.textContent === '出力が大きかった会話と、残った1行あたりの出力トークン')"), True)
             ok &= check("sessions prompt shown", page.evaluate("document.getElementById('details').textContent.includes('a.ts に listNotes を足して')"), False)  # habits プロジェクトには user text が無い
             page.set_input_files("#logInput", str(LOGS)); page.set_input_files("#projInput", str(PROJ))
             page.wait_for_function("document.getElementById('statusPill').textContent === 'あなたのコード' && window.__seizon.current.projectName === 'alpha'", timeout=20000)

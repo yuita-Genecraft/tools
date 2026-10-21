@@ -2,8 +2,8 @@
 """生存率（cc-seizon/app.html）の別実装。ブラウザ版と同じ規則で、同じ数字が出るかを突き合わせるためのもの。
 規則の正本は app.html のコメント。ここは写し（違いが出たらどちらかが間違い）。
 使い方: run(log_paths, project_dir, strict=False) -> dict"""
-import json, math, os, pathlib, re
-from datetime import datetime
+import math, json, os, pathlib, re
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Tokyo")   # e2e は Chromium のタイムゾーンを Asia/Tokyo にして揃える
@@ -61,7 +61,21 @@ def parse_ts(s):
         return None
 
 def new_acc():
-    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "resp": {}, "sessLink": []}
+    return {"uses": {}, "results": {}, "files": 0, "lines": 0, "bad": 0, "sess": {}, "msgSid": {}, "resp": {}, "sessLink": [],
+            "cur": new_file_state(""), "cxSeen": set(), "gem": {}, "gmSkipped": 0, "prompts": {}}
+
+def add_prompt(acc, sid, ts, text):
+    if not sid or ts is None or not text:
+        return
+    acc["prompts"].setdefault(sid, []).append({"ts": ts, "text": text})
+
+def new_file_state(path):
+    return {"path": str(path or ""), "sid": "", "cwd": ""}
+
+TOOL_NAME = {"claude": "Claude", "codex": "Codex", "gemini": "Gemini"}
+def tool_of(sid):
+    sid = str(sid)
+    return "codex" if sid.startswith("codex:") else "gemini" if sid.startswith("gemini:") else "claude"
 
 def resolve_sessions(acc):
     """app.html の resolveSessions と同じ：同じ uuid が別の sessionId で出たセッションを1つの会話にまとめる。代表＝いちばん早く始まった方（同時なら sid の文字列順）"""
@@ -97,13 +111,13 @@ def resolve_sessions(acc):
     return rep_of, merged
 
 RX_TAG = re.compile(r"<[^<>]{1,80}>")
-RX_RECORD = re.compile(r"^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|system-reminder)\b")
+RX_RECORD = re.compile(r"^\s*<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|system-reminder|task-notification|bash-input|bash-stdout|bash-stderr)\b")
 
-def prompt_head(text):
+def prompt_head(text, n=100):
     if RX_RECORD.match(text):
         return ""
     t = re.sub(r"\s+", " ", RX_TAG.sub(" ", str(text))).strip()
-    return t[:100] + "…" if len(t) > 100 else t
+    return t[:n] + "…" if len(t) > n else t
 
 def sess_of(acc, sid):
     s = acc["sess"].get(sid)
@@ -116,14 +130,20 @@ def handle_line(line, acc):
     acc["lines"] += 1
     if utf16len(line) < 40:
         return
-    if '"message"' not in line:
+    if '"message"' not in line and '"payload"' not in line and '"step_index"' not in line:
         return
     try:
         o = json.loads(line)
     except ValueError:
         acc["bad"] += 1
         return
-    if not isinstance(o, dict) or not isinstance(o.get("message"), dict):
+    if not isinstance(o, dict):
+        return
+    if not o.get("message") and isinstance(o.get("payload"), dict) and isinstance(o.get("type"), str):
+        handle_codex(o, acc); return
+    if not o.get("message") and isinstance(o.get("step_index"), (int, float)) and not isinstance(o.get("step_index"), bool) and isinstance(o.get("type"), str):
+        handle_gemini(o, acc); return
+    if not isinstance(o.get("message"), dict):
         return
     sid = o["sessionId"] if isinstance(o.get("sessionId"), str) else ""
     ts_raw = parse_ts(o.get("timestamp"))
@@ -149,6 +169,17 @@ def handle_line(line, acc):
                         break
         if h and ts_raw is not None and (sv["firstTs"] is None or ts_raw < sv["firstTs"]):
             sv["first"] = h; sv["firstTs"] = ts_raw
+        if not o.get("isMeta"):
+            full = ""
+            if isinstance(c, str):
+                full = prompt_head(c, 160)
+            elif isinstance(c, list):
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str):
+                        full = prompt_head(b["text"], 160)
+                        if full:
+                            break
+            add_prompt(acc, sid, ts_raw, full)
     if not isinstance(c, list):
         return
     if o.get("type") == "assistant":
@@ -168,14 +199,18 @@ def handle_line(line, acc):
             else:
                 sv = sess_of(acc, sid)
                 if r is None:
-                    r = {"sid": sid, "out": 0, "inp": 0, "cache": 0}; acc["resp"][mid] = r; sv["msgs"] += 1
+                    r = {"sid": sid, "out": 0, "inp": 0, "cache": 0, "cr": 0, "cw": 0, "cw1h": 0, "ts": ts, "side": bool(o.get("isSidechain")), "u": False}; acc["resp"][mid] = r; sv["msgs"] += 1
                 u = o["message"].get("usage")
                 if isinstance(u, dict):
+                    r["u"] = True
                     for k, v in (("out", u.get("output_tokens")), ("inp", u.get("input_tokens")),
                                  ("cache", (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0))):
                         n = v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 0
                         if n > r[k]:
                             sv[k] += n - r[k]; r[k] = n
+                    cc = u.get("cache_creation") if isinstance(u.get("cache_creation"), dict) else {}
+                    r["cr"] = max(r["cr"], pos_num(u.get("cache_read_input_tokens"))); r["cw"] = max(r["cw"], pos_num(u.get("cache_creation_input_tokens")))
+                    r["cw1h"] = max(r["cw1h"], pos_num(cc.get("ephemeral_1h_input_tokens")))
                 for b in c:
                     if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash":
                         sv["bash"] += 1
@@ -209,6 +244,203 @@ def handle_line(line, acc):
                     tur["file"] = {"content": t["file"]["content"]}
             acc["results"][b["tool_use_id"]] = {"isError": b.get("is_error") is True, "text": text if RX_NUMBERED.match(text) else "", "tur": tur}
 
+# ---------- Codex・Gemini（app.html の handleCodex・handleGemini・finalizeGemini と同じ） ----------
+def pos_num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else 0
+
+def abs_path(p, cwd):
+    p = norm_path(p)
+    return p if (p.startswith("/") or re.match(r"^[A-Za-z]:/", p) or not cwd) else norm_path(cwd + "/" + p)
+
+def diff_sides(diff):
+    old_l, new_l = [], []
+    in_hunk = False
+    for l in str(diff).split("\n"):
+        if l.startswith("@@"):
+            in_hunk = True; continue
+        if not in_hunk or l.startswith("\\"):
+            continue
+        if l.startswith("+"):
+            new_l.append(l[1:])
+        elif l.startswith("-"):
+            old_l.append(l[1:])
+        else:
+            t = l[1:] if l.startswith(" ") else l
+            old_l.append(t); new_l.append(t)
+    return "\n".join(old_l), "\n".join(new_l)
+
+def add_use(acc, uid, name, inp, ts, sid, cwd, tur):
+    if uid in acc["uses"]:
+        return
+    acc["uses"][uid] = {"id": uid, "name": name, "input": inp, "ts": ts, "sid": sid, "cwd": cwd or ""}
+    acc["results"][uid] = {"isError": False, "text": "", "tur": tur}
+
+def sess_touch(acc, sid, ts, cwd):
+    sv = sess_of(acc, sid)
+    if ts is not None:
+        if sv["start"] is None or ts < sv["start"]:
+            sv["start"] = ts
+        if sv["end"] is None or ts > sv["end"]:
+            sv["end"] = ts
+    if not sv["cwd"] and cwd:
+        sv["cwd"] = cwd
+    return sv
+
+def first_prompt(sv, h, ts):
+    if h and ts is not None and (sv["firstTs"] is None or ts < sv["firstTs"]):
+        sv["first"] = h; sv["firstTs"] = ts
+
+def handle_codex(o, acc):
+    st, p = acc["cur"], o["payload"]
+    if o["type"] == "session_meta":
+        if not st["sid"] and isinstance(p.get("id"), str) and p["id"]:
+            st["sid"] = "codex:" + p["id"]
+        if not st["cwd"] and isinstance(p.get("cwd"), str):
+            st["cwd"] = norm_path(p["cwd"])
+    elif o["type"] == "turn_context" and isinstance(p.get("cwd"), str):
+        st["cwd"] = norm_path(p["cwd"])
+    sid = st["sid"] or ("codex:" + (st["path"] or "?"))
+    ts = parse_ts(o.get("timestamp"))
+    sv = sess_touch(acc, sid, ts, st["cwd"])
+    tstr = o["timestamp"] if isinstance(o.get("timestamp"), str) else ""
+    if o["type"] == "token_usage_record":
+        u = p.get("usage")
+        rid = "cx:" + (p["response_id"] if isinstance(p.get("response_id"), str) and p["response_id"] else sid + ":" + tstr)
+        if not isinstance(u, dict) or rid in acc["resp"]:
+            return
+        cached = pos_num(u.get("cached_input_tokens"))
+        acc["resp"][rid] = {"sid": sid, "ts": ts, "out": pos_num(u.get("output_tokens")), "inp": max(0, pos_num(u.get("input_tokens")) - cached), "cr": cached,
+                            "cw": pos_num(u.get("cache_write_input_tokens")), "cw1h": 0, "side": False}
+        sv["msgs"] += 1
+        sv["out"] += pos_num(u.get("output_tokens")); sv["inp"] += max(0, pos_num(u.get("input_tokens")) - cached); sv["cache"] += cached + pos_num(u.get("cache_write_input_tokens"))
+        return
+    it = p.get("item")
+    if o["type"] != "event_msg" or p.get("type") != "item_completed" or not isinstance(it, dict):
+        return
+    iid = it["id"] if isinstance(it.get("id"), str) and it["id"] else sid + ":" + tstr + ":" + str(it.get("type"))
+    if iid in acc["cxSeen"]:
+        return
+    acc["cxSeen"].add(iid)
+    if it.get("type") == "UserMessage":
+        c = it.get("content"); h = ""
+        if isinstance(c, str):
+            h = prompt_head(c)
+        elif isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and isinstance(b.get("text"), str):
+                    h = prompt_head(b["text"])
+                    if h:
+                        break
+        first_prompt(sv, h, ts)
+        full = ""
+        if isinstance(c, str):
+            full = prompt_head(c, 160)
+        elif isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and isinstance(b.get("text"), str):
+                    full = prompt_head(b["text"], 160)
+                    if full:
+                        break
+        add_prompt(acc, sid, ts, full)
+    elif it.get("type") == "CommandExecution":
+        sv["bash"] += 1
+    elif it.get("type") == "FileChange" and it.get("status", "completed") == "completed" and isinstance(it.get("changes"), dict):
+        for i, fp in enumerate(it["changes"].keys()):
+            ch = it["changes"][fp]; uid = "cx:" + iid + ":" + str(i)
+            if not isinstance(ch, dict):
+                continue
+            path = abs_path(ch["move_path"] if isinstance(ch.get("move_path"), str) and ch["move_path"] else fp, st["cwd"])
+            if ch.get("type") == "add" and isinstance(ch.get("content"), str):
+                add_use(acc, uid, "Write", {"file_path": path, "content": ch["content"]}, ts, sid, st["cwd"], {"type": "create"})
+            elif ch.get("type") == "update" and isinstance(ch.get("unified_diff"), str):
+                old_s, new_s = diff_sides(ch["unified_diff"])
+                add_use(acc, uid, "Edit", {"file_path": path, "old_string": old_s, "new_string": new_s}, ts, sid, st["cwd"], None)
+            elif ch.get("type") == "delete":
+                add_use(acc, uid, "Write", {"file_path": path, "content": ""}, ts, sid, st["cwd"], {"type": "update"})
+
+def gem_rank(path):
+    return 0 if "transcript_full" in path else 2 if "chunks" in path else 1
+
+def handle_gemini(o, acc):
+    path = acc["cur"]["path"]
+    m = re.search(r"brain/([0-9A-Za-z-]{8,})", path)
+    conv = m.group(1) if m else (path or "?")
+    key = (conv, o["step_index"])
+    truncated = isinstance(o.get("truncated_fields"), list) and "tool_calls" in o["truncated_fields"]
+    score = (10 if truncated else 0) + gem_rank(path)
+    prev = acc["gem"].get(key)
+    if prev is None or score < prev["score"]:
+        acc["gem"][key] = {"score": score, "o": o, "conv": conv}
+
+def gem_value(v, wrapped):
+    if not isinstance(v, str):
+        return None
+    if not wrapped:
+        return v
+    try:
+        x = json.loads(v)
+    except ValueError:
+        return None
+    return x if isinstance(x, str) else None
+
+def finalize_gemini(acc):
+    for uid in [k for k in acc["uses"] if k.startswith("gm:")]:
+        del acc["uses"][uid]; acc["results"].pop(uid, None)
+    for sid in [k for k in acc["sess"] if k.startswith("gemini:")]:
+        del acc["sess"][sid]
+    for sid in [k for k in acc["prompts"] if k.startswith("gemini:")]:
+        del acc["prompts"][sid]
+    for k in [k for k in acc["resp"] if isinstance(k, str) and k.startswith("gm:")]:
+        del acc["resp"][k]
+    acc["gmSkipped"] = 0
+    for g in sorted(acc["gem"].values(), key=lambda g: (g["conv"], g["o"]["step_index"])):
+        o, conv = g["o"], g["conv"]
+        sid = "gemini:" + conv
+        ts = parse_ts(o.get("created_at"))
+        sv = sess_touch(acc, sid, ts, "")
+        if o["type"] == "USER_INPUT" and isinstance(o.get("content"), str):
+            first_prompt(sv, prompt_head(o["content"]), ts)
+            add_prompt(acc, sid, ts, prompt_head(o["content"], 160))
+        if o["type"] != "PLANNER_RESPONSE":
+            continue
+        sv["msgs"] += 1
+        sv["out"] += pos_num(o.get("output_tokens")); sv["inp"] += pos_num(o.get("input_tokens")); sv["cache"] += pos_num(o.get("cache_read_tokens"))
+        acc["resp"]["gm:" + conv + ":" + str(o["step_index"])] = {"sid": sid, "ts": ts, "out": pos_num(o.get("output_tokens")), "inp": pos_num(o.get("input_tokens")),
+                                                                    "cr": pos_num(o.get("cache_read_tokens")), "cw": 0, "cw1h": 0, "side": False}
+        calls = o.get("tool_calls") if isinstance(o.get("tool_calls"), list) else []
+        for i, t in enumerate(calls):
+            if not isinstance(t, dict):
+                continue
+            a = t.get("args")
+            if isinstance(a, str):
+                try:
+                    a = json.loads(a)
+                except ValueError:
+                    a = None
+            if not isinstance(a, dict):
+                continue
+            if t.get("name") == "run_command":
+                sv["bash"] += 1
+                c = gem_value(a.get("Cwd"), isinstance(a.get("Cwd"), str) and a["Cwd"].startswith('"'))
+                if not sv["cwd"] and c:
+                    sv["cwd"] = norm_path(c)
+                continue
+            if t.get("name") not in ("write_to_file", "replace_file_content"):
+                continue
+            wrapped = isinstance(a.get("TargetFile"), str) and a["TargetFile"].startswith('"')
+            f = gem_value(a.get("TargetFile"), wrapped)
+            uid = "gm:" + conv + ":" + str(o["step_index"]) + ":" + str(i)
+            if t["name"] == "write_to_file":
+                content = gem_value(a.get("CodeContent"), wrapped)
+                if not f or content is None:
+                    acc["gmSkipped"] += 1; continue
+                add_use(acc, uid, "Write", {"file_path": abs_path(f, sv["cwd"]), "content": content}, ts, sid, sv["cwd"], None)
+            else:
+                old_s, new_s = gem_value(a.get("TargetContent"), wrapped), gem_value(a.get("ReplacementContent"), wrapped)
+                if not f or old_s is None or new_s is None:
+                    acc["gmSkipped"] += 1; continue
+                add_use(acc, uid, "Edit", {"file_path": abs_path(f, sv["cwd"]), "old_string": old_s, "new_string": new_s}, ts, sid, sv["cwd"], None)
+
 def read_content(res):
     f = (res["tur"] or {}).get("file") if res["tur"] else None
     if isinstance(f, dict) and isinstance(f.get("content"), str):
@@ -218,7 +450,8 @@ def read_content(res):
         return ""
     return "\n".join(RX_NUMBERED.sub("", l, count=1) for l in t.split("\n"))
 
-def read_log_file(path, acc):
+def read_log_file(path, acc, rel=None):
+    acc["cur"] = new_file_state(rel if rel is not None else str(path))
     text = path.read_bytes().decode("utf-8", errors="replace")
     if text.startswith("﻿"):
         text = text[1:]
@@ -239,9 +472,17 @@ def build_events(acc):
 
 def apply_events(evs, acc, strict):
     claude, known = {}, {}
+    rw, added_by = {}, {}   # 書き直し（app.html の applyEvents と同じ）
+    def note_gone(p, k, ev, rec):
+        key = (ev["seq"], p)
+        e = rw.get(key)
+        if e is None:
+            e = {"path": p, "ts": ev["ts"], "sid": ev["sid"], "seq": ev["seq"], "gone": [], "goneTs": []}; rw[key] = e
+        e["gone"].append(k); e["goneTs"].append(rec["ts"])
     def known_add(p, keys):
         known.setdefault(p, set()).update(keys)
     def claude_add(p, k, ev):
+        added_by.setdefault((ev["seq"], p), []).append(k)
         m = claude.setdefault(p, {})
         if k in m:
             rec = m[k]
@@ -250,9 +491,11 @@ def apply_events(evs, acc, strict):
             rec["removed"] = False
         else:
             m[k] = {"ts": ev["ts"], "sid": ev["sid"], "seq": ev["seq"], "removed": False}
-    def claude_remove(p, k):
+    def claude_remove(p, k, ev):
         rec = claude.get(p, {}).get(k)
         if rec:
+            if not rec["removed"]:
+                note_gone(p, k, ev, rec)
             rec["removed"] = True
     def apply_edit(p, old_s, new_s, ev):
         # 並びを保つ（JS の Set と同じ挿入順）＝直し癖の hunk は Claude が書いた順に依存する。set() だと PYTHONHASHSEED で順が変わる
@@ -262,7 +505,7 @@ def apply_events(evs, acc, strict):
                 claude_add(p, k, ev)
         for k in old_k:
             if k not in new_k:
-                claude_remove(p, k)
+                claude_remove(p, k, ev)
         known_add(p, new_k)
     applied = []
     for ev in evs:
@@ -306,12 +549,15 @@ def apply_events(evs, acc, strict):
                     claude_add(p, k, ev)
             for k, rec in claude.get(p, {}).items():
                 if k not in cur:
+                    if not rec["removed"]:
+                        note_gone(p, k, ev, rec)
                     rec["removed"] = True
             known[p] = set(cur)
         else:
             continue
         applied.append({"path": p, "ts": ev["ts"], "sid": ev["sid"], "name": ev["name"], "cwd": ev["cwd"]})
-    return claude, applied
+    rewrites = [dict(e, added=added_by.get(key, [])) for key, e in rw.items()]
+    return claude, applied, rewrites
 
 def base_name(p):
     return p.split("/")[-1] or p
@@ -609,7 +855,7 @@ def session_stats(per_sess, sess):
         gone = ps["written"] - ps["alive"]
         out_gone_repo = jround(out_repo * gone / ps["written"])
         out_total += out_repo; out_gone += out_gone_repo
-        rows.append({"sid": sid, "first": sv["first"] or "", "start": date_key(sv["start"]) if sv["start"] is not None else "", "end": date_key(sv["end"]) if sv["end"] is not None else "",
+        rows.append({"sid": sid, "tool": tool_of(sid), "first": sv["first"] or "", "start": date_key(sv["start"]) if sv["start"] is not None else "", "end": date_key(sv["end"]) if sv["end"] is not None else "",
                      "out": sv["out"], "outRepo": out_repo, "share": share, "msgs": sv["msgs"], "bash": sv["bash"], "members": sv.get("members", 1), "edits": ps["edits"],
                      "written": ps["written"], "alive": ps["alive"], "rewritten": ps["rewritten"], "human": ps["human"], "dropped": ps["dropped"],
                      "perAlive": jround(out_repo / ps["alive"]) if ps["alive"] else None})
@@ -620,9 +866,62 @@ def session_stats(per_sess, sess):
     return {"outTotal": out_total, "outGone": out_gone, "goneShare": (out_gone / out_total) if out_total else 0, "rows": rows,
             "costly": [r["sid"] for r in costly], "cheap": [r["sid"] for r in cheap]}
 
-def analyze(acc, project, project_name, strict):
+CTX_EDGES = [50000, 100000, 150000, 200000, 400000, 700000]
+CTX_LABELS = ["〜5万", "5〜10万", "10〜15万", "15〜20万", "20〜40万", "40〜70万", "70万〜"]
+GAP_MS = 3600 * 1000
+
+def token_stats(acc):
+    """app.html の tokenStats と同じ（文脈とトークン・ログだけ）"""
+    rs = [r for r in acc["resp"].values() if r.get("ts") is not None and r.get("u") is not False]   # usage の無い応答は数えない
+    ctx_of = lambda r: (r.get("inp") or 0) + (r.get("cr") or 0) + (r.get("cw") or 0)
+    bins = [{"label": l, "n": 0} for l in CTX_LABELS]
+    by = {}; w = {"out": 0, "inp": 0, "cw": 0, "cr": 0}
+    over = 0; tmin = None; tmax = None
+    for r in rs:
+        c = ctx_of(r); i = 0
+        while i < len(CTX_EDGES) and c >= CTX_EDGES[i]:
+            i += 1
+        bins[i]["n"] += 1
+        v = by.setdefault(tool_of(r["sid"]), {"n": 0, "over": 0, "resumes": 0, "matched": 0})
+        v["n"] += 1
+        if c >= 150000:
+            v["over"] += 1; over += 1
+        w["out"] += (r.get("out") or 0) * 5; w["inp"] += r.get("inp") or 0
+        w["cw"] += ((r.get("cw") or 0) - (r.get("cw1h") or 0)) * 1.25 + (r.get("cw1h") or 0) * 2; w["cr"] += (r.get("cr") or 0) * 0.1
+        tmin = r["ts"] if tmin is None or r["ts"] < tmin else tmin
+        tmax = r["ts"] if tmax is None or r["ts"] > tmax else tmax
+    rep_of = resolve_sessions(acc)[0]   # 再開で写った応答は読む順で sid が変わる＝つないだ会話の代表でまとめる
+    by_sid = {}
+    for r in rs:
+        if not r.get("side"):
+            by_sid.setdefault(rep_of.get(r["sid"], r["sid"]), []).append(r)
+    resumes = 0; matched = []
+    for sid in sorted(by_sid):
+        a = sorted(by_sid[sid], key=lambda x: (x["ts"], ctx_of(x)))
+        for i in range(1, len(a)):
+            p, q = a[i - 1], a[i]
+            if q["ts"] - p["ts"] <= GAP_MS:
+                continue
+            resumes += 1; by[tool_of(sid)]["resumes"] += 1
+            prev = ctx_of(p)
+            if prev > 20000 and (q.get("cr") or 0) < 0.2 * prev and (q.get("cw") or 0) > 0.5 * prev:
+                matched.append({"sid": sid, "ts": q["ts"], "gapMin": jround((q["ts"] - p["ts"]) / 60000), "prevCtx": prev, "cr": q.get("cr") or 0, "cw": q.get("cw") or 0})
+                by[tool_of(sid)]["matched"] += 1
+    cws = sorted(m["cw"] for m in matched)
+    latest = sorted(matched, key=lambda m: (-m["ts"], m["sid"]))[0] if matched else None
+    wt = w["out"] + w["inp"] + w["cw"] + w["cr"]
+    iso = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(ms) % 1000:03d}Z"
+    return {"n": len(rs), "over": over, "bins": bins, "by": by,
+            "period": {"start": date_key(tmin), "end": date_key(tmax)} if rs else None,
+            "resumes": resumes, "matched": len(matched), "matchedMedianCw": cws[len(cws) // 2] if cws else 0,
+            "latest": {"sid": latest["sid"], "tool": tool_of(latest["sid"]), "ts": iso(latest["ts"]), "gapMin": latest["gapMin"], "prevCtx": latest["prevCtx"], "cr": latest["cr"], "cw": latest["cw"]} if latest else None,
+            "weighted": {k: math.floor(w[k] / wt * 1e6 + 0.5) / 1e6 for k in ("out", "inp", "cw", "cr")} if wt else None}   # 足す順で末尾の桁が揺れる＝6桁に丸める（app.html と同じ式）
+
+def analyze(acc, project, project_name, strict, since=None):
+    finalize_gemini(acc)
     evs = build_events(acc)
-    claude, applied = apply_events(evs, acc, strict)
+    claude, applied, rewrites = apply_events(evs, acc, strict)
+    frm = since if since is not None else float("-inf")
     cwds = {}
     for a in applied:
         if a["cwd"]:
@@ -634,7 +933,9 @@ def analyze(acc, project, project_name, strict):
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
          "written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "droppedWritten": 0, "aiLines": 0,
          "period": None, "files": [], "top": [], "examples": {"alive": None, "human": None}, "rootCandidates": candidates, "rootMatched": matched,
-         "habits": {"lines": 0, "matched": 0, "items": []},
+         "habits": {"lines": 0, "matched": 0, "items": []}, "tools": {}, "gmSkipped": acc["gmSkipped"],
+         "since": datetime.fromtimestamp(since / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(since) % 1000:03d}Z" if since is not None else None,
+         "rewriteTotal": {"events": 0, "lines": 0, "files": 0}, "rewriteFiles": [], "rewriteEvents": [],
          "sessionStats": {"outTotal": 0, "outGone": 0, "goneShare": 0, "rows": [], "costly": [], "cheap": []}}
     if not root:
         return R
@@ -651,7 +952,7 @@ def analyze(acc, project, project_name, strict):
             v = {"written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "edits": 0, "writtenAll": 0}; per_sess[sid] = v
         return v
     for a in applied:
-        if not a["path"].startswith(prefix):
+        if not a["path"].startswith(prefix) or a["ts"] < frm:
             continue
         R["edits"] += 1; sids.add(rep_sid(a["sid"])); ps_of(a["sid"])["edits"] += 1
         tmin = a["ts"] if tmin is None or a["ts"] < tmin else tmin
@@ -663,13 +964,16 @@ def analyze(acc, project, project_name, strict):
     alive_c, human_c = [], []
     habit_in = []   # 直し癖の材料（app.html の habitIn と同じ）
     seen_rel = set()
-    for p, m in claude.items():
+    for p, m_all in claude.items():
         if not p.startswith(prefix):
             R["otherProjectFiles"] += 1
             continue
+        m = m_all if since is None else {k: rec for k, rec in m_all.items() if rec["ts"] >= frm}
         rel = p[len(prefix):]
         seen_rel.add(rel)
         text = project.get(rel)
+        if not m and text is None:
+            continue
         # 行は「種類」で数える（同じ内容の行は1つ）＝app.html と同じ
         cur_set = set() if text is None else set(line_keys(text, strict))
         row = {"file": rel, "exists": text is not None, "lines": len(cur_set), "written": len(m), "alive": 0, "rewritten": 0, "human": 0, "ai": 0}
@@ -705,6 +1009,16 @@ def analyze(acc, project, project_name, strict):
         R["projectLines"] += n
         if rel not in seen_rel:
             R["files"].append({"file": rel, "exists": True, "lines": n, "written": 0, "alive": 0, "rewritten": 0, "human": 0, "ai": 0})
+    # AI ごとの内訳（app.html と同じ）
+    for a in applied:
+        if a["path"].startswith(prefix):
+            R["tools"].setdefault(tool_of(a["sid"]), {"written": 0, "alive": 0, "edits": 0, "sessions": 0})["edits"] += 1
+    for sid in sids:
+        R["tools"].setdefault(tool_of(sid), {"written": 0, "alive": 0, "edits": 0, "sessions": 0})["sessions"] += 1
+    for sid, ps in per_sess.items():
+        v = R["tools"].get(tool_of(sid))
+        if v is not None:
+            v["written"] += ps["written"]; v["alive"] += ps["alive"]
     R["files"].sort(key=lambda f: (-f["written"], -f["lines"], f["file"]))
     R["missingFiles"].sort(key=lambda f: (-f["written"], f["file"]))
     assign_aliases(R)
@@ -716,9 +1030,41 @@ def analyze(acc, project, project_name, strict):
     R["habits"] = analyze_habits(habit_in)
     for m in claude.values():
         for rec in m.values():
+            if rec["ts"] < frm:
+                continue
             ps = per_sess.get(rep_sid(rec.get("sid", "")))
             if ps:
                 ps["writtenAll"] += 1
+    # 書き直しの集中（app.html と同じ）
+    rw_in = [e for e in rewrites if e["path"].startswith(prefix) and e["ts"] >= frm]
+    if frm != float("-inf"):   # 区切りより前に入った行の書き直しは数えない（app.html と同じ）
+        rw_in = [dict(e, gone=[k for k, t in zip(e["gone"], e["goneTs"]) if t >= frm]) for e in rw_in]
+        rw_in = [e for e in rw_in if e["gone"]]
+    by_file = {}
+    for e in rw_in:
+        f = e["path"][len(prefix):]
+        v = by_file.setdefault(f, {"file": f, "events": 0, "lines": 0, "sids": set()})
+        v["events"] += 1; v["lines"] += len(e["gone"]); v["sids"].add(rep_sid(e["sid"]))
+    alias_of = {f["file"]: f["alias"] for f in R["files"] + R["missingFiles"]}
+    ranked = sorted(by_file.values(), key=lambda v: (-v["events"], -v["lines"], v["file"]))
+    R["rewriteTotal"] = {"events": len(rw_in), "lines": sum(len(e["gone"]) for e in rw_in), "files": len(by_file)}
+    R["rewriteFiles"] = [{"file": v["file"], "alias": alias_of.get(v["file"]) or "", "events": v["events"], "lines": v["lines"], "sessions": len(v["sids"])} for v in ranked[:5]]
+    top_files = {v["file"] for v in ranked[:3]}
+    iso = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(ms) % 1000:03d}Z"
+    prompts = {}
+    evs_out = []
+    for e in sorted([e for e in rw_in if e["path"][len(prefix):] in top_files], key=lambda e: (e["ts"], e["seq"], e["path"])):
+        ps = prompts.get(e["sid"])
+        if ps is None:
+            ps = sorted(acc["prompts"].get(e["sid"], []), key=lambda x: x["ts"]); prompts[e["sid"]] = ps
+        pr = None
+        for i in range(len(ps) - 1, -1, -1):
+            if ps[i]["ts"] <= e["ts"]:
+                pr = {"text": ps[i]["text"], "minutes": jround((e["ts"] - ps[i]["ts"]) / 60000), "first": i == 0}
+                break
+        evs_out.append({"file": e["path"][len(prefix):], "ts": iso(e["ts"]), "sid": rep_sid(e["sid"]), "tool": tool_of(e["sid"]), "goneN": len(e["gone"]), "addedN": len(e["added"]),
+                        "gone": e["gone"][:3], "added": e["added"][:3], "prompt": pr})
+    R["rewriteEvents"] = evs_out
     R["sessionStats"] = session_stats(per_sess, sess_merged)
     return R
 
@@ -743,7 +1089,7 @@ def load_project(project_dir):
     project_dir = pathlib.Path(project_dir)
     project = {}
     for p in sorted(project_dir.rglob("*")):
-        if not p.is_file():
+        if p.is_symlink() or not p.is_file():   # ブラウザのフォルダ選択はシンボリックリンクを渡さない（実データ：AGENTS.md → GEMINI.md）
             continue
         rel = p.relative_to(project_dir).as_posix()
         if not project_filter(rel, p.stat().st_size):
@@ -756,10 +1102,14 @@ def load_project(project_dir):
         project[rel] = text
     return project
 
-def run_texts(log_texts, project, project_name, strict=False):
+def run_texts(log_texts, project, project_name, strict=False, since=None):
     """文字列から同じ計算（app.html の analyzeTexts と対）。log_texts: [str]、project: {rel: text}"""
     acc = new_acc()
     for text in log_texts:
+        path = ""
+        if isinstance(text, tuple):
+            path, text = text
+        acc["cur"] = new_file_state(path)
         parts = text.split("\n")
         if parts and parts[-1] == "":
             parts.pop()
@@ -770,17 +1120,26 @@ def run_texts(log_texts, project, project_name, strict=False):
     for rel, text in project.items():
         if project_filter(rel, utf16len(text)) and "\x00" not in text[:4096]:
             pm[norm_path(rel)] = text
-    return analyze(acc, pm, project_name or "", strict)
+    return analyze(acc, pm, project_name or "", strict, since)
 
-def run(log_paths, project_dir, strict=False):
+def load_acc(log_paths):
     acc = new_acc()
     for p in log_paths:
         p = pathlib.Path(p)
         if p.suffix.lower() != ".jsonl" or any(seg in LOG_SKIP_DIRS for seg in p.parts):
             continue
         read_log_file(p, acc)
+    return acc
+
+def run(log_paths, project_dir, strict=False, since=None):
+    acc = load_acc(log_paths)
     project = load_project(project_dir)
-    return analyze(acc, project, pathlib.Path(project_dir).name, strict)
+    return analyze(acc, project, pathlib.Path(project_dir).name, strict, since)
+
+def run_tokens(log_paths):
+    acc = load_acc(log_paths)
+    finalize_gemini(acc)
+    return token_stats(acc)
 
 if __name__ == "__main__":
     import sys

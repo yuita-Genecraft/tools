@@ -185,4 +185,11 @@ t("r4：スプレッド（{ ...base, apiKey: \"AIza…\" }）は直下のプロ�
 t("r4：計算されたキー（{ [k]: 1, apiKey: \"AIza…\" }）も warn", (() => { const F = unsureOf({ "src/fb.ts": `const c = { [k]: 1, apiKey: "${AK}" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
 t("r4：Firebase の設定のキーが並ぶ { } で apiKey 以外のプロパティに AIza…＝言い切らず warn", (() => { const F = unsureOf({ "src/fb.ts": `const c = { key: "${AK}", authDomain: "d" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
 t("r4：読めた Firebase の設定は今までどおり無言（Gemini の痕跡があっても）", (() => { const F = unsureOf({ "src/fb.ts": cfgWith(`"${AK}"`) }); return [geminiTitles(F), F.warn.length, F.info.length]; })(), [[], 0, 1]);
+// ---- レビュー r5（BLOCK）：文字列の終端のエスケープ・別名の呼び出し
+t("r5-1：SDK の引数の文字列の \\\" は終端ではない（連結の直書き扱いにしない・レビューの例そのまま）", (() => { const F = unsureOf({ "src/a.ts": `new GoogleGenAI("${AK}\\",)" + suffix);\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r5-1：エスケープされた \\ で終わる文字列（\"AIza…\\\\\"）は本当の終端として danger", geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenAI("${AK}\\\\");\n` })).length, 1);
+t("r5-1：閉じない文字列は読み切れない＝warn", (() => { const F = unsureOf({ "src/a.ts": `new GoogleGenAI("${AK}\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r5-2：$GoogleGenAI(\"AIza…\") は別の名前＝danger にしない（レビューの例そのまま）", (() => { const F = unsureOf({ "src/a.ts": `$GoogleGenAI("${AK}");\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r5-2：_GoogleGenAI(・xGoogleGenAI( も別の名前", ["_GoogleGenAI", "xGoogleGenAI", "MyGoogleGenerativeAI"].map((n) => geminiTitles(unsureOf({ "src/a.ts": `${n}("${AK}");\n` })).length), [0, 0, 0]);
+t("r5-2：名前空間つき（genai.GoogleGenAI(\"AIza…\")）は SDK の呼び出しとして danger（今の扱いのまま）", geminiTitles(unsureOf({ "src/a.ts": `new genai.GoogleGenAI("${AK}");\n` })).length, 1);
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

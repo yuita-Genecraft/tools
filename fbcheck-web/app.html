@@ -196,7 +196,8 @@ const TEXT_EXT = new Set([
 const MAX_BYTES = 2 * 1024 * 1024;
 const GEMINI_TRACE = /@google\/generative-ai|@google\/genai|generativelanguage\.googleapis\.com|GoogleGenerativeAI\(|GoogleGenAI\(/;
 const AIZA_KEY = /AIza[A-Za-z0-9_\-]{10,}/;
-const GEMINI_CTOR_OPEN = /\b(?:GoogleGenerativeAI|GoogleGenAI)\(\s*$/;   // 痕跡の一覧（GEMINI_TRACE）と同じ呼び出しの名前
+// 痕跡の一覧（GEMINI_TRACE）と同じ呼び出しの名前。前の文字が識別子の文字（英数字・_・$）でない時だけ一致（$GoogleGenAI( は別の名前）。.GoogleGenAI(（名前空間つき）は SDK の呼び出しとして扱う（danger 側）
+const GEMINI_CTOR_OPEN = /(?:^|[^\w$])(?:GoogleGenerativeAI|GoogleGenAI)\(\s*$/;
 const FIREBASE_CONFIG_KEYS = new Set(["authDomain", "projectId", "storageBucket", "messagingSenderId", "appId", "measurementId", "databaseURL"]);
 // 文字列・コメントを読み飛ばしながら { } の組を取り、各 { } の直下のプロパティ名と、文字列の値の範囲を集める。
 // 括弧が合わない・閉じないコメントなど、読み切れない時は null（呼ぶ側は「Firebase の設定ではない」＝除外しない側に倒す）
@@ -253,8 +254,11 @@ function objectRanges(text) {
 function classifyAiza(text, at, cache) {
   // Gemini の SDK の生成の呼び出しの第1引数に、引用符の文字列で AIza… が直接入る形（new GoogleGenerativeAI("AIza…")・new GoogleGenAI("AIza…")）は、Firebase の設定ではないと読める典型
   if (/["']/.test(text[at - 1] || "") && GEMINI_CTOR_OPEN.test(text.slice(Math.max(0, at - 80), at - 1))) {
-    const q = text[at - 1], e = text.indexOf(q, at);
-    if (e > 0 && /^\s*[,)]/.test(text.slice(e + 1, e + 40)) && !/\n/.test(text.slice(at, e))) return "other";
+    // 文字列の終端は、\ の次の文字を飛ばしながら探す（\" は終端ではない）。改行・ファイルの終わりまでに閉じなければ読み切れない＝下の既定（unknown）
+    const q = text[at - 1];
+    let e = at;
+    while (e < text.length && text[e] !== q && text[e] !== "\n") e += text[e] === "\\" ? 2 : 1;
+    if (e < text.length && text[e] === q && /^\s*[,)]/.test(text.slice(e + 1, e + 40))) return "other";
   }
   if (cache.ranges === undefined) cache.ranges = objectRanges(text);
   if (!cache.ranges) return "unknown";

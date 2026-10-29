@@ -203,7 +203,8 @@ t("g-4：混在（&& の片方だけ読めない）は判定できなかった�
 t("g-5：1つの比較・型の検査・false は無言", ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.auth.token.admin == true", "request.auth.uid == \"alice\"", "request.resource.data.name is string", "resource.data.public == true", "false"].map((c) => UR(c).length), [0, 0, 0, 0, 0, 0, 0]);
 t("g-6：true を含む &&・|| は true として扱わない（全体がちょうど true の時だけ danger）", [UR("true && request.auth.uid == \"alice\"").length, UR("true || someFunction()").length, UR("true && request.auth.uid == null").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth.uid == \"alice\";") }), "danger"), titles(run({ "firestore.rules": FS("allow read, write: if true || someFunction();") }), "danger")], [1, 1, 1, [], []]);
 t("g-7：danger の判定（全体がちょうど true・条件なし・auth 全体・期限）は変わらない", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1]);
-t("g-8：FBCHECK_VERSION は 0.3.2", /const FBCHECK_VERSION = "0\.3\.2";/.test(src), true);
+t("g-8：FBCHECK_VERSION は 0.3.3", /const FBCHECK_VERSION = "0\.3\.3";/.test(src), true);
+t("判定できなかった行の説明は、次の行に続く条件（今は読める）を挙げず、関数・括弧・&&・||・; で終わらない文を挙げる", (() => { const w = unresolvedOf("allow read: if f();")[0].why; return [w.includes("条件が次の行にある"), w.includes("&&"), w.includes("; で終わっていない")]; })(), [false, true, true]);
 // ---- 表から機械的に作る試験（レビュー r1 の指摘：手で思いついた例だけにしない）。項 × つなぎ × 改行の位置 の全組み合わせ
 {
   const READ = ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.resource.data.name is string", "request.auth.uid == \"alice\"", "false"];

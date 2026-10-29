@@ -148,4 +148,16 @@ t("r1-2：同じ行（配布物）の firebaseConfig と Gemini でも Gemini �
 t("r1-2：Gemini の鍵の行を Firebase の apiKey は正常と言わない", run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "src/a.ts": `new GoogleGenAI({ apiKey: "${AK}" });\n` }).info.length, 0);
 t("r1-3：閉じていない /* は parse 失敗（warn）", [titles(rt('{"rules":{}}/*'), "warn"), titles(rt('{"rules":{}}\n/* 閉じない'), "warn")], [["database.rules.json を読めませんでした"], ["database.rules.json を読めませんでした"]]);
 t("r1-3：looseJson は閉じていない /* で例外", (() => { try { looseJson('{"a":1}/*'); return "no throw"; } catch (e) { return "throw"; } })(), "throw");
+// ---- レビュー r2（BLOCK・P1×3）の指摘（例はレビューのまま）
+t("r2-1：true && request.auth != null は読める条件（読めない行にしない）・auth と同じ＝全体なら danger", [unresolvedOf("allow read, write: if true && request.auth != null;").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth != null;") }), "danger")], [0, ["ログインすれば、すべての文書を読み書きできます（firestore.rules）"]]);
+t("r2-1：true && データの検査だけ＝誰でも（danger）・持ち主の照合が付けば無言", [titles(run({ "firestore.rules": FS("allow write: if true && request.resource.data.n is int;") }), "danger").length, unresolvedOf("allow write: if true && request.resource.data.n is int;").length, run({ "firestore.rules": FS("allow write: if true && request.auth.uid == id;") }).danger.length], [1, 0, 0]);
+t("r2-1：読める項だけの && は warn を増やさない（auth && データ・auth && 持ち主・true && 持ち主）", ["request.auth != null && request.resource.data.n is int", "request.auth != null && request.auth.uid == id", "true && request.auth.uid == id"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [0, 0, 0]);
+const NL = "\n" + " ".repeat(80);
+t("r2-2：apiKey: の後に改行と長い空白があっても、同じ { } に authDomain があれば Firebase の鍵（Gemini の danger にしない）", G2({ "src/fb.ts": `const firebaseConfig = {\n  apiKey:${NL}"${AK}",\n  authDomain: "d.firebaseapp.com",\n};\n` }), []);
+t("r2-2：キーを JSON 形式（引用符つき）で書いた firebaseConfig も Firebase の鍵", G2({ "src/fb.ts": `const c = { "apiKey": "${AK}", "authDomain": "d", "projectId": "p" };\n` }), []);
+t("r2-3：値の文字列に authDomain があるだけの Gemini の設定は Gemini の danger（レビューの例そのまま）", G2({ "src/ai.ts": `new GoogleGenAI({ apiKey: "${AK}", note: "authDomain" });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+t("r2-3：その行を「Firebase の apiKey は正常」と言わない", run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "src/ai.ts": `new GoogleGenAI({ apiKey: "${AK}", note: "authDomain" });\n` }).info.length, 0);
+t("r2-3：コメントの中の authDomain・別の { } にある authDomain では除外しない", G2({ "src/ai.ts": `const a = { authDomain: "x" };\nnew GoogleGenAI({ apiKey: "${AK}" /* authDomain */ });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+t("r2-3：{ } が読み切れない（閉じない括弧）時は除外しない側＝Gemini の danger", G2({ "src/fb.ts": `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d",\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+t("r2-3：{ } の外の apiKey（const apiKey = …）は Firebase の設定ではない＝Gemini の danger", G2({ "src/ai.ts": `const apiKey = "${AK}";\nconst firebaseConfig = { authDomain: "d" };\n` }), ["Gemini のキーがブラウザ側に出ています"]);
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

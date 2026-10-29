@@ -11,16 +11,50 @@ const TEXT_EXT = new Set([
 const MAX_BYTES = 2 * 1024 * 1024;
 const GEMINI_TRACE = /@google\/generative-ai|@google\/genai|generativelanguage\.googleapis\.com|GoogleGenerativeAI\(|GoogleGenAI\(/;
 const AIZA_KEY = /AIza[A-Za-z0-9_\-]{10,}/;
-const FIREBASE_CONFIG_KEYS = /authDomain|messagingSenderId|storageBucket|measurementId/;
-// この位置の鍵が、firebaseConfig の apiKey そのものか：apiKey: "…" の値で、それを囲む { } の中に authDomain などがある時だけ
-// （隣の行・同じ行にある別のオブジェクトの鍵は除外しない）
-function inFirebaseConfig(text, at) {
-  if (!/\bapiKey["']?\s*[:=]\s*["'`]$/.test(text.slice(Math.max(0, at - 40), at))) return false;
-  let d = 0, s = at;
-  while (s > 0 && at - s < 3000) { s--; const c = text[s]; if (c === "}") d++; else if (c === "{") { if (d === 0) break; d--; } }
-  let e = at; d = 0;
-  while (e < text.length && e - at < 3000) { const c = text[e]; if (c === "{") d++; else if (c === "}") { if (d === 0) break; d--; } e++; }
-  return FIREBASE_CONFIG_KEYS.test(text.slice(s, e));
+const FIREBASE_CONFIG_KEYS = new Set(["authDomain", "projectId", "storageBucket", "messagingSenderId", "appId", "measurementId", "databaseURL"]);
+// 文字列・コメントを読み飛ばしながら { } の組を取り、各 { } の直下のプロパティ名と、文字列の値の範囲を集める。
+// 括弧が合わない・閉じないコメントなど、読み切れない時は null（呼ぶ側は「Firebase の設定ではない」＝除外しない側に倒す）
+function objectRanges(text) {
+  const stack = [], out = [];
+  let i = 0, prev = "", pending = null;   // prev＝直前の意味のある文字（文字列・コメントを除く）／pending＝コロンまで読んだプロパティ名
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "/" && text[i + 1] === "/") { while (i < n && text[i] !== "\n") i++; continue; }
+    if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); if (e < 0) return null; i = e + 2; continue; }
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n && text[j] !== c) { if (text[j] === "\\") j++; else if (text[j] === "\n" && c !== "`") return null; j++; }
+      if (j >= n) return null;
+      const top = stack[stack.length - 1], body = text.slice(i + 1, j);
+      let k = j + 1; while (k < n && /[ \t\r\n]/.test(text[k])) k++;
+      if (top && (prev === "{" || prev === ",") && text[k] === ":") { top.keys.add(body); pending = body; prev = ":"; i = k + 1; continue; }
+      if (top && pending !== null && prev === ":") top.props.push({ name: pending, vs: i, ve: j });
+      pending = null; prev = '"'; i = j + 1; continue;
+    }
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i + 1; while (j < n && /[\w$]/.test(text[j])) j++;
+      const top = stack[stack.length - 1], word = text.slice(i, j);
+      let k = j; while (k < n && /[ \t\r\n]/.test(text[k])) k++;
+      if (top && (prev === "{" || prev === ",") && text[k] === ":") { top.keys.add(word); pending = word; prev = ":"; i = k + 1; continue; }
+      pending = null; prev = "a"; i = j; continue;
+    }
+    if (c === "{") { stack.push({ s: i, e: -1, keys: new Set(), props: [] }); pending = null; prev = "{"; i++; continue; }
+    if (c === "}") { const o = stack.pop(); if (!o) return null; o.e = i; out.push(o); pending = null; prev = "}"; i++; continue; }
+    pending = null; prev = c; i++;
+  }
+  return stack.length ? null : out;
+}
+// この位置の鍵が、firebaseConfig の apiKey そのものか：位置を囲む（いちばん内側の）{ } の中の apiKey プロパティの文字列の値で、
+// 同じ { } の直下のプロパティ名に authDomain・projectId などが並ぶ時だけ（値の文字列や近さでは決めない）
+function inFirebaseConfig(text, at, cache) {
+  if (cache.ranges === undefined) cache.ranges = objectRanges(text);
+  if (!cache.ranges) return false;
+  let best = null;
+  for (const r of cache.ranges) if (r.s < at && at < r.e && (!best || r.s > best.s)) best = r;
+  if (!best) return false;
+  return best.props.some((p) => p.name === "apiKey" && p.vs < at && at < p.ve) && [...best.keys].some((k) => FIREBASE_CONFIG_KEYS.has(k));
 }
 const BUNDLE_DIRS = ["dist", "build", "out", "public", ".output"];
 // 見本として Git に入れる前提の .env（中身は本物の鍵を入れない約束のファイル）
@@ -126,18 +160,20 @@ const COND_TEST = /^request\.time\s*<\s*timestamp\.date\(\s*(\d{4})\s*,\s*(\d{1,
 // 上の3つのほかに、中身を読めたと言える条件。&& でつないだ条件は、各項がすべて読める時だけ（|| があれば読めない）。
 // 項の種類：true／request.auth != null／絞り込み（false・持ち主の照合・request.auth.token.x ==・送るデータの検査）／それ以外＝読めない（関数・括弧など）
 const TERM_AUTH = /^request\.auth(\.uid)?\s*!=\s*null$/;
-const TERM_NARROW = /^false$|^request\.auth\.uid\s*==|==\s*request\.auth\.uid$|^request\.auth\.token\.\w+\s*==|^(request\.resource|resource)\.data\b/;
+const TERM_OWNER = /^false$|^request\.auth\.uid\s*==|==\s*request\.auth\.uid$|^request\.auth\.token\.\w+\s*==/;   // 誰かに絞る項
+const TERM_DATA = /^(request\.resource|resource)\.data\b/;                                                      // 送るデータの検査（誰が、には効かない）
+// 条件の種類："true"（誰でも）・"auth"（ログインしていれば誰でも）・"known"（読めて、上の2つではない）・"unknown"（読めない）
 function condKind(c) {
   if (/\|\|/.test(c)) return "unknown";
-  const terms = c.split("&&").map((x) => x.trim());
-  if (terms.every((x) => x === "true")) return "true";
-  const kinds = terms.map((x) => (x === "true" ? "t" : TERM_AUTH.test(x) ? "a" : TERM_NARROW.test(x) ? "n" : "u"));
+  const kinds = c.split("&&").map((x) => x.trim()).map((x) => (x === "true" ? "t" : TERM_AUTH.test(x) ? "a" : TERM_OWNER.test(x) ? "o" : TERM_DATA.test(x) ? "v" : "u"));
   if (kinds.includes("u")) return "unknown";
-  if (kinds.includes("t") && !terms.some((x) => /^false$|^request\.auth\.uid\s*==|==\s*request\.auth\.uid$|^request\.auth\.token\.\w+\s*==/.test(x))) return "unknown";   // true と絞り込みだけ（持ち主の照合なし）＝何に効くか言えない
-  return "known";
+  if (kinds.includes("o")) return "known";
+  if (!kinds.includes("a")) return kinds.includes("t") ? "true" : "known";   // true だけ・true とデータの検査だけ＝誰でも
+  return kinds.includes("v") ? "known" : "auth";                              // auth だけ・true && auth ＝ログインしていれば誰でも
 }
 const COND_KNOWN = (c) => condKind(c) === "known";
 const COND_TRUEISH = (c) => COND_TRUE.test(c) || condKind(c) === "true";
+const COND_AUTHISH = (c) => COND_AUTH.test(c) || condKind(c) === "auth";
 
 // コメント（// と /* */）と末尾のカンマを、文字列の外だけ落とす。コンソールのテストモードの rules や firebase init が書く形を読むため
 function looseJson(text) {
@@ -337,7 +373,7 @@ function runChecks(P) {
       const found = allowsIn(lines[i]);
       // 判定できなかった allow：行に allow があるのに取り出せない（条件が次の行・複数行の ops など）／条件を読めない（関数・括弧・||）
       const nAllow = (bare[i].match(/\ballow\b/g) || []).length;
-      const known = (a) => a.bare || COND_TRUEISH(a.cond) || COND_AUTH.test(a.cond) || COND_TEST.test(a.cond) || COND_KNOWN(a.cond);
+      const known = (a) => a.bare || COND_TRUEISH(a.cond) || COND_AUTHISH(a.cond) || COND_TEST.test(a.cond) || COND_KNOWN(a.cond);
       if (nAllow && (nAllow > found.length || !found.every(known))) unresolved.push({ loc: `${f.rel}:${i + 1}`, code: lines[i].trim() });
       for (const a of found) {
         const whole = isWholeScope(chains[i]);
@@ -345,7 +381,7 @@ function runChecks(P) {
         if (COND_TRUEISH(a.cond)) {
           ev.mark = a.bare ? "条件なし" : "if " + a.cond.replace(/\s*\|\|.*$/, "");
           (opFamily(a.ops).includes("w") || whole ? G.anyoneHard : G.anyoneSoft).push(ev);
-        } else if (COND_AUTH.test(a.cond)) {
+        } else if (COND_AUTHISH(a.cond)) {
           ev.mark = a.cond;
           (whole ? G.authAll : G.authPart).push(ev);
         } else {
@@ -529,10 +565,10 @@ function runChecks(P) {
         });
         continue;
       }
-      const re = new RegExp(AIZA_KEY.source, "g");
+      const re = new RegExp(AIZA_KEY.source, "g"), cache = {};
       let k;
       while ((k = re.exec(text))) {
-        if (inFirebaseConfig(text, k.index)) continue;
+        if (inFirebaseConfig(text, k.index, cache)) continue;
         const loc = `${f.rel}:${text.slice(0, k.index).split("\n").length}`;
         if (!geminiHits.some((h) => h.loc === loc && h.code.endsWith(mask(k[0])))) geminiHits.push({ loc, code: `AIza で始まる鍵  ${mask(k[0])}` });
       }

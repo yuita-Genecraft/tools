@@ -9,12 +9,13 @@ FAKE_OPENAI2 = J(["sk-", "proj-", "FAKE" * 8, "9999"])
 FAKE_STRIPE = J(["sk_", "live_", "FAKE" * 4, "0000"])
 FAKE_ANTHROPIC = J(["sk-", "ant-", "FAKE-" * 5, "0000"])
 FAKE_FB_APIKEY = J(["AIza", "SyFAKEFAKEFAKEFAKEFAKE_12345-abc"])
+FAKE_GEMINI = J(["AIza", "SyGEMINIGEMINIGEMINI_67890-xyz"])
 
 def w(root, p, s):
     p = root / p; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(s, encoding="utf-8")
 
 def main():
-    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8"):
+    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8", "fbproj9", "fbproj10", "fbproj11", "fbproj12"):
         shutil.rmtree(HERE / n, ignore_errors=True)
     R = HERE / "fbproj"
     w(R, "firebase.json", json.dumps({"firestore": {"rules": "firestore.rules"}, "storage": {"rules": "storage.rules"}}, indent=2))
@@ -104,6 +105,30 @@ service firebase.storage {
     w(R8, ".gitignore", ".env*\n")
     w(R8, ".env", "X=1\n")
     git(R8, "init", "-q"); git(R8, "add", ".gitignore", "package.json"); git(R8, "commit", "-q", "-m", "first")
+    # --- 判定の直し（fbcheck-review v0.1）：条件なしの allow・判定できなかった allow の行・RTDB の実物の形・Gemini のキー
+    R9 = HERE / "fbproj9"
+    w(R9, "firebase.json", '{"firestore":{"rules":"firestore.rules"},"storage":{"rules":"storage.rules"}}\n')
+    w(R9, "firestore.rules", "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth != null && request.auth.uid == userId;\n    }\n    match /rooms/{roomId} {\n      allow read: if isSignedIn();\n      allow write: if\n        request.auth != null;\n    }\n    match /{document=**} {\n      allow read, write;\n    }\n  }\n}\n")
+    w(R9, "storage.rules", "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read;\n      allow write: if request.auth != null;\n    }\n  }\n}\n")
+    w(R9, ".gitignore", ".env*\n")
+    R10 = HERE / "fbproj10"   # コンソールのテストモードの形（コメント入り・末尾カンマ）と firebase init の既定（auth != null）
+    w(R10, "firebase.json", '{"database":{"rules":"database.rules.json"}}\n')
+    w(R10, "database.rules.json", '{\n  "rules": {\n    // 2099 年まで誰でも\n    ".read": "now < 4102444800000",  // 2099-12-31\n    ".write": "now < 4102444800000",\n    "chat": {\n      ".read": "auth != null",\n    },\n  }\n}\n')
+    w(R10, ".gitignore", ".env*\n")
+    R11 = HERE / "fbproj11"   # Gemini を使うプロジェクト：ブラウザ側に AIza の鍵／firebaseConfig の apiKey
+    w(R11, "package.json", json.dumps({"name": "r11", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R11, "src/ai.ts", f'import {{ GoogleGenAI }} from "@google/genai";\nexport const ai = new GoogleGenAI({{ apiKey: "{FAKE_GEMINI}" }});\n')
+    w(R11, "src/firebase.ts", f'import {{ initializeApp }} from "firebase/app";\nconst firebaseConfig = {{\n  apiKey: "{FAKE_FB_APIKEY}",\n  authDomain: "demo.firebaseapp.com",\n  storageBucket: "demo.appspot.com",\n}};\nexport const app = initializeApp(firebaseConfig);\n')
+    w(R11, ".env", f"VITE_GEMINI_API_KEY={FAKE_GEMINI}\nVITE_FIREBASE_API_KEY={FAKE_FB_APIKEY}\n")
+    w(R11, ".gitignore", ".env*\n")
+    w(R11, "firebase.json", '{"firestore":{"rules":"firestore.rules"}}\n')
+    w(R11, "firestore.rules", "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth != null && request.auth.uid == userId;\n    }\n  }\n}\n")
+    R12 = HERE / "fbproj12"   # 壊れた database.rules.json・Gemini の痕跡が無い apiKey（言い過ぎないこと）
+    w(R12, "firebase.json", '{"database":{"rules":"database.rules.json"}}\n')
+    w(R12, "database.rules.json", '{"rules": {".read": ')
+    w(R12, "package.json", json.dumps({"name": "r12", "dependencies": {"firebase": "^11.0.0"}}, indent=2))
+    w(R12, "src/firebase.ts", f'const firebaseConfig = {{ apiKey: "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
+    w(R12, ".gitignore", ".env*\n")
     print("ok")
 
 if __name__ == "__main__":

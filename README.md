@@ -28,15 +28,15 @@
 
 新しいページ（`<slug>` は URL になる英数字とハイフン）を足す時は、次の5か所を同じ PR で直します。
 
-1. **ソース**：`<slug>/app.html` を置く（doctype などの骨格なし・`<title>` と `<meta name="description" content="…">` が要る。`build_standalone.py` が OGP と CSP に使う）。ブラウザ版だけの置き場が別にある時（例：`fbcheck-web/app.html`）は、その場所を次の `TOOLS` に書く。
+1. **ソース**：`<slug>/app.html` を置く。doctype などの骨格は書かない。`build_standalone.py` は最初の `</style>` の位置で head 側と body 側に分けるので、**`<style>…</style>` が必ず1つあり、`<title>` はその前に置き、本文（body に入る部分）は `</style>` より後に置く**（`</style>` が無いとビルドが止まる）。`<title>` は必須（無いとビルドが止まる）。`<meta name="description" content="…">` は無くても止まらないが、OGP の説明が空になるので書く。この2つは OGP（共有カード）に使う。CSP は title・description からではなく `build_standalone.py` の固定の定数から作られる（書体を埋め込んだ時だけ `font-src` が `data:` になる）。ブラウザ版だけの置き場が別にある時（例：`fbcheck-web/app.html`）は、その場所を次の `TOOLS` に書く。
 2. **`build_site.py` の `TOOLS`**：`("<slug>", "<slug>/app.html")` を1つ足す。
 3. **一覧ページ**：`site-src/index.html` の `<ul>` にカードを1枚（`<li><a class="card" href="<slug>/"><b>名前</b><span>1〜2文</span></a></li>`）。`docs/index.html` は手で直さない。
-4. **カード画像**：`og/og-<slug>.html` を作り、`render_og.py` の `PAIRS` に1組足して、`python3 render_og.py --only <slug>` で `docs/og/<slug>.png`（1200×630）を作る。画像が無いと `build_site.py` が「注意」を出す。
+4. **カード画像**：`og/og-<slug>.html` を作り、`render_og.py` の `PAIRS` に3要素の組 `("<slug>", "og/og-<slug>.html", "docs/og/<slug>.png")` を足して（`TOOLS` の2要素とは形が違う）、`python3 render_og.py --only <slug>` で `docs/og/<slug>.png`（1200×630）を作る。画像が無いと `build_site.py` が「注意」を出す。
 5. **この README**：先頭の「開く」の表と、「道具の詳細」の表に1行ずつ。
 
 確かめ方（この順で）：
 
-- `python3 build_site.py` を実行し、「注意」が出ないこと。`git status` で変わるのが `docs/index.html`・`docs/<slug>/index.html`・`docs/og/<slug>.png`（と、直した既存のページ）だけであること。
+- `python3 build_site.py` を実行し、「注意」が出ないこと。`git status` で変わるのが、この手順で触った物（`<slug>/app.html`・`build_site.py`・`site-src/index.html`・`og/og-<slug>.html`・`render_og.py`・`README.md`）と、その生成物（`docs/index.html`・`docs/<slug>/index.html`・`docs/og/<slug>.png`）だけであること。それ以外のファイル（特に既存の作品の `docs/<別の slug>/`）が変わっていたら、理由を確かめる。
 - `docs/<slug>/index.html` をブラウザで開き、ファイルを入れて動くこと。開発者ツールのコンソールに CSP の違反が出ないこと（通信は `connect-src 'none'` で止まる）。
 - 一覧ページ（`docs/index.html`）のカードのリンクが、`docs/<slug>/index.html` に飛ぶこと。
 - 集計やルールの判定を持つ作品は、`test/` に合成データの試験を足し、「テスト」の節の動かし方に書く。

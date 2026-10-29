@@ -335,6 +335,20 @@ t("g-8：FBCHECK_VERSION は 0.3.4", /const FBCHECK_VERSION = "0\.3\.4";/.test(s
   t("1 == 1・\"a\" == \"a\"・false != true・null == null も判定できなかった行", ["1 == 1", "\"a\" == \"a\"", "false != true", "null == null"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1, 1, 1]);
   t("同じ名前同士（resource.data.x == resource.data.x・request.auth.uid == request.auth.uid）も判定できなかった行", ["resource.data.x == resource.data.x", "request.auth.uid == request.auth.uid"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1]);
   t("字との is の検査（1 is int・\"a\" is string・true is bool）も判定できなかった行", ["1 is int", "\"a\" is string", "true is bool"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1, 1]);
+  // r1（BLOCK）：左辺・右辺は文字列の分割で取らない。文字列の中に " is "・==・!=・&&・'・" を含む字を、is と比較の両方の左右に置く表
+  {
+    const STR = ["'a is b'", "\"a is b\"", "\"x == y\"", "'x != y'", "\"a && b\"", "'a || b'", "\"it's\"", "'say \"hi\"'", "\"a is b == c\"", "'is'", "\" is \"", "'x is string'"];
+    const TYPES = ["string", "int", "bool"], NAMES = ["resource.data.x", "request.auth.uid"], OPS6 = ["==", "!=", "<", ">"];
+    const bad = []; let n = 0;
+    const chk = (c, want) => { n++; const u = unresolvedOf(`allow read: if ${c};`).length; if (u !== want) bad.push(`${c} → ${u}/${want}`); };
+    for (const a of STR) {
+      for (const ty of TYPES) chk(`${a} is ${ty}`, 1);                           // 字の is は全部 unresolved
+      for (const nm of NAMES) for (const ty of TYPES) chk(`${nm} is ${ty}`, 0);   // 名前の is は無言
+      for (const b of STR) for (const op of OPS6) chk(`${a} ${op} ${b}`, 1);        // 字 × 字 は全部 unresolved
+      for (const nm of NAMES) for (const op of OPS6) { const w = /&&|\|\|/.test(a) ? 1 : 0; chk(`${nm} ${op} ${a}`, w); chk(`${a} ${op} ${nm}`, w); }   // 名前 × 字は無言（&& / || を含む字は全体一致の前の検査で unresolved）
+    }
+    t(`文字列の中に " is "・==・!=・&&・'・" を含む字を、is と比較の両方の左右に置いた ${n} 式：字の is・字 × 字 は全部 unresolved、名前 × 字は今までどおり`, bad.slice(0, 5), []);
+  }
   t("名前と字の比較・名前の is の検査は今までどおり無言（request.auth.uid == \"alice\"・resource.data.public == true・x is string・resource.data.n > 0）", ["request.auth.uid == \"alice\"", "resource.data.public == true", "request.resource.data.x is string", "resource.data.n > 0", "true == resource.data.public"].map((c) => unresolvedOf(`allow read: if ${c};`).length), [0, 0, 0, 0, 0]);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

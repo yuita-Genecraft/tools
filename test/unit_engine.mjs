@@ -90,15 +90,17 @@ t("B1：一部の場所の allow get; は warn（読み取りだけ）", titles(
 // B2：判定できなかった allow の行（P0-2）
 const unresolvedOf = (body) => run({ "firestore.rules": FS(body) }).warn.filter(UNRES);
 for (const [name, body, lineNo] of [
-  ["#03 || true", "allow read, write: if request.auth != null || true;", 5], ["#04 条件が次の行（auth）", "allow read, write: if\n        request.auth != null;", 5],
-  ["#05 条件が次の行（true）", "allow read, write: if\n        true;", 5], ["#06 括弧", "allow read, write: if (request.auth != null);", 5],
-  ["#15 関数", "allow read, write: if isSignedIn();", 5], ["ops が複数行", "allow read,\n        write: if true;", 5],
+  ["#03 || true", "allow read, write: if request.auth != null || true;", 5], ["#06 括弧", "allow read, write: if (request.auth != null);", 5],
+  ["#15 関数", "allow read, write: if isSignedIn();", 5],
 ]) {
   const u = unresolvedOf(body);
   t(`B2/N2：${name}＝無言にしない（行の実物つき）`, [u.length, u[0] && u[0].evidence[0].loc, u[0] && u[0].evidence[0].code.startsWith("allow")], [1, `firestore.rules:${lineNo}`, true]);
 }
 t("B2：件数が見出しに出る", unresolvedOf("allow read: if f(1);\n      allow write: if g(2);")[0].title, "判定できなかった allow の行があります（2 行・firestore.rules）");
-t("B2：持ち主の照合（&&・uid ==）・false は無言（言い過ぎを増やさない）", ["allow read, write: if request.auth != null && request.auth.uid == userId;", "allow read: if request.auth.uid == userId;", "allow write: if false;", "allow read: if resource.data.owner == request.auth.uid;"].map((b) => unresolvedOf(b).length), [0, 0, 0, 0]);
+t("B2：持ち主の照合（&&・uid ==）・false は無言（言い過ぎを増やさない）", ["allow read: if request.auth.uid == userId;", "allow write: if false;", "allow read: if resource.data.owner == request.auth.uid;"].map((b) => unresolvedOf(b).length), [0, 0, 0]);
+t("B2：&& でつないだ条件は、読める項だけでも判定できなかった行（全体が1つの形に一致した時だけ読む）", unresolvedOf("allow read, write: if request.auth != null && request.auth.uid == userId;").length, 1);
+// 条件や ops が次の行に続く文は、; か } までつないで読む（次の行は allow を持たないので、つながないと見えない）
+t("B2：条件が次の行（auth・true）・ops が複数行は、つないで読んで判定する（無言にも読めない行にもしない）", [["allow read, write: if\n        request.auth != null;", "danger", "ログインすれば、すべての文書を読み書きできます（firestore.rules）"], ["allow read, write: if\n        true;", "danger", "誰でも読み書きできる状態です（firestore.rules）"], ["allow read,\n        write: if true;", "danger", "誰でも読み書きできる状態です（firestore.rules）"]].map(([b, k, ti]) => [titles(run({ "firestore.rules": FS(b) }), k), unresolvedOf(b).length]), [[["ログインすれば、すべての文書を読み書きできます（firestore.rules）"], 0], [["誰でも読み書きできる状態です（firestore.rules）"], 0], [["誰でも読み書きできる状態です（firestore.rules）"], 0]]);
 t("B2：コメントの中の「allow」という語では出さない", unresolvedOf("/* allow only the owner */\n      // allow nothing here\n      allow write: if false;").length, 0);
 // B3：request.auth.uid != null
 t("B3：request.auth.uid != null が全体＝danger（ログインすれば…）", titles(run({ "firestore.rules": FS("allow read, write: if request.auth.uid != null;") }), "danger"), ["ログインすれば、すべての文書を読み書きできます（firestore.rules）"]);
@@ -134,14 +136,14 @@ t("N4：壊れた JSON＝warn「読めませんでした」", titles(rt('{"rules
 t("N4：JSON でない中身も warn", titles(rt("not json"), "warn"), ["database.rules.json を読めませんでした"]);
 t("B5：ルールが無い {}（rules が空）は何も出さない", ["danger", "warn"].map((k) => titles(rt('{"rules":{}}'), k).length), [0, 0]);
 // 変えない物：正しい持ち主ルール・一部の read: true は今までどおり
-t("不変：持ち主のルールだけ＝何も出ない", ["danger", "warn", "info"].map((k) => titles(run({ "firestore.rules": "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth != null && request.auth.uid == userId;\n    }\n  }\n}\n" }), k).length), [0, 0, 0]);
+t("不変：持ち主のルールだけ＝何も出ない", ["danger", "warn", "info"].map((k) => titles(run({ "firestore.rules": "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth.uid == userId;\n    }\n  }\n}\n" }), k).length), [0, 0, 0]);
 // ---- レビュー r1（BLOCK）の指摘
-t("r1-1：if true && true は danger（読めない行にしない）", [titles(run({ "firestore.rules": FS("allow read, write: if true && true;") }), "danger"), unresolvedOf("allow read, write: if true && true;").length], [["誰でも読み書きできる状態です（firestore.rules）"], 0]);
+t("r1-1：if true && true は判定できなかった行（全体がちょうど true の時だけ true）", [titles(run({ "firestore.rules": FS("allow read, write: if true && true;") }), "danger"), unresolvedOf("allow read, write: if true && true;").length], [[], 1]);
 t("r1-1：if isSignedIn() && customCheck() は読めない行", unresolvedOf("allow read: if isSignedIn() && customCheck();").length, 1);
 t("r1-1：request.auth != null && customCheck() も読めない行", unresolvedOf("allow read: if request.auth != null && customCheck();").length, 1);
 t("r1-1：true && 関数 は読めない行", unresolvedOf("allow read: if true && isOk();").length, 1);
-t("r1-1：auth && データの検査 は今までどおり無言", unresolvedOf("allow create: if request.auth != null && request.resource.data.name is string;").length, 0);
-t("r1-1：持ち主の照合＋読める比較は無言", unresolvedOf("allow write: if request.auth.uid == userId && request.resource.data.n < 10;").length, 0);
+t("r1-1：auth && データの検査 は判定できなかった行", unresolvedOf("allow create: if request.auth != null && request.resource.data.name is string;").length, 1);
+t("r1-1：持ち主の照合＋読める比較も、&& を含むので判定できなかった行", unresolvedOf("allow write: if request.auth.uid == userId && request.resource.data.n < 10;").length, 1);
 const G2 = (files) => geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', ...files }));
 const FBCFG = `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d.firebaseapp.com",\n};\n`;
 t("r1-2：firebaseConfig の直後の new GoogleGenAI({ apiKey: AIza }) を見逃さない", G2({ "src/a.ts": FBCFG + `const ai = new GoogleGenAI({ apiKey: "${AK}2" });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
@@ -150,9 +152,8 @@ t("r1-2：Gemini の鍵の行を Firebase の apiKey は正常と言わない", 
 t("r1-3：閉じていない /* は parse 失敗（warn）", [titles(rt('{"rules":{}}/*'), "warn"), titles(rt('{"rules":{}}\n/* 閉じない'), "warn")], [["database.rules.json を読めませんでした"], ["database.rules.json を読めませんでした"]]);
 t("r1-3：looseJson は閉じていない /* で例外", (() => { try { looseJson('{"a":1}/*'); return "no throw"; } catch (e) { return "throw"; } })(), "throw");
 // ---- レビュー r2（BLOCK・P1×3）の指摘（例はレビューのまま）
-t("r2-1：true && request.auth != null は読める条件（読めない行にしない）・auth と同じ＝全体なら danger", [unresolvedOf("allow read, write: if true && request.auth != null;").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth != null;") }), "danger")], [0, ["ログインすれば、すべての文書を読み書きできます（firestore.rules）"]]);
-t("r2-1：true && データの検査だけ＝誰でも（danger）・持ち主の照合が付けば無言", [titles(run({ "firestore.rules": FS("allow write: if true && request.resource.data.n is int;") }), "danger").length, unresolvedOf("allow write: if true && request.resource.data.n is int;").length, run({ "firestore.rules": FS("allow write: if true && request.auth.uid == id;") }).danger.length], [1, 0, 0]);
-t("r2-1：読める項だけの && は warn を増やさない（auth && データ・auth && 持ち主・true && 持ち主）", ["request.auth != null && request.resource.data.n is int", "request.auth != null && request.auth.uid == id", "true && request.auth.uid == id"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [0, 0, 0]);
+t("r2-1：true && request.auth != null も、&& を含むので判定できなかった行（danger にも無言にもしない）", [unresolvedOf("allow read, write: if true && request.auth != null;").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth != null;") }), "danger")], [1, []]);
+t("r2-1：&& を含む条件は、読める項だけでも全部 判定できなかった行", ["true && request.resource.data.n is int", "true && request.auth.uid == id", "request.auth != null && request.resource.data.n is int", "request.auth != null && request.auth.uid == id"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1, 1, 1]);
 const NL = "\n" + " ".repeat(80);
 t("r2-2：apiKey: の後に改行と長い空白があっても、同じ { } に authDomain があれば Firebase の鍵（Gemini の danger にしない）", G2({ "src/fb.ts": `const firebaseConfig = {\n  apiKey:${NL}"${AK}",\n  authDomain: "d.firebaseapp.com",\n};\n` }), []);
 t("r2-2：キーを JSON 形式（引用符つき）で書いた firebaseConfig も Firebase の鍵", G2({ "src/fb.ts": `const c = { "apiKey": "${AK}", "authDomain": "d", "projectId": "p" };\n` }), []);
@@ -199,8 +200,48 @@ t("g-1：関数・メソッドの呼び出し（右辺・左辺・メソッド�
 t("g-2：括弧は判定できなかった行（比較の中・全体・片側）", ["(request.auth != null)", "request.auth.uid == (userId)", "request.auth != null && (resource.data.x == 1)", "(true)"].map((c) => UR(c).length), [1, 1, 1, 1]);
 t("g-3：|| は判定できなかった行", ["request.auth != null || true", "resource.data.public == true || request.auth.uid == userId", "request.auth.uid == userId || isAdmin()"].map((c) => UR(c).length), [1, 1, 1]);
 t("g-4：混在（&& の片方だけ読めない）は判定できなかった行・danger にも auth にもしない", [UR("true && isOk()").length, titles(run({ "firestore.rules": FS("allow read, write: if true && isOk();") }), "danger").length, titles(run({ "firestore.rules": FS("allow read, write: if request.auth != null && isOk();") }), "danger").length], [1, 0, 0]);
-t("g-5：読める形は今までどおり無言（持ち主の照合・データの検査・is の型）", ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.auth != null && request.auth.uid == userId", "request.auth != null && request.resource.data.name is string", "request.auth.token.admin == true", "resource.data.public == true", "false"].map((c) => UR(c).length), [0, 0, 0, 0, 0, 0, 0]);
-t("g-6：request.auth.uid == null は「絞る項」にしない（true と組むと誰でも＝danger）", titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth.uid == null;") }), "danger"), ["誰でも読み書きできる状態です（firestore.rules）"]);
-t("g-7：danger の判定は変わらない（true・条件なし・auth 全体・期限・true&&読める比較）", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);"), FS("allow write: if true && request.resource.data.n is int;"), FS("allow read: if true && request.auth.uid == id;")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1, 1, 0]);
+t("g-5：1つの比較・型の検査・false は無言", ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.auth.token.admin == true", "request.auth.uid == \"alice\"", "request.resource.data.name is string", "resource.data.public == true", "false"].map((c) => UR(c).length), [0, 0, 0, 0, 0, 0, 0]);
+t("g-6：true を含む &&・|| は true として扱わない（全体がちょうど true の時だけ danger）", [UR("true && request.auth.uid == \"alice\"").length, UR("true || someFunction()").length, UR("true && request.auth.uid == null").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth.uid == \"alice\";") }), "danger"), titles(run({ "firestore.rules": FS("allow read, write: if true || someFunction();") }), "danger")], [1, 1, 1, [], []]);
+t("g-7：danger の判定（全体がちょうど true・条件なし・auth 全体・期限）は変わらない", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1]);
 t("g-8：FBCHECK_VERSION は 0.3.1", /const FBCHECK_VERSION = "0\.3\.1";/.test(src), true);
+// ---- 表から機械的に作る試験（レビュー r1 の指摘：手で思いついた例だけにしない）。項 × つなぎ × 改行の位置 の全組み合わせ
+{
+  const READ = ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.resource.data.name is string", "request.auth.uid == \"alice\"", "false"];
+  const ODD = ["someFunction()", "resource.data.x == someFunction()", "(request.auth != null)", "request.resource.data.size() < 10", "isOk()"];
+  const ANY = ["true", "request.auth != null"];
+  const TERMS = [...READ, ...ODD, ...ANY];
+  const JOIN = [" && ", " || "];
+  // 改行の入れ方：なし／if の直後／つなぎの前／つなぎの後／; の前／ops の途中
+  const layout = (ops, cond, k, join) => {
+    const parts = join ? cond.split(join) : [cond];
+    const c = k === 2 && join ? parts.join("\n  " + join.trim() + " ") : k === 3 && join ? parts.join(" " + join.trim() + "\n  ") : cond;
+    return (k === 5 ? `allow ${ops[0]},\n  ${ops[1]}` : `allow ${ops.join(", ")}`) + (k === 1 ? ": if\n  " : ": if ") + c + (k === 4 ? "\n;" : ";");
+  };
+  const bad = [];
+  let n = 0;
+  const check = (label, body, wantUnres, wantDanger) => {
+    n++;
+    const u = unresolvedOf(body).length, d = run({ "firestore.rules": FS(body) }).danger.length;
+    if (u !== wantUnres || d !== wantDanger) bad.push(`${label} [${body.replace(/\n/g, "\\n")}] unres=${u}/${wantUnres} danger=${d}/${wantDanger}`);
+  };
+  for (let k = 0; k <= 5; k++) {
+    for (const ops of [["read", "write"], ["get", "list"]]) {
+      // 1つの項：読める形は無言（改行の位置によらない）・読めない形は判定できなかった行
+      for (const t1 of READ) check(`単独読める k${k}`, layout(ops, t1, k), 0, 0);
+      for (const t1 of ODD) check(`単独読めない k${k}`, layout(ops, t1, k), 1, 0);
+      check(`単独 true k${k}`, layout(ops, "true", k), 0, 1);
+      check(`単独 auth k${k}`, layout(ops, "request.auth != null", k), 0, 1);
+      // 2項・3項：&& か || を含む条件は、項がすべて読めても、true／auth を含んでも、判定できなかった行 1 件・danger 0 件
+      for (const j of JOIN) for (const a of TERMS) for (const b of TERMS) {
+        check(`2項 k${k}`, layout(ops, a + j + b, k, j), 1, 0);
+        for (const c3 of ["true", "someFunction()", "request.auth.uid == userId"]) check(`3項 k${k}`, layout(ops, a + j + b + j + c3, k, j), 1, 0);
+      }
+    }
+  }
+  t(`表から作った試験 ${n} 件：&& か || を含む条件は、読める項だけでも true を含んでも 判定できなかった行（danger にしない）／単独の項は読める形だけ無言`, bad.slice(0, 5), []);
+  // 指摘の3例（レビューのまま）
+  t("r1 の例1：true || someFunction() は判定できなかった行", [UR("true || someFunction()").length, run({ "firestore.rules": FS("allow read: if true || someFunction();") }).danger.length], [1, 0]);
+  t("r1 の例2：次の行に && someFunction() が続く条件は判定できなかった行", [unresolvedOf("allow read: if request.auth.uid == userId\n        && someFunction();").length, unresolvedOf("allow read: if request.auth.uid == userId\n        && someFunction();")[0].evidence[0].code], [1, "allow read: if request.auth.uid == userId && someFunction();"]);
+  t("r1 の例3：true && request.auth.uid == \"alice\" は danger にならず判定できなかった行", [run({ "firestore.rules": FS("allow write: if true && request.auth.uid == \"alice\";") }).danger.length, UR("true && request.auth.uid == \"alice\"").length], [0, 1]);
+}
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

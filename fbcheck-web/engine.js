@@ -1,5 +1,5 @@
 /* ENGINE:BEGIN — fbcheck の判定本体。CLI（fbcheck.mjs）とブラウザ版で、この区間は同じ文字列を使う。 */
-const FBCHECK_VERSION = "0.3.2";
+const FBCHECK_VERSION = "0.3.3";
 const SKIP_DIRS = new Set([
   "node_modules", ".git", ".next", ".nuxt", ".cache", ".vercel",
   ".firebase", "coverage", ".turbo", ".svelte-kit", "vendor",
@@ -483,7 +483,7 @@ function runChecks(P) {
     }
     if (unresolved.length) add("warn", {
       title: `判定できなかった allow の行があります（${unresolved.length} 行・${f.rel}）`,
-      why: "この行の条件は、ここでは読み取れませんでした。「問題なし」という意味ではありません。条件が次の行にある・関数（isSignedIn() など）を呼んでいる・括弧や || を使っている、といった書き方がこれに当たります。条件が常に true になる書き方でも、ここでは見分けられません。",
+      why: "この allow の条件は、このチェックが読める形に当たらなかったため、安全かどうかを判定していません。「問題なし」という意味ではありません。手で確かめてください。条件が常に true になる書き方でも、ここでは見分けられません。",
       how: "この行が、誰に何を許可しているかを自分で確かめてください。中身を AI に貼って「この条件で、誰が何を読めるか1行ずつ説明して」と聞くと、何が起きるかが分かります。",
       evidence: unresolved,
     });

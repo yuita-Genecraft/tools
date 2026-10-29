@@ -203,7 +203,7 @@ t("g-4：混在（&& の片方だけ読めない）は判定できなかった�
 t("g-5：1つの比較・型の検査・false は無言", ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.auth.token.admin == true", "request.auth.uid == \"alice\"", "request.resource.data.name is string", "resource.data.public == true", "false"].map((c) => UR(c).length), [0, 0, 0, 0, 0, 0, 0]);
 t("g-6：true を含む &&・|| は true として扱わない（全体がちょうど true の時だけ danger）", [UR("true && request.auth.uid == \"alice\"").length, UR("true || someFunction()").length, UR("true && request.auth.uid == null").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth.uid == \"alice\";") }), "danger"), titles(run({ "firestore.rules": FS("allow read, write: if true || someFunction();") }), "danger")], [1, 1, 1, [], []]);
 t("g-7：danger の判定（全体がちょうど true・条件なし・auth 全体・期限）は変わらない", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1]);
-t("g-8：FBCHECK_VERSION は 0.3.3", /const FBCHECK_VERSION = "0\.3\.3";/.test(src), true);
+t("g-8：FBCHECK_VERSION は 0.3.4", /const FBCHECK_VERSION = "0\.3\.4";/.test(src), true);
 // 警告文は事実だけを言う（理由の条件を列挙しない）。4回続けて、文の中の条件の列挙が判定とずれたため
 {
   const W = unresolvedOf("allow read: if f();")[0].why;
@@ -320,5 +320,21 @@ t("g-8：FBCHECK_VERSION は 0.3.3", /const FBCHECK_VERSION = "0\.3\.3";/.test(s
   t("持ち主の形にもう1項つないだ物は unknown のまま（&& の3項・|| ・関数・別の項）", ["request.auth != null && request.auth.uid == userId && someFunction()", "request.auth != null && request.auth.uid == userId && request.resource.data.n < 10", "someFunction() && request.auth != null && request.auth.uid == userId", "request.auth != null && request.auth.uid == userId || true", "true || request.auth != null && request.auth.uid == userId", "request.auth != null && request.auth.uid == userId && true", "(request.auth != null && request.auth.uid == userId)", "request.auth != null && request.auth.uid == userId()", "request.auth != null && request.auth.uid == userId.get()"].map(OW), [1, 1, 1, 1, 1, 1, 1, 1, 1]);
   t("持ち主の形に似た別の形は known にしない（uid との比較でない・null・リテラル・uid 同士・auth != null が無い）", ["request.auth != null && request.auth.uid == null", "request.auth != null && request.auth.uid == \"alice\"", "request.auth != null && request.auth.uid == request.auth.uid", "request.auth != null && request.auth.uid != userId", "request.auth != null && request.auth.token.admin == userId", "request.auth == null && request.auth.uid == userId", "true && request.auth.uid == userId", "request.auth.uid == userId && request.auth.uid == userId", "request.auth.uid != null && request.auth.uid == userId", "request.auth.uid == userId && request.auth.uid != null"].map(OW), [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
   t("持ち主の形は danger にしない（auth 全体の danger は 1 項の request.auth != null だけ）", ["request.auth != null && request.auth.uid == userId", "userId == request.auth.uid && request.auth != null"].map((c) => run({ "firestore.rules": FS(`allow read, write: if ${c};`) }).danger.length), [0, 0]);
+}
+// ---- 字同士の比較（fbcheck repo 審査 r2・BLOCK）：左右がどちらも字（true・false・null・数・文字列）の比較や、同じ名前同士の比較は、結果が決まっていて「誰を許すか」を読めない。known にせず、判定できなかった行（警告）にする
+{
+  const LIT = ["true", "false", "null", "1", "0", "-1", "1.5", "\"a\"", "'b'"], OPS = ["==", "!=", "<", ">", "<=", ">="];
+  const bad = []; let n = 0;
+  for (const a of LIT) for (const b of LIT) for (const op of OPS) {
+    const c = `${a} ${op} ${b}`, F = run({ "firestore.rules": FS(`allow read, write: if ${c};`) });
+    n++;
+    if (F.warn.filter(UNRES).length !== 1 || F.danger.length !== 0) bad.push(c);
+  }
+  t(`字同士の比較 ${n} 式（字 × 字 × 6 つの比較）は、すべて判定できなかった行（danger にも無言にもしない）`, bad.slice(0, 5), []);
+  t("レビューの例：allow read, write: if true == true; は警告が出る（無言にしない）", [unresolvedOf("allow read, write: if true == true;").length, run({ "firestore.rules": FS("allow read, write: if true == true;") }).warn.length], [1, 1]);
+  t("1 == 1・\"a\" == \"a\"・false != true・null == null も判定できなかった行", ["1 == 1", "\"a\" == \"a\"", "false != true", "null == null"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1, 1, 1]);
+  t("同じ名前同士（resource.data.x == resource.data.x・request.auth.uid == request.auth.uid）も判定できなかった行", ["resource.data.x == resource.data.x", "request.auth.uid == request.auth.uid"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1]);
+  t("字との is の検査（1 is int・\"a\" is string・true is bool）も判定できなかった行", ["1 is int", "\"a\" is string", "true is bool"].map((c) => unresolvedOf(`allow write: if ${c};`).length), [1, 1, 1]);
+  t("名前と字の比較・名前の is の検査は今までどおり無言（request.auth.uid == \"alice\"・resource.data.public == true・x is string・resource.data.n > 0）", ["request.auth.uid == \"alice\"", "resource.data.public == true", "request.resource.data.x is string", "resource.data.n > 0", "true == resource.data.public"].map((c) => unresolvedOf(`allow read: if ${c};`).length), [0, 0, 0, 0, 0]);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

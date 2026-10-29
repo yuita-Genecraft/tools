@@ -1,5 +1,5 @@
 /* ENGINE:BEGIN — fbcheck の判定本体。CLI（fbcheck.mjs）とブラウザ版で、この区間は同じ文字列を使う。 */
-const FBCHECK_VERSION = "0.3.3";
+const FBCHECK_VERSION = "0.3.4";
 const SKIP_DIRS = new Set([
   "node_modules", ".git", ".next", ".nuxt", ".cache", ".vercel",
   ".firebase", "coverage", ".turbo", ".svelte-kit", "vendor",
@@ -223,6 +223,7 @@ const ID_PATH = String.raw`(?!(?:true|false|null)\b)(?!request\.auth\.uid\b)[A-Z
 const UID_EQ = String.raw`(?:request\.auth\.uid\s*==\s*${ID_PATH}|${ID_PATH}\s*==\s*request\.auth\.uid)`;
 const AUTH_NN = String.raw`request\.auth\s*!=\s*null`;
 const OWNER_FORM = new RegExp(`^(?:${AUTH_NN}\\s*&&\\s*${UID_EQ}|${UID_EQ}\\s*&&\\s*${AUTH_NN})$`);
+const LITERAL = /^(?:-?\d+(?:\.\d+)?|"[^"]*"|'[^']*'|true|false|null)$/;
 // 条件の種類："true"（誰でも）・"auth"（ログインしていれば誰でも）・"known"（1つの比較・型の検査・false）・"unknown"（それ以外）
 function condKind(c) {
   c = c.trim();
@@ -230,7 +231,11 @@ function condKind(c) {
   if (COND_AUTH.test(c)) return "auth";
   if (OWNER_FORM.test(c)) return "known";
   if (/&&|\|\|/.test(c)) return "unknown";
-  if (c === "false" || TERM_CMP.test(c) || TERM_IS.test(c)) return "known";
+  if (c === "false") return "known";
+  const m = c.match(TERM_CMP);
+  if (m) return LITERAL.test(m[1]) && LITERAL.test(m[3]) || m[1] === m[3] ? "unknown" : "known";   // 左右がどちらも字（true == true・1 == 1）や同じ名前同士は、結果が決まっていて「誰を許すか」を読めない＝known にしない
+  const is = c.match(TERM_IS);
+  if (is) return LITERAL.test(c.split(/\s+is\s+/)[0]) ? "unknown" : "known";
   return "unknown";
 }
 const COND_KNOWN = (c) => condKind(c) === "known";

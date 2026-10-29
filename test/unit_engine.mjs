@@ -255,6 +255,11 @@ t("g-8：FBCHECK_VERSION は 0.3.1", /const FBCHECK_VERSION = "0\.3\.1";/.test(s
   const B = (second) => raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read: if false\n    ${second}\n  }\n}\n`);
   const FB = B("} match /posts/{id} { allow read: if true; }");
   t("r2-b：allow read: if false の次行が「} match /posts/{id} { allow read: if true; }」でも、posts の read: true を全体スコープの danger にしない（posts だけの warn）", [FB.danger.length, FB.warn.map((f) => f.title)], [0, ["誰でも読める場所があります（firestore.rules）"]]);
+  // r3：同じ行に完結した allow と未完の allow が並ぶ形（完結が先・未完が後・次行に別の allow）。完結した方の danger は出し、未完の方だけ unresolved
+  const MIX = raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow write: if true; allow read: if false\n      allow get: if false;\n    }\n  }\n}\n`);
+  t("r3：同じ行の「allow write: if true; allow read: if false」＋次行に別の allow でも、完結した write: true の danger は出し、未完の allow read は unresolved", [MIX.danger.map((f) => f.title), MIX.warn.filter(UNRES).length], [["誰でも書き込める状態です（firestore.rules）"], 1]);
+  const MIX2 = raw(RAW("      allow read; allow write: if false\n      match /x/{y} { allow get: if true; }\n    }\n  }\n}\n"));
+  t("r3：完結した条件なしの allow read; も、同じ行の未完の allow の前なら拾う（danger）・未完は unresolved", [MIX2.danger.length, MIX2.warn.filter(UNRES).length], [1, 1]);
   t("r2-b：終わりの無い allow の次の行に別の allow・match があれば、そこで打ち切って unresolved（次の行の allow は次の行として読む）", (() => { const F = B("allow write: if true;"); return [F.danger.length, F.warn.filter(UNRES).length]; })(), [1, 1]);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

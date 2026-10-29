@@ -415,9 +415,11 @@ function runChecks(P) {
     const bare = stripBlockComments(lines);
     for (let i = 0; i < lines.length; i++) {
       const { text: stmt, closed } = joinStmt(bare, i);
-      const found = closed ? allowsIn(stmt) : [];   // 終わりまで読めなかった文は、条件の途中なので何も判定しない（下で判定できなかった行に入る）
       // 判定できなかった allow：行に allow があるのに取り出せない／条件を読めない（関数・括弧・&&・||）。条件や ops が次の行に続く文は ; か } までつないで読む
       const nAllow = (stmt.match(/\ballow\b/g) || []).length;
+      let found = allowsIn(stmt);
+      // 終わりまで読めなかった文：末尾の allow は条件の途中なので判定せず（下で判定できなかった行に入る）、その前の完結した allow は今までどおり判定する
+      if (!closed && found.length === nAllow) found = found.slice(0, -1);
       const known = (a) => a.bare || COND_TRUEISH(a.cond) || COND_AUTHISH(a.cond) || COND_TEST.test(a.cond) || COND_KNOWN(a.cond);
       if (nAllow && (nAllow > found.length || !found.every(known))) unresolved.push({ loc: `${f.rel}:${i + 1}`, code: stmt.trim() === bare[i].trim() ? lines[i].trim() : stmt.replace(/\s+/g, " ").trim() });
       for (const a of found) {

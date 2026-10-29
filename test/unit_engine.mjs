@@ -171,7 +171,9 @@ t("r3-2：正規表現リテラルの { で崩れても warn", titles(unsureOf({
 t("r3-2：warn には行の実物がつく", unsureOf({ "src/fb.ts": `const re = /}/;\nconst c = { apiKey: "${AK}", authDomain: "d" };\n` }).warn[0].evidence.map((e) => e.loc), ["src/fb.ts:2"]);
 t("r3：鍵のプロパティ名が取れない（[k]: \"AIza…\"）時は warn", (() => { const F = unsureOf({ "src/a.ts": `const o = { [k]: "${AK}" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
 t("r3：danger は、プロパティの値と読めて Firebase の設定ではないと読めた時だけ（new GoogleGenAI({ apiKey: \"AIza…\" })）", geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenAI({ apiKey: "${AK}" });\n` })), ["Gemini のキーがブラウザ側に出ています"]);
-t("r3：位置引数（new GoogleGenerativeAI(\"AIza…\")）はプロパティの値ではない＝warn", (() => { const F = unsureOf({ "src/a.ts": `new GoogleGenerativeAI("${AK}");\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r5：Gemini の SDK の生成の第1引数に引用符の文字列で AIza… が直接入る形は danger（new GoogleGenerativeAI(\"AIza…\")・new GoogleGenAI(\"AIza…\")・第2引数が付いても）", ['new GoogleGenerativeAI("AIK")', "new GoogleGenAI('AIK')", 'new GoogleGenAI( "AIK" , opts)', 'const ai = new GoogleGenerativeAI("AIK");'].map((c) => geminiTitles(unsureOf({ "src/a.ts": c.replace("AIK", AK) + "\n" })).length), [1, 1, 1, 1]);
+t("r5：第1引数が識別子（new GoogleGenAI(key)）は danger にならない（鍵の文字が無いので何も出ない）", (() => { const F = unsureOf({ "src/a.ts": "const key = process.env.K;\nnew GoogleGenAI(key);\n" }); return [geminiTitles(F), F.warn.length]; })(), [[], 0]);
+t("r5：読めない形は warn のまま（連結・テンプレート・var 単独・別の呼び出し f(\"AIza…\")・生成の呼び出しでない第2引数）", ['new GoogleGenAI("AIK" + x)', "new GoogleGenAI(`AIK`)", 'var k = "AIK";', 'f("AIK")', 'new GoogleGenAI(opts, "AIK")', 'new Other("AIK")'].map((c) => { const F = unsureOf({ "src/a.ts": c.replace("AIK", AK) + "\n" }); return [geminiTitles(F).length, titles(F, "warn").length]; }), [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1]]);
 t("r3：Gemini の痕跡が無ければ読み切れなくても何も言わない（N3）", run({ "src/fb.ts": `const re = /}/; const c = { apiKey: "${AK}", authDomain: "d" };\n` }).warn.length, 0);
 // ---- レビュー r4（BLOCK）：danger は肯定の条件が揃った時だけ。読み取れなかった値は全部 warn（既定は unknown）
 const cfgWith = (v) => `const c = { apiKey: ${v}, authDomain: "d" };\n`;

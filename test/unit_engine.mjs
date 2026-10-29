@@ -141,7 +141,7 @@ t("r1-1：if isSignedIn() && customCheck() は読めない行", unresolvedOf("al
 t("r1-1：request.auth != null && customCheck() も読めない行", unresolvedOf("allow read: if request.auth != null && customCheck();").length, 1);
 t("r1-1：true && 関数 は読めない行", unresolvedOf("allow read: if true && isOk();").length, 1);
 t("r1-1：auth && データの検査 は今までどおり無言", unresolvedOf("allow create: if request.auth != null && request.resource.data.name is string;").length, 0);
-t("r1-1：持ち主の照合＋データの検査 は無言", unresolvedOf("allow write: if request.auth.uid == userId && request.resource.data.size() < 10;").length, 0);
+t("r1-1：持ち主の照合＋読める比較は無言", unresolvedOf("allow write: if request.auth.uid == userId && request.resource.data.n < 10;").length, 0);
 const G2 = (files) => geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', ...files }));
 const FBCFG = `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d.firebaseapp.com",\n};\n`;
 t("r1-2：firebaseConfig の直後の new GoogleGenAI({ apiKey: AIza }) を見逃さない", G2({ "src/a.ts": FBCFG + `const ai = new GoogleGenAI({ apiKey: "${AK}2" });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
@@ -192,4 +192,15 @@ t("r5-1：閉じない文字列は読み切れない＝warn", (() => { const F =
 t("r5-2：$GoogleGenAI(\"AIza…\") は別の名前＝danger にしない（レビューの例そのまま）", (() => { const F = unsureOf({ "src/a.ts": `$GoogleGenAI("${AK}");\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
 t("r5-2：_GoogleGenAI(・xGoogleGenAI( も別の名前", ["_GoogleGenAI", "xGoogleGenAI", "MyGoogleGenerativeAI"].map((n) => geminiTitles(unsureOf({ "src/a.ts": `${n}("${AK}");\n` })).length), [0, 0, 0]);
 t("r5-2：名前空間つき（genai.GoogleGenAI(\"AIza…\")）は SDK の呼び出しとして danger（今の扱いのまま）", geminiTitles(unsureOf({ "src/a.ts": `new genai.GoogleGenAI("${AK}");\n` })).length, 1);
+// ---- 判定の抜け（fbcheck repo 審査 BLOCK）：条件の項は完全一致の文法で読む。READMEの限界の3つ（関数・括弧・||）は、全部「判定できなかった行」に入る
+const UR = (c) => unresolvedOf(`allow read: if ${c};`);
+t("g-1：レビューの例（resource.data.x == someFunction()）は判定できなかった行", UR("resource.data.x == someFunction()").length, 1);
+t("g-1：関数・メソッドの呼び出し（右辺・左辺・メソッド）はどれも判定できなかった行", ["request.auth.uid == getOwner(x)", "getOwner(x) == request.auth.uid", "request.resource.data.size() < 10", "resource.data.keys().hasAll([\"a\"])", "request.time < timestamp.date(2099, 1, 1) && request.auth != null", "request.auth.uid == userId && resource.data.x == f()", "isSignedIn() && request.auth != null"].map((c) => UR(c).length), [1, 1, 1, 1, 1, 1, 1]);
+t("g-2：括弧は判定できなかった行（比較の中・全体・片側）", ["(request.auth != null)", "request.auth.uid == (userId)", "request.auth != null && (resource.data.x == 1)", "(true)"].map((c) => UR(c).length), [1, 1, 1, 1]);
+t("g-3：|| は判定できなかった行", ["request.auth != null || true", "resource.data.public == true || request.auth.uid == userId", "request.auth.uid == userId || isAdmin()"].map((c) => UR(c).length), [1, 1, 1]);
+t("g-4：混在（&& の片方だけ読めない）は判定できなかった行・danger にも auth にもしない", [UR("true && isOk()").length, titles(run({ "firestore.rules": FS("allow read, write: if true && isOk();") }), "danger").length, titles(run({ "firestore.rules": FS("allow read, write: if request.auth != null && isOk();") }), "danger").length], [1, 0, 0]);
+t("g-5：読める形は今までどおり無言（持ち主の照合・データの検査・is の型）", ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.auth != null && request.auth.uid == userId", "request.auth != null && request.resource.data.name is string", "request.auth.token.admin == true", "resource.data.public == true", "false"].map((c) => UR(c).length), [0, 0, 0, 0, 0, 0, 0]);
+t("g-6：request.auth.uid == null は「絞る項」にしない（true と組むと誰でも＝danger）", titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth.uid == null;") }), "danger"), ["誰でも読み書きできる状態です（firestore.rules）"]);
+t("g-7：danger の判定は変わらない（true・条件なし・auth 全体・期限・true&&読める比較）", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);"), FS("allow write: if true && request.resource.data.n is int;"), FS("allow read: if true && request.auth.uid == id;")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1, 1, 0]);
+t("g-8：FBCHECK_VERSION は 0.3.1", /const FBCHECK_VERSION = "0\.3\.1";/.test(src), true);
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

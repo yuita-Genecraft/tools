@@ -1,5 +1,5 @@
 /* ENGINE:BEGIN — fbcheck の判定本体。CLI（fbcheck.mjs）とブラウザ版で、この区間は同じ文字列を使う。 */
-const FBCHECK_VERSION = "0.3";
+const FBCHECK_VERSION = "0.3.1";
 const SKIP_DIRS = new Set([
   "node_modules", ".git", ".next", ".nuxt", ".cache", ".vercel",
   ".firebase", "coverage", ".turbo", ".svelte-kit", "vendor",
@@ -189,13 +189,30 @@ const COND_AUTH = /^request\.auth(\.uid)?\s*!=\s*null$/;
 const COND_TEST = /^request\.time\s*<\s*timestamp\.date\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)$/;
 // 上の3つのほかに、中身を読めたと言える条件。&& でつないだ条件は、各項がすべて読める時だけ（|| があれば読めない）。
 // 項の種類：true／request.auth != null／絞り込み（false・持ち主の照合・request.auth.token.x ==・送るデータの検査）／それ以外＝読めない（関数・括弧など）
+// 項（&& で区切った1つ）は、次の形に「全体が」一致した時だけ読めたとする。関数・メソッドの呼び出し・括弧・|| ・添字・それ以外は読めない（unknown）
+const OPERAND = String.raw`(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|-?\d+(?:\.\d+)?|"[^"\\]*"|'[^'\\]*'|true|false|null)`;
 const TERM_AUTH = /^request\.auth(\.uid)?\s*!=\s*null$/;
-const TERM_OWNER = /^false$|^request\.auth\.uid\s*==|==\s*request\.auth\.uid$|^request\.auth\.token\.\w+\s*==/;   // 誰かに絞る項
-const TERM_DATA = /^(request\.resource|resource)\.data\b/;                                                      // 送るデータの検査（誰が、には効かない）
+const TERM_CMP = new RegExp(`^(${OPERAND})\\s*(==|!=|<=|>=|<|>)\\s*(${OPERAND})$`);
+const TERM_IS = new RegExp(`^${OPERAND}\\s+is\\s+(?:string|int|float|number|bool|list|map|timestamp|path|latlng|bytes|duration)$`);
+const AUTH_UID = /^request\.auth\.uid$/, AUTH_TOKEN = /^request\.auth\.token\.[A-Za-z_$][\w$]*$/;
+const IS_PATH = (x) => /^[A-Za-z_$]/.test(x) && !/^(?:true|false|null)$/.test(x);   // 識別子の並び（リテラルではない）
+// 項の種類：t＝true／a＝request.auth != null／o＝誰かに絞る（false・request.auth.uid や request.auth.token.x との == ）／v＝そのほかの読める比較（送るデータの検査など・誰が、には効かない）／u＝読めない
+function termKind(x) {
+  if (x === "true") return "t";
+  if (TERM_AUTH.test(x)) return "a";
+  if (x === "false") return "o";
+  const m = x.match(TERM_CMP);
+  if (m) {
+    const [, l, op, r] = m;
+    if (op === "==" && ((AUTH_UID.test(l) && IS_PATH(r) && !AUTH_UID.test(r)) || (AUTH_UID.test(r) && IS_PATH(l) && !AUTH_UID.test(l)) || (AUTH_TOKEN.test(l) && r !== "null"))) return "o";   // request.auth.uid == null は「ログインしていない」＝絞る項ではない
+    return "v";
+  }
+  return TERM_IS.test(x) ? "v" : "u";
+}
 // 条件の種類："true"（誰でも）・"auth"（ログインしていれば誰でも）・"known"（読めて、上の2つではない）・"unknown"（読めない）
 function condKind(c) {
   if (/\|\|/.test(c)) return "unknown";
-  const kinds = c.split("&&").map((x) => x.trim()).map((x) => (x === "true" ? "t" : TERM_AUTH.test(x) ? "a" : TERM_OWNER.test(x) ? "o" : TERM_DATA.test(x) ? "v" : "u"));
+  const kinds = c.split("&&").map((x) => termKind(x.trim()));
   if (kinds.includes("u")) return "unknown";
   if (kinds.includes("o")) return "known";
   if (!kinds.includes("a")) return kinds.includes("t") ? "true" : "known";   // true だけ・true とデータの検査だけ＝誰でも

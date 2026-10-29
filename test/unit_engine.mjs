@@ -204,31 +204,13 @@ t("g-5：1つの比較・型の検査・false は無言", ["request.auth.uid == 
 t("g-6：true を含む &&・|| は true として扱わない（全体がちょうど true の時だけ danger）", [UR("true && request.auth.uid == \"alice\"").length, UR("true || someFunction()").length, UR("true && request.auth.uid == null").length, titles(run({ "firestore.rules": FS("allow read, write: if true && request.auth.uid == \"alice\";") }), "danger"), titles(run({ "firestore.rules": FS("allow read, write: if true || someFunction();") }), "danger")], [1, 1, 1, [], []]);
 t("g-7：danger の判定（全体がちょうど true・条件なし・auth 全体・期限）は変わらない", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1]);
 t("g-8：FBCHECK_VERSION は 0.3.3", /const FBCHECK_VERSION = "0\.3\.3";/.test(src), true);
-t("判定できなかった行の説明は、次の行に続く条件（今は読める）を挙げず、&&・|| と、; まで読み切れない文を挙げる", (() => { const w = unresolvedOf("allow read: if f();")[0].why; return [w.includes("条件が次の行にある"), w.includes("&&"), w.includes("読み切れない")]; })(), [false, true, true]);
-// 警告文は「この警告が出る時の条件」だけを言う。文が挙げる形を、engine とは別に（文の言葉どおり）正規表現で書き、
-// 「警告が出る式の全部で、文の条件が真（どの形にも当たらない）」「警告が出ない式では、文の条件が偽（どれかの形に当たる）」を確かめる
+// 警告文は事実だけを言う（理由の条件を列挙しない）。4回続けて、文の中の条件の列挙が判定とずれたため
 {
-  const NM = String.raw`(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|-?\d+(?:\.\d+)?|"(?:(?!&&|\|\|)[^"])*"|'(?:(?!&&|\|\|)[^'])*'|true|false|null)`;
-  const SENT = [/^true$/, /^false$/, /^request\.auth(\.uid)?\s*!=\s*null$/, /^request\.time\s*<\s*timestamp\.date\(\s*\d{4}\s*,\s*\d{1,2}\s*,\s*\d{1,2}\s*\)$/,
-    new RegExp(`^${NM}\\s*(==|!=|<=|>=|<|>)\\s*${NM}$`), new RegExp(`^${NM}\\s+is\\s+(string|int|float|number|bool|list|map|timestamp|path|latlng|bytes|duration)$`),
-    /^request\.auth\s*!=\s*null\s*&&\s*request\.auth\.uid\s*==\s*(?!request\.auth\.uid\b)(?!(?:true|false|null)\b)[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/,
-    /^(?!request\.auth\.uid\b)(?!(?:true|false|null)\b)[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*\s*==\s*request\.auth\.uid\s*&&\s*request\.auth\s*!=\s*null$/,
-    /^request\.auth\.uid\s*==\s*(?!request\.auth\.uid\b)(?!(?:true|false|null)\b)[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*\s*&&\s*request\.auth\s*!=\s*null$/,
-    /^(?!request\.auth\.uid\b)(?!(?:true|false|null)\b)[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*\s*==\s*request\.auth\.uid\s*&&\s*request\.auth\s*!=\s*null$/,
-    /^request\.auth\s*!=\s*null\s*&&\s*(?!request\.auth\.uid\b)(?!(?:true|false|null)\b)[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*\s*==\s*request\.auth\.uid$/];
-  const covered = (c) => SENT.some((r) => r.test(c));
-  const T = ["true", "false", "request.auth != null", "request.auth.uid != null", "request.auth.uid == userId", "userId == request.auth.uid", "resource.data.owner == request.auth.uid", "request.auth.uid == \"alice\"", "request.auth.uid == null", "request.auth.uid == request.auth.uid", "request.auth != null || true", "request.resource.data.n is int", "request.resource.data.n < 10", "request.time < timestamp.date(2099, 1, 1)", "request.time < timestamp.date(2099, 1, 1) && request.auth != null", "someFunction()", "resource.data.x == someFunction()", "(request.auth != null)", "request.resource.data.size() < 10", "isSignedIn()", "request.auth.token.admin == true", "request.auth.uid != userId", "x == \"a&&b\""];
-  const E = [...T];
-  for (const a of T) for (const b of T) { E.push(a + " && " + b, a + " || " + b); }
-  for (const a of ["request.auth != null", "request.auth.uid == userId", "userId == request.auth.uid"]) for (const b of ["request.auth != null", "request.auth.uid == userId", "userId == request.auth.uid", "resource.data.owner == request.auth.uid", "f()", "true"]) for (const c of ["f()", "true", "request.auth.uid == userId"]) E.push(`${a} && ${b} && ${c}`);
-  const bad = [];
-  for (const c of E) {
-    const shown = unresolvedOf(`allow read: if ${c};`).length > 0, inSentence = covered(c);
-    if (shown === inSentence) bad.push(`${c} 警告=${shown} 文の形に当たる=${inSentence}`);
-  }
-  t(`警告が出る式の全部で、文の条件が真（どの形にも当たらない）／出ない式では偽（${E.length} 式）`, bad.slice(0, 5), []);
   const W = unresolvedOf("allow read: if f();")[0].why;
-  t("警告文は一般の「読めない例」の一覧を言わない・この警告が出る条件を言う", [W.includes("読めない例"), W.includes("読める例"), W.includes("この警告は"), W.includes("どれにも当たらない")], [false, false, true, true]);
+  const NG = ["&&", "||", "文字列", "括弧", "関数", "次の行", "isSignedIn", ";", "request.auth", "読める例", "読めない例", "ただし"];
+  t("警告が出る時に、この文が出る（読める形に当たらなかったため、判定していない・手で確かめる）", [W.includes("この allow の条件は、このチェックが読める形に当たらなかったため、安全かどうかを判定していません。"), W.includes("手で確かめてください")], [true, true]);
+  t("文に、形の列挙（&&・||・文字列・括弧・関数・次の行・; など）が無い", NG.filter((w) => W.includes(w)), []);
+  t("この文は、判定できなかったどの種類の行にも同じ（関数・括弧・&&・||・; で終わらない文・複数行の続き）", ["allow read: if f();", "allow read: if (request.auth != null);", "allow read: if request.auth != null || true;", "allow read: if true && g();", "allow read: if request.auth != null"].map((b) => unresolvedOf(b)[0].why === W), [true, true, true, true, true]);
 }
 // ---- 表から機械的に作る試験（レビュー r1 の指摘：手で思いついた例だけにしない）。項 × つなぎ × 改行の位置 の全組み合わせ
 {

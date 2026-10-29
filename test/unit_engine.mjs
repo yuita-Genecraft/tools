@@ -1,8 +1,8 @@
 // engine.js の部品を直接たたく（.gitignore の読み・ルールの読み）
 import fs from "node:fs"; import vm from "node:vm";
 const src = fs.readFileSync(new URL("../fbcheck-web/engine.js", import.meta.url), "utf8");
-const ctx = {}; vm.createContext(ctx); vm.runInContext(src + "\n;globalThis.E={gitignoreCovers, matchChains, allowsIn, isWholeScope, globToRegex, runChecks, looseJson};", ctx);
-const { gitignoreCovers, matchChains, allowsIn, isWholeScope, runChecks, looseJson } = ctx.E;
+const ctx = {}; vm.createContext(ctx); vm.runInContext(src + "\n;globalThis.E={condKind, OWNER_DOC, gitignoreCovers, matchChains, allowsIn, isWholeScope, globToRegex, runChecks, looseJson};", ctx);
+const { condKind, OWNER_DOC, gitignoreCovers, matchChains, allowsIn, isWholeScope, runChecks, looseJson } = ctx.E;
 let fail = 0;
 const t = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fail++; console.log((ok ? "OK  " : "NG  ") + name + (ok ? "" : `  got=${JSON.stringify(got)} want=${JSON.stringify(want)}`)); };
 const C = (gi, rel) => gitignoreCovers(gi, rel).covered;
@@ -205,7 +205,9 @@ t("g-6：true を含む &&・|| は true として扱わない（全体がちょ
 t("g-7：danger の判定（全体がちょうど true・条件なし・auth 全体・期限）は変わらない", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1]);
 t("g-8：FBCHECK_VERSION は 0.3.3", /const FBCHECK_VERSION = "0\.3\.3";/.test(src), true);
 t("判定できなかった行の説明は、次の行に続く条件（今は読める）を挙げず、関数・括弧・&&・||・; で終わらない文を挙げる", (() => { const w = unresolvedOf("allow read: if f();")[0].why; return [w.includes("条件が次の行にある"), w.includes("&&"), w.includes("; で終わっていない")]; })(), [false, true, true]);
-t("説明文の「&& は読めない」と判定の例外が食い違わない：説明文は持ち主の定番の形を読める例外として挙げ、その形は実際に判定できなかった行に出ない", (() => { const w = unresolvedOf("allow read: if f();")[0].why; return [w.includes("持ち主の定番の形") && w.includes("request.auth != null") && w.includes("読めます"), unresolvedOf("allow read: if request.auth != null && request.auth.uid == userId;").length, unresolvedOf("allow read: if userId == request.auth.uid && request.auth != null;").length, unresolvedOf("allow read: if request.auth != null && request.auth.uid == userId && f();").length]; })(), [true, 0, 0, 1]);
+t("説明文の例外の表（OWNER_DOC）：読める例は全部 condKind が known・読めない例は全部 unknown", [OWNER_DOC.yes.map(condKind), OWNER_DOC.no.map(condKind)], [OWNER_DOC.yes.map(() => "known"), OWNER_DOC.no.map(() => "unknown")]);
+t("説明文の例外の表：実際の判定（判定できなかった行の数）も表と一致する（読める例＝0・読めない例＝1）", [OWNER_DOC.yes.map((c) => unresolvedOf(`allow read: if ${c};`).length), OWNER_DOC.no.map((c) => unresolvedOf(`allow read: if ${c};`).length)], [OWNER_DOC.yes.map(() => 0), OWNER_DOC.no.map(() => 1)]);
+t("説明文は表の例を全部そのまま載せ、読める例と読めない例を分けて言い、広すぎる言い方（持ち主の定番の形は読めます）をしない", (() => { const w = unresolvedOf("allow read: if f();")[0].why; const [pre, post] = w.split("読めない例："); return [OWNER_DOC.yes.every((c) => pre.includes(c) && !post.includes(c + " ／") ), OWNER_DOC.no.every((c) => post.includes(c)), w.includes("持ち主の定番の形は読めます"), w.includes("文字列・null・uid 同士との比較")]; })(), [true, true, false, true]);
 // ---- 表から機械的に作る試験（レビュー r1 の指摘：手で思いついた例だけにしない）。項 × つなぎ × 改行の位置 の全組み合わせ
 {
   const READ = ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.resource.data.name is string", "request.auth.uid == \"alice\"", "false"];

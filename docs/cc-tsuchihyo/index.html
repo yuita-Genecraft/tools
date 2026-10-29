@@ -227,6 +227,10 @@ tfoot td{font-weight:700;border-bottom:0}
 const $ = s => document.querySelector(s);
 const STANDALONE = window.__STANDALONE__ === true;
 const TOOL_URL = typeof window.__TOOL_URL__ === 'string' ? window.__TOOL_URL__ : '';
+// 画像の下端の行と共有文で同じ文字を使う（URL は公開先の URL・無ければ公開中のページ。共有文の URL 行と同じ物から「https://」と末尾の「/」を外したもの）
+const CARD_URL = (TOOL_URL || 'https://yuita-genecraft.github.io/tools/cc-tsuchihyo/').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+const HASHTAG = '#ClaudeCode通知表';
+const AUTHOR = '@yuita_Genecraft';
 
 /* ---------- 表示の小道具 ---------- */
 const fmt = n => Math.round(n || 0).toLocaleString('ja-JP');
@@ -944,8 +948,8 @@ function drawCard(R, name, rate){
   x.restore();
 
   // 足元
-  text('Claude Code 通知表 ・ ログは端末の外に出ていません', 64, H - 64, `500 17px ${GOTHIC}`, P.sub);
-  text('#ClaudeCode通知表', W - 64, H - 64, `600 17px ${GOTHIC}`, P.line, 'right');
+  text(CARD_URL, 64, H - 64, `700 21px ${GOTHIC}`, P.line);
+  text(`作 ${AUTHOR} ・ ${HASHTAG}`, W - 64, H - 64, `500 17px ${GOTHIC}`, P.sub, 'right');
 
   if (R.sample) {
     x.save();
@@ -1066,7 +1070,7 @@ function shareText(R, title, rate){
     `・Claudeが働いた時間：${hoursText(R.workMin || 0)}`,
     `・APIトークン料金換算：${usd(R.usd)}（${yen(R.usd * rate)}）`,
     `称号は「${title}」でした`,
-    '#ClaudeCode通知表 via @yuita_Genecraft',
+    `${HASHTAG} via ${AUTHOR}`,
   ];
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');

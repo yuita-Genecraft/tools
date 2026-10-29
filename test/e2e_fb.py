@@ -8,12 +8,17 @@ CLI = HERE / "out" / "fbcheck.mjs"   # engine から毎回作る（Git には入
 # テスト用プロジェクトの上の階層（このリポジトリ自体）を git が見に行かないようにする。
 # これが無いと、git の外のつもりの fbproj〜fbproj5 が、このリポジトリの中として判定される。
 CLI_ENV = {**os.environ, "GIT_CEILING_DIRECTORIES": str(HERE.resolve())}
-subprocess.run([sys.executable, str(ROOT / "fbcheck-web/sync_engine.py"), str(CLI)], check=True)
+# app.html は直さない（--no-app）：コミットした ENGINE 区間が engine.js とずれていれば、ここで失敗にする（N5）
+subprocess.run([sys.executable, str(ROOT / "fbcheck-web/sync_engine.py"), "--no-app", str(CLI)], check=True)
+sync = subprocess.run([sys.executable, str(HERE / "check_engine_sync.py"), str(ROOT / "fbcheck-web/app.html")], capture_output=True, text=True)
+print(sync.stdout.strip())
+if sync.returncode != 0:
+    print("NG  app.html の ENGINE 区間が engine.js と違います（python3 fbcheck-web/sync_engine.py で入れ直してコミット）"); sys.exit(1)
 subprocess.run([sys.executable, str(ROOT / "build_standalone.py"), str(ROOT / "fbcheck-web/app.html"), str(ROOT / "fbcheck-web/dist/index.html")], check=True)
 subprocess.run([sys.executable, str(HERE / "gen_fbproj.py")], check=True)
 URL = (ROOT / "fbcheck-web/dist/index.html").as_uri()
 SHOTS = HERE / "shots"; SHOTS.mkdir(exist_ok=True)
-FIX = ["fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj9", "fbproj10", "fbproj11", "fbproj12"]          # git の外＝CLI も Git を読めない→ブラウザ版と一致するはず
+FIX = ["fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15"]          # git の外＝CLI も Git を読めない→ブラウザ版と一致するはず
 FIX_GIT = ["fbproj6", "fbproj7", "fbproj8"]                           # 本物の git リポジトリ＝CLI だけが git で確かめられる
 
 def parse_cli(txt):
@@ -119,5 +124,13 @@ g11 = [f for f in r11["danger"] if f["title"] == "Gemini のキーがブラウ�
 ok(len(g11) == 1 and {e.split(" ")[0] for e in g11[0]["ev"]} == {"src/ai.ts:2", ".env:1"}, "B4: Gemini の痕跡＋AIza（src と接頭辞つき .env）を出し、firebaseConfig・VITE_FIREBASE_API_KEY は含めない")
 ok(len(r11["info"]) == 1 and r11["info"][0]["ev"] == ["src/firebase.ts:3（対応不要）"], "B4: firebaseConfig の apiKey は従来どおり info")
 ok(not any(f["title"].startswith("Gemini") for f in allf(r12)) and len(r12["info"]) == 1, "N3: Gemini の痕跡が無い apiKey は danger にしない（info のまま）")
+g13 = res["fbproj13"]
+ok(any(f["title"].startswith("ログインしている人なら誰でも読める場所があります") and f["ev"][0].startswith("firestore.rules:3") for f in g13["warn"]), "N5/B3: #02 request.auth.uid != null を auth と同じに読む（ブラウザ版と CLI が一致）")
+u13 = [f for f in g13["warn"] if f["title"].startswith("判定できなかった allow の行があります")]
+ok(len(u13) == 1 and u13[0]["title"].startswith("判定できなかった allow の行があります（5 行") , "N5/N2: #03・#05・#06・&& の関数・複数行の ops を無言にしない（5 行）")
+ok(any("if true && true" in e or "true && true" in e for f in g13["danger"] for e in f["ev"]) and not any("firestore.rules:11" in e for f in g13["warn"] for e in f["ev"]), "B2: if true && true は読めない行ではなく danger 側")
+g14 = res["fbproj14"]
+ok(len([f for f in g14["danger"] if f["title"] == "Gemini のキーがブラウザ側に出ています"][0]["ev"]) == 2 and len(g14["info"]) == 1 and g14["info"][0]["ev"] == ["src/firebase.ts:2（対応不要）"], "B4: firebaseConfig の隣・同じ行の Gemini キーを見逃さず、Firebase の鍵だけ info")
+ok(t9(res["fbproj15"], "warn") == ["database.rules.json を読めませんでした"], "N4: 閉じていない /* の database.rules.json は warn（無言にしない）")
 print("\nALL PASS" if fails == 0 else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

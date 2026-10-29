@@ -134,4 +134,18 @@ t("N4：JSON でない中身も warn", titles(rt("not json"), "warn"), ["databas
 t("B5：ルールが無い {}（rules が空）は何も出さない", ["danger", "warn"].map((k) => titles(rt('{"rules":{}}'), k).length), [0, 0]);
 // 変えない物：正しい持ち主ルール・一部の read: true は今までどおり
 t("不変：持ち主のルールだけ＝何も出ない", ["danger", "warn", "info"].map((k) => titles(run({ "firestore.rules": "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth != null && request.auth.uid == userId;\n    }\n  }\n}\n" }), k).length), [0, 0, 0]);
+// ---- レビュー r1（BLOCK）の指摘
+t("r1-1：if true && true は danger（読めない行にしない）", [titles(run({ "firestore.rules": FS("allow read, write: if true && true;") }), "danger"), unresolvedOf("allow read, write: if true && true;").length], [["誰でも読み書きできる状態です（firestore.rules）"], 0]);
+t("r1-1：if isSignedIn() && customCheck() は読めない行", unresolvedOf("allow read: if isSignedIn() && customCheck();").length, 1);
+t("r1-1：request.auth != null && customCheck() も読めない行", unresolvedOf("allow read: if request.auth != null && customCheck();").length, 1);
+t("r1-1：true && 関数 は読めない行", unresolvedOf("allow read: if true && isOk();").length, 1);
+t("r1-1：auth && データの検査 は今までどおり無言", unresolvedOf("allow create: if request.auth != null && request.resource.data.name is string;").length, 0);
+t("r1-1：持ち主の照合＋データの検査 は無言", unresolvedOf("allow write: if request.auth.uid == userId && request.resource.data.size() < 10;").length, 0);
+const G2 = (files) => geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', ...files }));
+const FBCFG = `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d.firebaseapp.com",\n};\n`;
+t("r1-2：firebaseConfig の直後の new GoogleGenAI({ apiKey: AIza }) を見逃さない", G2({ "src/a.ts": FBCFG + `const ai = new GoogleGenAI({ apiKey: "${AK}2" });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+t("r1-2：同じ行（配布物）の firebaseConfig と Gemini でも Gemini 側だけを danger にし（info は同じ行なので出さない＝安全側）", (() => { const F = run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "dist/a.js": `var c={apiKey:"${AK}",authDomain:"d"},g=new GoogleGenAI({apiKey:"${AK}2"});\n` }); return [F.danger.filter((f) => f.title.startsWith("Gemini")).map((f) => f.evidence.length), F.info.length]; })(), [[1], 0]);
+t("r1-2：Gemini の鍵の行を Firebase の apiKey は正常と言わない", run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "src/a.ts": `new GoogleGenAI({ apiKey: "${AK}" });\n` }).info.length, 0);
+t("r1-3：閉じていない /* は parse 失敗（warn）", [titles(rt('{"rules":{}}/*'), "warn"), titles(rt('{"rules":{}}\n/* 閉じない'), "warn")], [["database.rules.json を読めませんでした"], ["database.rules.json を読めませんでした"]]);
+t("r1-3：looseJson は閉じていない /* で例外", (() => { try { looseJson('{"a":1}/*'); return "no throw"; } catch (e) { return "throw"; } })(), "throw");
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

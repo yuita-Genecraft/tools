@@ -196,7 +196,17 @@ const TEXT_EXT = new Set([
 const MAX_BYTES = 2 * 1024 * 1024;
 const GEMINI_TRACE = /@google\/generative-ai|@google\/genai|generativelanguage\.googleapis\.com|GoogleGenerativeAI\(|GoogleGenAI\(/;
 const AIZA_KEY = /AIza[A-Za-z0-9_\-]{10,}/;
-const FIREBASE_CONFIG_NEAR = /authDomain|messagingSenderId|storageBucket|measurementId/;
+const FIREBASE_CONFIG_KEYS = /authDomain|messagingSenderId|storageBucket|measurementId/;
+// この位置の鍵が、firebaseConfig の apiKey そのものか：apiKey: "…" の値で、それを囲む { } の中に authDomain などがある時だけ
+// （隣の行・同じ行にある別のオブジェクトの鍵は除外しない）
+function inFirebaseConfig(text, at) {
+  if (!/\bapiKey["']?\s*[:=]\s*["'`]$/.test(text.slice(Math.max(0, at - 40), at))) return false;
+  let d = 0, s = at;
+  while (s > 0 && at - s < 3000) { s--; const c = text[s]; if (c === "}") d++; else if (c === "{") { if (d === 0) break; d--; } }
+  let e = at; d = 0;
+  while (e < text.length && e - at < 3000) { const c = text[e]; if (c === "{") d++; else if (c === "}") { if (d === 0) break; d--; } e++; }
+  return FIREBASE_CONFIG_KEYS.test(text.slice(s, e));
+}
 const BUNDLE_DIRS = ["dist", "build", "out", "public", ".output"];
 // 見本として Git に入れる前提の .env（中身は本物の鍵を入れない約束のファイル）
 const TEMPLATE_ENV = /^\.env\.(example|sample|template|dist|defaults)$/i;
@@ -298,9 +308,21 @@ function stripBlockComments(lines) {
 const COND_TRUE = /^true\s*(\|\||$)/;
 const COND_AUTH = /^request\.auth(\.uid)?\s*!=\s*null$/;
 const COND_TEST = /^request\.time\s*<\s*timestamp\.date\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)$/;
-// 上の3つのほかに、中身を読めたと言える条件：false・持ち主との照合・&& でつないだ条件（|| が無ければ、つないだ分だけ絞られる）。
-// これ以外（関数の呼び出し・括弧・|| ・次の行にある条件）は判定できなかった行として出す
-const COND_KNOWN = (c) => /^false$/.test(c) || (!/\|\|/.test(c) && (/&&/.test(c) || /\brequest\.auth\.uid\s*==|==\s*request\.auth\.uid\b|\brequest\.auth\.token\.\w+\s*==/.test(c)));
+// 上の3つのほかに、中身を読めたと言える条件。&& でつないだ条件は、各項がすべて読める時だけ（|| があれば読めない）。
+// 項の種類：true／request.auth != null／絞り込み（false・持ち主の照合・request.auth.token.x ==・送るデータの検査）／それ以外＝読めない（関数・括弧など）
+const TERM_AUTH = /^request\.auth(\.uid)?\s*!=\s*null$/;
+const TERM_NARROW = /^false$|^request\.auth\.uid\s*==|==\s*request\.auth\.uid$|^request\.auth\.token\.\w+\s*==|^(request\.resource|resource)\.data\b/;
+function condKind(c) {
+  if (/\|\|/.test(c)) return "unknown";
+  const terms = c.split("&&").map((x) => x.trim());
+  if (terms.every((x) => x === "true")) return "true";
+  const kinds = terms.map((x) => (x === "true" ? "t" : TERM_AUTH.test(x) ? "a" : TERM_NARROW.test(x) ? "n" : "u"));
+  if (kinds.includes("u")) return "unknown";
+  if (kinds.includes("t") && !terms.some((x) => /^false$|^request\.auth\.uid\s*==|==\s*request\.auth\.uid$|^request\.auth\.token\.\w+\s*==/.test(x))) return "unknown";   // true と絞り込みだけ（持ち主の照合なし）＝何に効くか言えない
+  return "known";
+}
+const COND_KNOWN = (c) => condKind(c) === "known";
+const COND_TRUEISH = (c) => COND_TRUE.test(c) || condKind(c) === "true";
 
 // コメント（// と /* */）と末尾のカンマを、文字列の外だけ落とす。コンソールのテストモードの rules や firebase init が書く形を読むため
 function looseJson(text) {
@@ -309,7 +331,7 @@ function looseJson(text) {
     const c = text[i];
     if (c === '"') { let j = i + 1; while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1; out += text.slice(i, j + 1); i = j + 1; }
     else if (c === "/" && text[i + 1] === "/") { while (i < text.length && text[i] !== "\n") i++; }
-    else if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); i = e < 0 ? text.length : e + 2; }
+    else if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); if (e < 0) throw new Error("unterminated block comment"); i = e + 2; }
     else { out += c; i++; }
   }
   let res = "", k = 0;
@@ -500,12 +522,12 @@ function runChecks(P) {
       const found = allowsIn(lines[i]);
       // 判定できなかった allow：行に allow があるのに取り出せない（条件が次の行・複数行の ops など）／条件を読めない（関数・括弧・||）
       const nAllow = (bare[i].match(/\ballow\b/g) || []).length;
-      const known = (a) => a.bare || COND_TRUE.test(a.cond) || COND_AUTH.test(a.cond) || COND_TEST.test(a.cond) || COND_KNOWN(a.cond);
+      const known = (a) => a.bare || COND_TRUEISH(a.cond) || COND_AUTH.test(a.cond) || COND_TEST.test(a.cond) || COND_KNOWN(a.cond);
       if (nAllow && (nAllow > found.length || !found.every(known))) unresolved.push({ loc: `${f.rel}:${i + 1}`, code: lines[i].trim() });
       for (const a of found) {
         const whole = isWholeScope(chains[i]);
         const ev = { loc: `${f.rel}:${i + 1}`, code: lines[i].trim(), ops: a.ops, chain: chains[i], bare: !!a.bare };
-        if (COND_TRUE.test(a.cond)) {
+        if (COND_TRUEISH(a.cond)) {
           ev.mark = a.bare ? "条件なし" : "if " + a.cond.replace(/\s*\|\|.*$/, "");
           (opFamily(a.ops).includes("w") || whole ? G.anyoneHard : G.anyoneSoft).push(ev);
         } else if (COND_AUTH.test(a.cond)) {
@@ -680,18 +702,25 @@ function runChecks(P) {
     for (const f of P.files) {
       const text = read(f.rel);
       if (text == null || f.name === ".env.example") continue;
-      const lines = text.split(/\r?\n/);
       const isEnv = f.name.startsWith(".env");
       if (isEnv && TEMPLATE_ENV.test(f.name)) continue;
-      lines.forEach((ln, i) => {
-        const k = ln.match(AIZA_KEY);
-        if (!k) return;
-        if (isEnv) {
+      if (isEnv) {
+        text.split(/\r?\n/).forEach((ln, i) => {
+          const k = ln.match(AIZA_KEY);
+          if (!k) return;
           const m = ln.match(new RegExp("^\\s*(?:export\\s+)?(" + PUBLIC_PREFIX + "\\w*)\\s*="));
           if (!m || /FIREBASE/i.test(m[1])) return;
-        } else if (lines.slice(Math.max(0, i - 6), i + 7).some((x) => FIREBASE_CONFIG_NEAR.test(x))) return;
-        geminiHits.push({ loc: `${f.rel}:${i + 1}`, code: `AIza で始まる鍵  ${mask(k[0])}` });
-      });
+          geminiHits.push({ loc: `${f.rel}:${i + 1}`, code: `AIza で始まる鍵  ${mask(k[0])}` });
+        });
+        continue;
+      }
+      const re = new RegExp(AIZA_KEY.source, "g");
+      let k;
+      while ((k = re.exec(text))) {
+        if (inFirebaseConfig(text, k.index)) continue;
+        const loc = `${f.rel}:${text.slice(0, k.index).split("\n").length}`;
+        if (!geminiHits.some((h) => h.loc === loc && h.code.endsWith(mask(k[0])))) geminiHits.push({ loc, code: `AIza で始まる鍵  ${mask(k[0])}` });
+      }
     }
   }
   if (geminiHits.length) add("danger", {

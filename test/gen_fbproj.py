@@ -15,7 +15,7 @@ def w(root, p, s):
     p = root / p; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(s, encoding="utf-8")
 
 def main():
-    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8", "fbproj9", "fbproj10", "fbproj11", "fbproj12"):
+    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15"):
         shutil.rmtree(HERE / n, ignore_errors=True)
     R = HERE / "fbproj"
     w(R, "firebase.json", json.dumps({"firestore": {"rules": "firestore.rules"}, "storage": {"rules": "storage.rules"}}, indent=2))
@@ -129,6 +129,19 @@ service firebase.storage {
     w(R12, "package.json", json.dumps({"name": "r12", "dependencies": {"firebase": "^11.0.0"}}, indent=2))
     w(R12, "src/firebase.ts", f'const firebaseConfig = {{ apiKey: "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
     w(R12, ".gitignore", ".env*\n")
+    R13 = HERE / "fbproj13"   # #02・#03・#05・#06 と && の形（レビュー r1）：ブラウザ版と CLI が同じ結果を出すか
+    w(R13, "firebase.json", '{"firestore":{"rules":"firestore.rules"}}\n')
+    w(R13, "firestore.rules", "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /a/{id} { allow read: if request.auth.uid != null; }\n    match /b/{id} { allow read: if request.auth != null || true; }\n    match /c/{id} {\n      allow read: if\n        true;\n    }\n    match /d/{id} { allow read: if (request.auth != null); }\n    match /e/{id} { allow read: if isSignedIn() && customCheck(); }\n    match /f/{id} { allow write: if true && true; }\n    match /g/{id} {\n      allow read,\n        write: if request.auth != null && request.auth.uid == id;\n    }\n  }\n}\n")
+    w(R13, ".gitignore", ".env*\n")
+    R14 = HERE / "fbproj14"   # firebaseConfig と Gemini のキーが隣・同じ行
+    w(R14, "package.json", json.dumps({"name": "r14", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R14, "src/firebase.ts", f'const firebaseConfig = {{\n  apiKey: "{FAKE_FB_APIKEY}",\n  authDomain: "demo.firebaseapp.com",\n}};\nconst ai = new GoogleGenAI({{ apiKey: "{FAKE_GEMINI}" }});\n')
+    w(R14, "dist/assets/a.js", f'var c={{apiKey:"{FAKE_FB_APIKEY}",authDomain:"d.firebaseapp.com"}},g=new GoogleGenAI({{apiKey:"{FAKE_GEMINI}"}});\n')
+    w(R14, ".gitignore", ".env*\n")
+    R15 = HERE / "fbproj15"   # 閉じていない /* の database.rules.json
+    w(R15, "firebase.json", '{"database":{"rules":"database.rules.json"}}\n')
+    w(R15, "database.rules.json", '{"rules":{}}\n/* 閉じていないコメント\n')
+    w(R15, ".gitignore", ".env*\n")
     print("ok")
 
 if __name__ == "__main__":

@@ -1,6 +1,22 @@
 # tools — ブラウザだけで動く道具
 
-AIで開発する人向けの、ページの中だけで動く小さな道具です。外部APIを使わず、あなたのファイルを外に送りません（ページ側の CSP で通信そのものを禁止しています）。
+**Claude Code のログを落とすだけで、推定作業時間・使った日数・APIトークン料金の換算を「通知表」の画像にします。** 開くのはこのページ → https://yuita-genecraft.github.io/tools/cc-tsuchihyo/
+
+- 何ができるか：`~/.claude/projects` のログを集計し、通知表の画像を作ります（ほかに、AI 開発ログマップ・Firebase 公開前チェックがあります）
+- ログは外に送りません：ページの中だけで動き、通信はブラウザ側（CSP）で禁止しています
+- 使い方：上のページを開き、ログのフォルダをドロップするだけです
+
+[![Claude Code 通知表](docs/og/cc-tsuchihyo.png)](https://yuita-genecraft.github.io/tools/cc-tsuchihyo/)
+
+| 道具 | 開く |
+|---|---|
+| Claude Code 通知表 | https://yuita-genecraft.github.io/tools/cc-tsuchihyo/ |
+| AI 開発ログマップ | https://yuita-genecraft.github.io/tools/cc-seizon/ |
+| Firebase 公開前チェック | https://yuita-genecraft.github.io/tools/fbcheck/ |
+
+作：ゆいた（[@yuita_Genecraft](https://x.com/yuita_Genecraft)）
+
+## 道具の詳細
 
 | 道具 | 中身 | ソース |
 |---|---|---|

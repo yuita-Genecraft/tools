@@ -78,6 +78,9 @@ with sync_playwright() as p:
             src = page.get_attribute("#cardImg", "src")
             (SHOTS / "card-mine.png").write_bytes(base64.b64decode(src.split(",", 1)[1]))
             print("share text:\n" + page.input_value("#shareText"))
+            st = page.input_value("#shareText")
+            check("share text via once at the tag line", (st.count("via @yuita_Genecraft"), "#ClaudeCode通知表 via @yuita_Genecraft" in st.split("\n")), (1, True))
+            check("author line in colophon", page.eval_on_selector_all(".colophon a[href='https://x.com/yuita_Genecraft']", "e => e.length"), 1)
             # フォルダ選択（~/.claude 相当を丸ごと＝history.jsonl も混ざる）
             page.click("#resetBtn")
             page.set_input_files("#dirInput", str(HERE / "logs"))

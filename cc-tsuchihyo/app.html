@@ -200,6 +200,7 @@ tfoot td{font-weight:700;border-bottom:0}
     <p>APIトークン料金換算は、Anthropic が公開している API 料金表（2026年9月29日時点）のトークン単価で計算した目安です。Web検索などのサーバー側ツールの料金は含みません。Pro や Max などの定額プランで使っている場合、実際の請求額とは違います。</p>
     <p>ログには同じ応答が複数行に分かれて記録されるため、応答のIDで重複を除いてから数えています。</p>
     <p>個人が作った非公式のツールです。Anthropic 社とは関係ありません。</p>
+    <p>作：ゆいた（<a href="https://x.com/yuita_Genecraft" target="_blank" rel="noopener">@yuita_Genecraft</a>）・<a href="https://github.com/yuita-Genecraft/tools" target="_blank" rel="noopener">ソース（GitHub）</a></p>
   </footer>
 </div>
 
@@ -1048,7 +1049,7 @@ function shareText(R, title, rate){
     `・Claudeが働いた時間：${hoursText(R.workMin || 0)}`,
     `・APIトークン料金換算：${usd(R.usd)}（${yen(R.usd * rate)}）`,
     `称号は「${title}」でした`,
-    '#ClaudeCode通知表',
+    '#ClaudeCode通知表 via @yuita_Genecraft',
   ];
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');

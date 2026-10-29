@@ -205,6 +205,7 @@ t("g-6：true を含む &&・|| は true として扱わない（全体がちょ
 t("g-7：danger の判定（全体がちょうど true・条件なし・auth 全体・期限）は変わらない", [FS("allow read, write: if true;"), FS("allow read, write;"), FS("allow read, write: if request.auth != null;"), FS("allow read, write: if request.time < timestamp.date(2099, 1, 1);")].map((b) => run({ "firestore.rules": b }).danger.length), [1, 1, 1, 1]);
 t("g-8：FBCHECK_VERSION は 0.3.3", /const FBCHECK_VERSION = "0\.3\.3";/.test(src), true);
 t("判定できなかった行の説明は、次の行に続く条件（今は読める）を挙げず、関数・括弧・&&・||・; で終わらない文を挙げる", (() => { const w = unresolvedOf("allow read: if f();")[0].why; return [w.includes("条件が次の行にある"), w.includes("&&"), w.includes("; で終わっていない")]; })(), [false, true, true]);
+t("説明文の「&& は読めない」と判定の例外が食い違わない：説明文は持ち主の定番の形を読める例外として挙げ、その形は実際に判定できなかった行に出ない", (() => { const w = unresolvedOf("allow read: if f();")[0].why; return [w.includes("持ち主の定番の形") && w.includes("request.auth != null") && w.includes("読めます"), unresolvedOf("allow read: if request.auth != null && request.auth.uid == userId;").length, unresolvedOf("allow read: if userId == request.auth.uid && request.auth != null;").length, unresolvedOf("allow read: if request.auth != null && request.auth.uid == userId && f();").length]; })(), [true, 0, 0, 1]);
 // ---- 表から機械的に作る試験（レビュー r1 の指摘：手で思いついた例だけにしない）。項 × つなぎ × 改行の位置 の全組み合わせ
 {
   const READ = ["request.auth.uid == userId", "resource.data.owner == request.auth.uid", "request.resource.data.name is string", "request.auth.uid == \"alice\"", "false"];

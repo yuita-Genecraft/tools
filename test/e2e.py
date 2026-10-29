@@ -141,16 +141,22 @@ with sync_playwright() as p:
     ctx.close()
     b.close()
 
-# 公開先の URL つきの build：共有文の URL の行と、画像の下端の URL が同じ物か
-PUB = "https://yuita-genecraft.github.io/tools/cc-tsuchihyo/"
-subprocess.run([sys.executable, str(HERE.parent / "build_standalone.py"), str(APP / "app.html"), str(APP / "dist" / "pub.html"), "--url", PUB], check=True)
+# --url に渡した値が、画像の下端の URL と共有文の URL の行の両方に出るか（既定の URL と同じ値だけでは、注入が効いているか区別できない）。
+# https・http・末尾のスラッシュなし・別のパスを渡す。画像は「https://」「http://」と末尾の「/」を外した文字
+PUBS = [("https://yuita-genecraft.github.io/tools/cc-tsuchihyo/", "yuita-genecraft.github.io/tools/cc-tsuchihyo"),
+        ("http://example.test/tools/cc-tsuchihyo", "example.test/tools/cc-tsuchihyo"),
+        ("https://example.test/other/path/", "example.test/other/path")]
 with sync_playwright() as p2:
-    b2 = p2.chromium.launch(); pg = b2.new_context(bypass_csp=True).new_page(); pg.add_init_script(FILLTEXT_SPY)
-    pg.goto((APP / "dist" / "pub.html").as_uri())
-    pg.wait_for_function("document.getElementById('cardImg').src.startsWith('data:image/png')")
-    share_lines = pg.input_value("#shareText").split("\n")
-    left = pg.evaluate("window.__fillTextCalls.filter(c => c.h === 1350 && c.y === 1286 && c.align === 'left').map(c => c.s)")
-    check("pub build: card URL == share text URL line without scheme", (share_lines[-1], left), (PUB, [PUB.replace("https://", "").rstrip("/")]))
+    b2 = p2.chromium.launch()
+    for i, (pub, shown) in enumerate(PUBS):
+        out = APP / "dist" / f"pub{i}.html"
+        subprocess.run([sys.executable, str(HERE.parent / "build_standalone.py"), str(APP / "app.html"), str(out), "--url", pub], check=True)
+        pg = b2.new_context(bypass_csp=True).new_page(); pg.add_init_script(FILLTEXT_SPY)
+        pg.goto(out.as_uri())
+        pg.wait_for_function("document.getElementById('cardImg').src.startsWith('data:image/png')")
+        share_lines = pg.input_value("#shareText").split("\n")
+        left = pg.evaluate("window.__fillTextCalls.filter(c => c.h === 1350 && c.y === 1286 && c.align === 'left').map(c => c.s)")
+        check(f"pub build {pub}: share text URL line / card URL", (share_lines[-1], left), (pub, [shown]))
     b2.close()
 
 print(f"CHECK FAILURES: {failures}")

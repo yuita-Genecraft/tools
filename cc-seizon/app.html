@@ -368,6 +368,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
     <p>ログとファイルはブラウザの中で読み、数えた結果だけを画面に出します。このページはサーバーと通信しません。</p>
     <p>「AI が書いた行」は、Claude Code の Edit・Write、Codex のファイル変更（FileChange）、Antigravity の write_to_file・replace_file_content で新しく入った行です。シェルのコマンド（ヒアドキュメントなど）で書かれた行や、ログの期間より前に書かれた行は数えません。</p>
     <p>個人が作った非公式のツールです。Anthropic 社とは関係ありません。数字の書体は IBM Plex Mono（SIL Open Font License 1.1）をページに埋め込んでいます。</p>
+    <p>作：ゆいた（<a href="https://x.com/yuita_Genecraft" target="_blank" rel="noopener">@yuita_Genecraft</a>）・<a href="https://github.com/yuita-Genecraft/tools" target="_blank" rel="noopener">ソース（GitHub）</a></p>
   </footer>
 </div>
 
@@ -1644,7 +1645,7 @@ function tokenShareText(T){
     `・使用量の ${pct(hv.w)} は、文脈が40万トークンを超えた応答だった`,
     `・その応答は、数では ${pctOf(hv.n, T.n)}（全 ${fmt(T.n)} 応答）`,
     `・1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で大量のキャッシュ作成${T.matched ? `（使用量の ${pct(T.matchedW || 0)}）` : ''}`,
-    '（使用量＝API の料金比で重みをつけた推定。利用枠の減り方ではありません）', '#AI開発ログマップ'];
+    '（使用量＝API の料金比で重みをつけた推定。利用枠の減り方ではありません）', '#AI開発ログマップ via @yuita_Genecraft'];
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');
 }
@@ -1863,7 +1864,7 @@ function shareText(R){
   if (R.dropped) lines.push(`・ファイルごと消えた：${pct(rate(R.dropped, w))}`);
   lines.push(`・AI率（この期間の分・下限）：${pct(rate(R.aiLines, R.projectLines))}`);
   if (R.sessionStats && R.sessionStats.outTotal) lines.push(`・今は無いコードに使った出力トークン：${pct(R.sessionStats.goneShare)}（${fmtTok(R.sessionStats.outGone)}／${fmtTok(R.sessionStats.outTotal)}）`);
-  lines.push('#AI開発ログマップ');
+  lines.push('#AI開発ログマップ via @yuita_Genecraft');
   if (TOOL_URL) lines.push(TOOL_URL);
   return lines.join('\n');
 }

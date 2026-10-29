@@ -254,12 +254,32 @@ t("g-8：FBCHECK_VERSION は 0.3.1", /const FBCHECK_VERSION = "0\.3\.1";/.test(s
   t("r2-a：終わりに届いた普通の形（空行をはさんだ true;）は今までどおり danger", raw(RAW(`      allow write: if${gap(3)}        true;\n    }\n  }\n}\n`)).danger.length, 1);
   const B = (second) => raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read: if false\n    ${second}\n  }\n}\n`);
   const FB = B("} match /posts/{id} { allow read: if true; }");
-  t("r2-b：allow read: if false の次行が「} match /posts/{id} { allow read: if true; }」でも、posts の read: true を全体スコープの danger にしない（posts だけの warn）", [FB.danger.length, FB.warn.map((f) => f.title)], [0, ["誰でも読める場所があります（firestore.rules）"]]);
+  t("r2-b：allow read: if false の次行が「} match /posts/{id} { allow read: if true; }」でも、posts の read: true を全体スコープの danger にしない（posts だけの warn＋; の無い allow read: if false は判定できなかった行）", [FB.danger.length, FB.warn.map((f) => f.title)], [0, ["誰でも読める場所があります（firestore.rules）", "判定できなかった allow の行があります（1 行・firestore.rules）"]]);
   // r3：同じ行に完結した allow と未完の allow が並ぶ形（完結が先・未完が後・次行に別の allow）。完結した方の danger は出し、未完の方だけ unresolved
   const MIX = raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow write: if true; allow read: if false\n      allow get: if false;\n    }\n  }\n}\n`);
   t("r3：同じ行の「allow write: if true; allow read: if false」＋次行に別の allow でも、完結した write: true の danger は出し、未完の allow read は unresolved", [MIX.danger.map((f) => f.title), MIX.warn.filter(UNRES).length], [["誰でも書き込める状態です（firestore.rules）"], 1]);
   const MIX2 = raw(RAW("      allow read; allow write: if false\n      match /x/{y} { allow get: if true; }\n    }\n  }\n}\n"));
   t("r3：完結した条件なしの allow read; も、同じ行の未完の allow の前なら拾う（danger）・未完は unresolved", [MIX2.danger.length, MIX2.warn.filter(UNRES).length], [1, 1]);
   t("r2-b：終わりの無い allow の次の行に別の allow・match があれば、そこで打ち切って unresolved（次の行の allow は次の行として読む）", (() => { const F = B("allow write: if true;"); return [F.danger.length, F.warn.filter(UNRES).length]; })(), [1, 1]);
+}
+// ---- レビュー r3（BLOCK）：同じ行に完結した allow と未完の allow が並ぶ形。文の切り出しは一度だけ頭から読む読み手（readAllows）。
+// 完結した文 × 別の文 × 区切り（空白・改行・コメント）× 並び順 を機械的に作る。完結した無認証の書き込みは必ず danger に出て、別の文は自分の分だけ unresolved になる
+{
+  const raw = (body) => run({ "firestore.rules": body }), RAW = (inner) => `service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n${inner}`;
+  const A = ["allow write: if true;", "allow write:\n   if\n   true\n   ;", "allow write: if true /* ; } { */;", "allow write: if /* x */ true;", "allow write : if  true ;"];
+  const Bs = [["allow read: if false", 1], ["allow get: if f();", 1], ["allow list: if true && g();", 1], ["allow create: if resource.data.x == \";\";", 0], ["allow update: if resource.data.x == '{;}';", 0], ["allow read: if false /* ; } */", 1]];
+  const SEP = [" ", "\n", "\n\n   // ; { }\n   ", " /* } ; */ ", "\n   /* allow read: if true; */\n   "];
+  const bad = []; let n = 0;
+  for (const a of A) for (const [b, nu] of Bs) for (const sep of SEP) for (const order of ["AB", "BA", "ABA"]) {
+    const body = (order === "AB" ? [a, b] : order === "BA" ? [b, a] : [a, b, a]).join(sep);
+    const F = raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      ${body}\n    }\n  }\n}\n`);
+    const u = F.warn.filter(UNRES).length, d = F.danger.map((f) => f.title);
+    n++;
+    if (u !== nu || d.length !== 1 || !d[0].startsWith("誰でも書き込める")) bad.push(`${order} [${body.replace(/\n/g, "\\n")}] unres=${u}/${nu} danger=${JSON.stringify(d)}`);
+  }
+  t(`r3：完結した allow write: if true; は、未完・読めない・読める別の文と並んでも（区切り・並び順 ${n} 通り）danger に出て、別の文は自分の分だけ unresolved`, bad.slice(0, 4), []);
+  const F2 = raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow write: if true; allow read: if false\n      allow get: if false;\n    }\n  }\n}\n`);
+  t("r3 の例：allow write: if true; allow read: if false の次行が allow get: if false;", [F2.danger.map((f) => f.title), F2.warn.filter(UNRES).length], [["誰でも書き込める状態です（firestore.rules）"], 1]);
+  t("コメント・文字列の中の ; { } は文の区切りにしない", (() => { const F = raw(RAW("      // allow write: if true;\n      /* allow read: if true; */\n      allow read: if resource.data.s == \"; } {\";\n    }\n  }\n}\n")); return [F.danger.length, F.warn.length]; })(), [0, 0]);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

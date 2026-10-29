@@ -36,7 +36,7 @@
 
 確かめ方（この順で）：
 
-- `python3 build_site.py` を実行し、「注意」が出ないこと。`git status` で変わるのが、この手順で触った物（`<slug>/app.html`・`build_site.py`・`site-src/index.html`・`og/og-<slug>.html`・`render_og.py`・`README.md`）と、その生成物（`docs/index.html`・`docs/<slug>/index.html`・`docs/og/<slug>.png`）だけであること。それ以外のファイル（特に既存の作品の `docs/<別の slug>/`）が変わっていたら、理由を確かめる。
+- `python3 build_site.py` を実行し、「注意」が出ないこと。`git status` で変わるのが、この手順で触った物（`<slug>/app.html`・`build_site.py`・`site-src/index.html`・`og/og-<slug>.html`・`render_og.py`・`README.md`、試験を足した時は `test/` の下も）と、その生成物（`docs/index.html`・`docs/<slug>/index.html`・`docs/og/<slug>.png`）だけであること。それ以外のファイル（特に既存の作品の `docs/<別の slug>/`）が変わっていたら、理由を確かめる。
 - `docs/<slug>/index.html` をブラウザで開き、ファイルを入れて動くこと。開発者ツールのコンソールに CSP の違反が出ないこと（通信は `connect-src 'none'` で止まる）。
 - 一覧ページ（`docs/index.html`）のカードのリンクが、`docs/<slug>/index.html` に飛ぶこと。
 - 集計やルールの判定を持つ作品は、`test/` に合成データの試験を足し、「テスト」の節の動かし方に書く。

@@ -403,10 +403,10 @@ const COND_TEST = /^request\.time\s*<\s*timestamp\.date\(\s*(\d{4})\s*,\s*(\d{1,
 const OPERAND = String.raw`(?:[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|-?\d+(?:\.\d+)?|"[^"\\]*"|'[^'\\]*'|true|false|null)`;
 const TERM_CMP = new RegExp(`^(${OPERAND})\\s*(==|!=|<=|>=|<|>)\\s*(${OPERAND})$`);
 const TERM_IS = new RegExp(`^${OPERAND}\\s+is\\s+(?:string|int|float|number|bool|list|map|timestamp|path|latlng|bytes|duration)$`);
-// 持ち主の定番の形：`request.auth != null` と `request.auth.uid == 識別子`（左右どちらでも）を && で1つずつつないだ物。全体がちょうどこの形の時だけ known（3項以上・ほかの項・|| が付けば unknown のまま）
+// 持ち主の定番の形：`request.auth != null`（`.uid` 付きは含まない）と `request.auth.uid == 識別子`（左右どちらでも）を && で1つずつつないだ物。全体がちょうどこの形の時だけ known（3項以上・ほかの項・|| が付けば unknown のまま）
 const ID_PATH = String.raw`(?!(?:true|false|null)\b)(?!request\.auth\.uid\b)[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*`;
 const UID_EQ = String.raw`(?:request\.auth\.uid\s*==\s*${ID_PATH}|${ID_PATH}\s*==\s*request\.auth\.uid)`;
-const AUTH_NN = String.raw`request\.auth(?:\.uid)?\s*!=\s*null`;
+const AUTH_NN = String.raw`request\.auth\s*!=\s*null`;
 const OWNER_FORM = new RegExp(`^(?:${AUTH_NN}\\s*&&\\s*${UID_EQ}|${UID_EQ}\\s*&&\\s*${AUTH_NN})$`);
 // 条件の種類："true"（誰でも）・"auth"（ログインしていれば誰でも）・"known"（1つの比較・型の検査・false）・"unknown"（それ以外）
 function condKind(c) {

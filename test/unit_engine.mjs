@@ -244,4 +244,17 @@ t("g-8：FBCHECK_VERSION は 0.3.1", /const FBCHECK_VERSION = "0\.3\.1";/.test(s
   t("r1 の例2：次の行に && someFunction() が続く条件は判定できなかった行", [unresolvedOf("allow read: if request.auth.uid == userId\n        && someFunction();").length, unresolvedOf("allow read: if request.auth.uid == userId\n        && someFunction();")[0].evidence[0].code], [1, "allow read: if request.auth.uid == userId && someFunction();"]);
   t("r1 の例3：true && request.auth.uid == \"alice\" は danger にならず判定できなかった行", [run({ "firestore.rules": FS("allow write: if true && request.auth.uid == \"alice\";") }).danger.length, UR("true && request.auth.uid == \"alice\"").length], [0, 1]);
 }
+// ---- レビュー r2（BLOCK・P1×2）：つなぐ処理の打ち切り。終わり（; か }）に届かない文は読めない行・次の allow／match をまたがない
+{
+  const raw = (body) => run({ "firestore.rules": body }), RAW = (inner) => `service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n${inner}`;
+  const gap = (n) => "\n".repeat(n);
+  const rows = [0, 1, 5, 19, 20, 21, 25, 40].map((n) => { const F = raw(RAW(`      allow write: if true${gap(n)}        && someFunction();\n    }\n  }\n}\n`)); return [n, F.danger.length, F.warn.filter(UNRES).length]; });
+  t("r2-a：空行が何行あっても、次に && someFunction(); が続く true は danger にしない（0〜19 行は つないで unresolved、20 行以上は終わりに届かず unresolved）", rows.map(([n, d, u]) => [d, u]), rows.map(() => [0, 1]));
+  t("r2-a：ファイルの終わりが allow write: if true（; も } も無い）は danger にせず unresolved", (() => { const F = raw(RAW("      allow write: if true")); return [F.danger.length, F.warn.filter(UNRES).length]; })(), [0, 1]);
+  t("r2-a：終わりに届いた普通の形（空行をはさんだ true;）は今までどおり danger", raw(RAW(`      allow write: if${gap(3)}        true;\n    }\n  }\n}\n`)).danger.length, 1);
+  const B = (second) => raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read: if false\n    ${second}\n  }\n}\n`);
+  const FB = B("} match /posts/{id} { allow read: if true; }");
+  t("r2-b：allow read: if false の次行が「} match /posts/{id} { allow read: if true; }」でも、posts の read: true を全体スコープの danger にしない（posts だけの warn）", [FB.danger.length, FB.warn.map((f) => f.title)], [0, ["誰でも読める場所があります（firestore.rules）"]]);
+  t("r2-b：終わりの無い allow の次の行に別の allow・match があれば、そこで打ち切って unresolved（次の行の allow は次の行として読む）", (() => { const F = B("allow write: if true;"); return [F.danger.length, F.warn.filter(UNRES).length]; })(), [1, 1]);
+}
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

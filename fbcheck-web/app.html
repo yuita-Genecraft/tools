@@ -369,13 +369,20 @@ function stripBlockComments(lines) {
     return out.replace(/\/\/.*$/, "");
   });
 }
-// allow の文を ; か } までつなぐ（条件や ops が次の行に続く形）。allow のない行は空、終わりが見つからない時は最大 20 行まで
+// allow の文を ; か } までつなぐ（条件や ops が次の行に続く形）。{ text, closed }：closed は ; か } に届いたか。
+// 次の行は ; か } の手前までしか取らない。その手前に別の allow・match があれば、そこで打ち切る（別の場所の allow をまたがない）。20 行までに届かない・ファイルの終わりまで届かない時は closed=false
 function joinStmt(bare, i) {
   let out = bare[i];
-  if (!/\ballow\b/.test(out)) return out;
+  if (!/\ballow\b/.test(out)) return { text: out, closed: true };
   const closed = (t) => { const k = t.search(/\ballow\b(?![\s\S]*\ballow\b)/); return /[;}]/.test(t.slice(k)); };
-  for (let j = i + 1; j < bare.length && j <= i + 20 && !closed(out); j++) out += " " + bare[j];
-  return out;
+  if (closed(out)) return { text: out, closed: true };
+  for (let j = i + 1; j < bare.length && j <= i + 20; j++) {
+    const k = bare[j].search(/[;}]/), seg = k < 0 ? bare[j] : bare[j].slice(0, k + 1);
+    if (/\b(allow|match)\b/.test(seg)) return { text: out, closed: false };
+    out += " " + seg;
+    if (k >= 0) return { text: out, closed: true };
+  }
+  return { text: out, closed: false };
 }
 const COND_AUTH = /^request\.auth(\.uid)?\s*!=\s*null$/;
 const COND_TEST = /^request\.time\s*<\s*timestamp\.date\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)$/;
@@ -592,8 +599,8 @@ function runChecks(P) {
     const unresolved = [];
     const bare = stripBlockComments(lines);
     for (let i = 0; i < lines.length; i++) {
-      const stmt = joinStmt(bare, i);
-      const found = allowsIn(stmt);
+      const { text: stmt, closed } = joinStmt(bare, i);
+      const found = closed ? allowsIn(stmt) : [];   // 終わりまで読めなかった文は、条件の途中なので何も判定しない（下で判定できなかった行に入る）
       // 判定できなかった allow：行に allow があるのに取り出せない／条件を読めない（関数・括弧・&&・||）。条件や ops が次の行に続く文は ; か } までつないで読む
       const nAllow = (stmt.match(/\ballow\b/g) || []).length;
       const known = (a) => a.bare || COND_TRUEISH(a.cond) || COND_AUTHISH(a.cond) || COND_TEST.test(a.cond) || COND_KNOWN(a.cond);

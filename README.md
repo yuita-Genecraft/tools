@@ -24,6 +24,23 @@
 | Firebase 公開前チェック | [fbcheck](https://github.com/yuita-Genecraft/fbcheck)（Node版）と同じ判定をブラウザで。フォルダをドロップするだけ | `fbcheck-web/app.html` |
 | AI 開発ログマップ（旧 Claude Code 生存率） | `~/.claude/projects`（Claude Code）・`~/.codex/sessions`（Codex）・`~/.gemini/antigravity*`（Antigravity）のログを読む。タブは2つ。**文脈とトークン**（ログだけ）＝使用量（料金比の推定）のうち文脈 40万超の応答が占める割合と、応答の数での割合の差（本人のログで 使用量 53%・応答の数 28%）、文脈の大きさ別の分布、週ごとの推移（その週の使用量のうち 40万超の分）、使用量が多かった5時間ブロック（そのうち 40万超・再開・いちばん使った会話の分）、1時間以上あけた再開と、その時の大量のキャッシュ作成（直近の1件の時刻つき）、使い道の内訳（料金比の推定）。**コードの手直し**（ログ＋手元のフォルダ）＝AI が書いた行のうち今も残っている割合を「残った・AI が自分で書き直した・ログの外で変わった・ファイルごと消えた」に分け、書き直しが集中したファイルと、書き直す前の本人の指示（画面だけ）を出す。繰り返した直しの型には、まず機械で防ぐ手（lint・formatter・型の検査）と、それでも残れば CLAUDE.md の1行。出力が大きく残らなかった会話も。日時で区切って「この日時以降に入った行だけ」でも数えられる。結果を JSON で保存して次回と比べられる（型ごとの印も保存） | `cc-seizon/app.html` |
 
+## 作品を足す時
+
+新しいページ（`<slug>` は URL になる英数字とハイフン）を足す時は、次の5か所を同じ PR で直します。
+
+1. **ソース**：`<slug>/app.html` を置く（doctype などの骨格なし・`<title>` と `<meta name="description" content="…">` が要る。`build_standalone.py` が OGP と CSP に使う）。ブラウザ版だけの置き場が別にある時（例：`fbcheck-web/app.html`）は、その場所を次の `TOOLS` に書く。
+2. **`build_site.py` の `TOOLS`**：`("<slug>", "<slug>/app.html")` を1つ足す。
+3. **一覧ページ**：`site-src/index.html` の `<ul>` にカードを1枚（`<li><a class="card" href="<slug>/"><b>名前</b><span>1〜2文</span></a></li>`）。`docs/index.html` は手で直さない。
+4. **カード画像**：`og/og-<slug>.html` を作り、`render_og.py` の `PAIRS` に1組足して、`python3 render_og.py --only <slug>` で `docs/og/<slug>.png`（1200×630）を作る。画像が無いと `build_site.py` が「注意」を出す。
+5. **この README**：先頭の「開く」の表と、「道具の詳細」の表に1行ずつ。
+
+確かめ方（この順で）：
+
+- `python3 build_site.py` を実行し、「注意」が出ないこと。`git status` で変わるのが `docs/index.html`・`docs/<slug>/index.html`・`docs/og/<slug>.png`（と、直した既存のページ）だけであること。
+- `docs/<slug>/index.html` をブラウザで開き、ファイルを入れて動くこと。開発者ツールのコンソールに CSP の違反が出ないこと（通信は `connect-src 'none'` で止まる）。
+- 一覧ページ（`docs/index.html`）のカードのリンクが、`docs/<slug>/index.html` に飛ぶこと。
+- 集計やルールの判定を持つ作品は、`test/` に合成データの試験を足し、「テスト」の節の動かし方に書く。
+
 ## 仕組み
 
 - `*/app.html` は claude.ai の Artifact 用（doctype などの骨格なし）

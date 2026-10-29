@@ -18,7 +18,7 @@ subprocess.run([sys.executable, str(ROOT / "build_standalone.py"), str(ROOT / "f
 subprocess.run([sys.executable, str(HERE / "gen_fbproj.py")], check=True)
 URL = (ROOT / "fbcheck-web/dist/index.html").as_uri()
 SHOTS = HERE / "shots"; SHOTS.mkdir(exist_ok=True)
-FIX = ["fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15", "fbproj16"]          # git の外＝CLI も Git を読めない→ブラウザ版と一致するはず
+FIX = ["fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15", "fbproj16", "fbproj17"]          # git の外＝CLI も Git を読めない→ブラウザ版と一致するはず
 FIX_GIT = ["fbproj6", "fbproj7", "fbproj8"]                           # 本物の git リポジトリ＝CLI だけが git で確かめられる
 
 def parse_cli(txt):
@@ -136,5 +136,8 @@ g16 = res["fbproj16"]
 ok(any(f["title"].startswith("ログインすれば、すべての文書を読み書きできます") for f in g16["danger"]) and not [f for f in g16["warn"] if f["title"].startswith("判定できなかった")], "r2-1: true && request.auth != null は auth と同じ（danger）で、判定できなかった行にしない")
 gm16 = [f for f in g16["danger"] if f["title"] == "Gemini のキーがブラウザ側に出ています"]
 ok(len(gm16) == 1 and [e.split(" ")[0] for e in gm16[0]["ev"]] == ["src/ai.ts:1"] and g16["info"] == [], "r2-2/3: 値の文字列に authDomain があるだけの Gemini だけを danger にし、長い空白をはさんだ firebaseConfig の鍵は Gemini にしない（info は同じ行に鍵が無いので出ない）")
+g17 = res["fbproj17"]
+w17 = [f for f in g17["warn"] if f["title"] == "Firebase の設定か Gemini のキーか判定できなかった AIza… があります"]
+ok(len(w17) == 1 and [e.split(" ")[0] for e in w17[0]["ev"]] == ["src/b.ts:2"] and not [f for f in g17["danger"] if f["title"].startswith("Gemini")], "r3: 正規表現リテラルで読み切れないファイルは warn（行の実物つき）・コメントをはさんだ firebaseConfig は Firebase の鍵・どちらも danger にしない")
 print("\nALL PASS" if fails == 0 else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

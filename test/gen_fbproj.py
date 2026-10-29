@@ -15,7 +15,7 @@ def w(root, p, s):
     p = root / p; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(s, encoding="utf-8")
 
 def main():
-    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15", "fbproj16"):
+    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15", "fbproj16", "fbproj17"):
         shutil.rmtree(HERE / n, ignore_errors=True)
     R = HERE / "fbproj"
     w(R, "firebase.json", json.dumps({"firestore": {"rules": "firestore.rules"}, "storage": {"rules": "storage.rules"}}, indent=2))
@@ -149,6 +149,11 @@ service firebase.storage {
     w(R16, "src/firebase.ts", f'const firebaseConfig = {{\n  apiKey:\n{" " * 80}"{FAKE_FB_APIKEY}",\n  authDomain: "demo.firebaseapp.com",\n}};\n')
     w(R16, "src/ai.ts", f'export const ai = new GoogleGenAI({{ apiKey: "{FAKE_GEMINI}", note: "authDomain" }});\n')
     w(R16, ".gitignore", ".env*\n")
+    R17 = HERE / "fbproj17"   # レビュー r3：名前と : の間のコメント・正規表現リテラルの }（読み切れない＝warn）
+    w(R17, "package.json", json.dumps({"name": "r17", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R17, "src/a.ts", f'const c = {{ apiKey /* comment */ : "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
+    w(R17, "src/b.ts", f'const re = /}}/;\nconst c = {{ apiKey: "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
+    w(R17, ".gitignore", ".env*\n")
     print("ok")
 
 if __name__ == "__main__":

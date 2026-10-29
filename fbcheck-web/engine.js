@@ -23,20 +23,31 @@ function objectRanges(text) {
     if (/\s/.test(c)) { i++; continue; }
     if (c === "/" && text[i + 1] === "/") { while (i < n && text[i] !== "\n") i++; continue; }
     if (c === "/" && text[i + 1] === "*") { const e = text.indexOf("*/", i + 2); if (e < 0) return null; i = e + 2; continue; }
+    // 名前と : の間の空白・コメントを飛ばして、次の文字の位置を返す（閉じないコメントは -1）
+    const after = (k) => {
+      for (;;) {
+        while (k < n && /\s/.test(text[k])) k++;
+        if (text[k] === "/" && text[k + 1] === "/") { while (k < n && text[k] !== "\n") k++; }
+        else if (text[k] === "/" && text[k + 1] === "*") { const e = text.indexOf("*/", k + 2); if (e < 0) return -1; k = e + 2; }
+        else return k;
+      }
+    };
     if (c === '"' || c === "'" || c === "`") {
       let j = i + 1;
       while (j < n && text[j] !== c) { if (text[j] === "\\") j++; else if (text[j] === "\n" && c !== "`") return null; j++; }
       if (j >= n) return null;
       const top = stack[stack.length - 1], body = text.slice(i + 1, j);
-      let k = j + 1; while (k < n && /[ \t\r\n]/.test(text[k])) k++;
+      const k = after(j + 1);
+      if (k < 0) return null;
       if (top && (prev === "{" || prev === ",") && text[k] === ":") { top.keys.add(body); pending = body; prev = ":"; i = k + 1; continue; }
-      if (top && pending !== null && prev === ":") top.props.push({ name: pending, vs: i, ve: j });
+      if (top && prev === ":") top.props.push({ name: pending, vs: i, ve: j });   // 名前が取れなかった値は name: null
       pending = null; prev = '"'; i = j + 1; continue;
     }
     if (/[A-Za-z_$]/.test(c)) {
       let j = i + 1; while (j < n && /[\w$]/.test(text[j])) j++;
       const top = stack[stack.length - 1], word = text.slice(i, j);
-      let k = j; while (k < n && /[ \t\r\n]/.test(text[k])) k++;
+      const k = after(j);
+      if (k < 0) return null;
       if (top && (prev === "{" || prev === ",") && text[k] === ":") { top.keys.add(word); pending = word; prev = ":"; i = k + 1; continue; }
       pending = null; prev = "a"; i = j; continue;
     }
@@ -46,15 +57,19 @@ function objectRanges(text) {
   }
   return stack.length ? null : out;
 }
-// この位置の鍵が、firebaseConfig の apiKey そのものか：位置を囲む（いちばん内側の）{ } の中の apiKey プロパティの文字列の値で、
-// 同じ { } の直下のプロパティ名に authDomain・projectId などが並ぶ時だけ（値の文字列や近さでは決めない）
-function inFirebaseConfig(text, at, cache) {
+// この位置の AIza… の鍵が何か：
+//   "firebase"＝囲む { } の直下のプロパティ名に authDomain・projectId などが並び、鍵がその { } の apiKey の値（Firebase の設定の apiKey）
+//   "other"＝{ } を読み切れて、Firebase の設定の中ではないと読めた
+//   "unknown"＝{ } を読み切れない（正規表現リテラルの { } ・括弧の不一致など）・鍵のプロパティ名が取れない＝言い切らない
+function classifyAiza(text, at, cache) {
   if (cache.ranges === undefined) cache.ranges = objectRanges(text);
-  if (!cache.ranges) return false;
+  if (!cache.ranges) return "unknown";
   let best = null;
   for (const r of cache.ranges) if (r.s < at && at < r.e && (!best || r.s > best.s)) best = r;
-  if (!best) return false;
-  return best.props.some((p) => p.name === "apiKey" && p.vs < at && at < p.ve) && [...best.keys].some((k) => FIREBASE_CONFIG_KEYS.has(k));
+  if (!best) return "other";
+  const prop = best.props.find((p) => p.vs < at && at < p.ve);
+  if (prop && prop.name === null) return "unknown";
+  return prop && prop.name === "apiKey" && [...best.keys].some((k) => FIREBASE_CONFIG_KEYS.has(k)) ? "firebase" : "other";
 }
 const BUNDLE_DIRS = ["dist", "build", "out", "public", ".output"];
 // 見本として Git に入れる前提の .env（中身は本物の鍵を入れない約束のファイル）
@@ -548,7 +563,7 @@ function runChecks(P) {
   // 4. Gemini の API キー（Firebase の apiKey とは別物）：Gemini を使う痕跡があるプロジェクトで、AIza… の鍵がブラウザ側（ソース・配布物・接頭辞つきの .env）にある
   //    firebaseConfig の中の apiKey（authDomain などが近くにある）は Firebase のキーなので数えない
   const geminiTrace = P.files.some((f) => { const t = read(f.rel); return t != null && GEMINI_TRACE.test(t); });
-  const geminiHits = [];
+  const geminiHits = [], geminiUnsure = [];
   if (geminiTrace) {
     for (const f of P.files) {
       const text = read(f.rel);
@@ -568,9 +583,11 @@ function runChecks(P) {
       const re = new RegExp(AIZA_KEY.source, "g"), cache = {};
       let k;
       while ((k = re.exec(text))) {
-        if (inFirebaseConfig(text, k.index, cache)) continue;
+        const kind = classifyAiza(text, k.index, cache);
+        if (kind === "firebase") continue;
         const loc = `${f.rel}:${text.slice(0, k.index).split("\n").length}`;
-        if (!geminiHits.some((h) => h.loc === loc && h.code.endsWith(mask(k[0])))) geminiHits.push({ loc, code: `AIza で始まる鍵  ${mask(k[0])}` });
+        const list = kind === "other" ? geminiHits : geminiUnsure;
+        if (!list.some((h) => h.loc === loc && h.code.endsWith(mask(k[0])))) list.push({ loc, code: `AIza で始まる鍵  ${mask(k[0])}` });
       }
     }
   }
@@ -581,9 +598,16 @@ function runChecks(P) {
     evidence: geminiHits,
   });
 
+  if (geminiUnsure.length) add("warn", {
+    title: "Firebase の設定か Gemini のキーか判定できなかった AIza… があります",
+    why: "このプロジェクトには Gemini の API を使う痕跡があり、AIza で始まる鍵があります。ただし、この鍵が Firebase の設定（firebaseConfig）の apiKey なのか、Gemini のキーなのかを、ここでは読み取れませんでした（コードの書き方を読み切れない・鍵のプロパティ名が取れない）。Firebase の apiKey は公開してよい識別子ですが、Gemini Developer API のキーは別物で、ブラウザに配るファイルや設定ファイルに入れてはいけません（Google の公式ドキュメント）。",
+    how: "この行を自分で確かめてください。Gemini のキーなら、1) 発行元で無効にして作り直す 2) Gemini を呼ぶ処理をサーバー側に移す。Firebase の apiKey なら対応不要です。",
+    evidence: geminiUnsure,
+  });
+
   // 5. よくある誤解
   let found = null;
-  const geminiLocs = new Set(geminiHits.map((h) => h.loc));
+  const geminiLocs = new Set([...geminiHits, ...geminiUnsure].map((h) => h.loc));
   for (const f of P.files) {
     const text = read(f.rel);
     if (text == null) continue;

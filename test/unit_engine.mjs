@@ -158,6 +158,17 @@ t("r2-2：キーを JSON 形式（引用符つき）で書いた firebaseConfig 
 t("r2-3：値の文字列に authDomain があるだけの Gemini の設定は Gemini の danger（レビューの例そのまま）", G2({ "src/ai.ts": `new GoogleGenAI({ apiKey: "${AK}", note: "authDomain" });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
 t("r2-3：その行を「Firebase の apiKey は正常」と言わない", run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "src/ai.ts": `new GoogleGenAI({ apiKey: "${AK}", note: "authDomain" });\n` }).info.length, 0);
 t("r2-3：コメントの中の authDomain・別の { } にある authDomain では除外しない", G2({ "src/ai.ts": `const a = { authDomain: "x" };\nnew GoogleGenAI({ apiKey: "${AK}" /* authDomain */ });\n` }), ["Gemini のキーがブラウザ側に出ています"]);
-t("r2-3：{ } が読み切れない（閉じない括弧）時は除外しない側＝Gemini の danger", G2({ "src/fb.ts": `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d",\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+const UNSURE = "Firebase の設定か Gemini のキーか判定できなかった AIza… があります";
+const unsureOf = (files) => run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', ...files });
+t("r2-3：{ } が読み切れない（閉じない括弧）時は danger にも「正常」にもせず warn", (() => { const F = unsureOf({ "src/fb.ts": `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d",\n` }); return [geminiTitles(F), titles(F, "warn"), F.info.length]; })(), [[], [UNSURE], 0]);
 t("r2-3：{ } の外の apiKey（const apiKey = …）は Firebase の設定ではない＝Gemini の danger", G2({ "src/ai.ts": `const apiKey = "${AK}";\nconst firebaseConfig = { authDomain: "d" };\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+// ---- レビュー r3（BLOCK）：読み切れない時は warn（迷ったら warn）。danger は「Firebase の設定の中ではない」と読めた時だけ
+t("r3-1：名前と : の間のコメント（apiKey /* c */ : \"AIza…\"）を飛ばして Firebase の鍵と読む（danger にしない）", (() => { const F = unsureOf({ "src/fb.ts": `const c = { apiKey /* comment */ : "${AK}", authDomain: "d" };\n` }); return [geminiTitles(F), titles(F, "warn"), F.info.length]; })(), [[], [], 0]);
+t("r3-1：// コメントをはさんでも同じ", geminiTitles(unsureOf({ "src/fb.ts": `const c = {\n  apiKey // c\n  : "${AK}",\n  authDomain: "d",\n};\n` })), []);
+t("r3-2：正規表現リテラルの } で範囲が崩れたら、danger にせず warn（レビューの例そのまま）", (() => { const F = unsureOf({ "src/fb.ts": `const re = /}/; const c = { apiKey: "${AK}", authDomain: "d" };\n` }); return [geminiTitles(F), titles(F, "warn"), F.info.length]; })(), [[], [UNSURE], 0]);
+t("r3-2：正規表現リテラルの { で崩れても warn", titles(unsureOf({ "src/fb.ts": `const re = /{/; const c = { apiKey: "${AK}", authDomain: "d" };\n` }), "warn"), [UNSURE]);
+t("r3-2：warn には行の実物がつく", unsureOf({ "src/fb.ts": `const re = /}/;\nconst c = { apiKey: "${AK}", authDomain: "d" };\n` }).warn[0].evidence.map((e) => e.loc), ["src/fb.ts:2"]);
+t("r3：鍵のプロパティ名が取れない（[k]: \"AIza…\"）時は warn", (() => { const F = unsureOf({ "src/a.ts": `const o = { [k]: "${AK}" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r3：Firebase の設定の中ではないと読めた時は danger のまま（new GoogleGenAI({ apiKey })・位置引数）", [geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenAI({ apiKey: "${AK}" });\n` })), geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenerativeAI("${AK}");\n` }))], [["Gemini のキーがブラウザ側に出ています"], ["Gemini のキーがブラウザ側に出ています"]]);
+t("r3：Gemini の痕跡が無ければ読み切れなくても何も言わない（N3）", run({ "src/fb.ts": `const re = /}/; const c = { apiKey: "${AK}", authDomain: "d" };\n` }).warn.length, 0);
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

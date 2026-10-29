@@ -9,12 +9,13 @@ FAKE_OPENAI2 = J(["sk-", "proj-", "FAKE" * 8, "9999"])
 FAKE_STRIPE = J(["sk_", "live_", "FAKE" * 4, "0000"])
 FAKE_ANTHROPIC = J(["sk-", "ant-", "FAKE-" * 5, "0000"])
 FAKE_FB_APIKEY = J(["AIza", "SyFAKEFAKEFAKEFAKEFAKE_12345-abc"])
+FAKE_GEMINI = J(["AIza", "SyGEMINIGEMINIGEMINI_67890-xyz"])
 
 def w(root, p, s):
     p = root / p; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(s, encoding="utf-8")
 
 def main():
-    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8"):
+    for n in ("fbproj", "fbproj2", "fbproj3", "fbproj4", "fbproj5", "fbproj6", "fbproj7", "fbproj8", "fbproj9", "fbproj10", "fbproj11", "fbproj12", "fbproj13", "fbproj14", "fbproj15", "fbproj16", "fbproj17"):
         shutil.rmtree(HERE / n, ignore_errors=True)
     R = HERE / "fbproj"
     w(R, "firebase.json", json.dumps({"firestore": {"rules": "firestore.rules"}, "storage": {"rules": "storage.rules"}}, indent=2))
@@ -104,6 +105,55 @@ service firebase.storage {
     w(R8, ".gitignore", ".env*\n")
     w(R8, ".env", "X=1\n")
     git(R8, "init", "-q"); git(R8, "add", ".gitignore", "package.json"); git(R8, "commit", "-q", "-m", "first")
+    # --- 判定の直し（fbcheck-review v0.1）：条件なしの allow・判定できなかった allow の行・RTDB の実物の形・Gemini のキー
+    R9 = HERE / "fbproj9"
+    w(R9, "firebase.json", '{"firestore":{"rules":"firestore.rules"},"storage":{"rules":"storage.rules"}}\n')
+    w(R9, "firestore.rules", "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth != null && request.auth.uid == userId;\n    }\n    match /rooms/{roomId} {\n      allow read: if isSignedIn();\n      allow write: if\n        request.auth != null;\n    }\n    match /{document=**} {\n      allow read, write;\n    }\n  }\n}\n")
+    w(R9, "storage.rules", "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read;\n      allow write: if request.auth != null;\n    }\n  }\n}\n")
+    w(R9, ".gitignore", ".env*\n")
+    R10 = HERE / "fbproj10"   # コンソールのテストモードの形（コメント入り・末尾カンマ）と firebase init の既定（auth != null）
+    w(R10, "firebase.json", '{"database":{"rules":"database.rules.json"}}\n')
+    w(R10, "database.rules.json", '{\n  "rules": {\n    // 2099 年まで誰でも\n    ".read": "now < 4102444800000",  // 2099-12-31\n    ".write": "now < 4102444800000",\n    "chat": {\n      ".read": "auth != null",\n    },\n  }\n}\n')
+    w(R10, ".gitignore", ".env*\n")
+    R11 = HERE / "fbproj11"   # Gemini を使うプロジェクト：ブラウザ側に AIza の鍵／firebaseConfig の apiKey
+    w(R11, "package.json", json.dumps({"name": "r11", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R11, "src/ai.ts", f'import {{ GoogleGenAI }} from "@google/genai";\nexport const ai = new GoogleGenAI({{ apiKey: "{FAKE_GEMINI}" }});\n')
+    w(R11, "src/firebase.ts", f'import {{ initializeApp }} from "firebase/app";\nconst firebaseConfig = {{\n  apiKey: "{FAKE_FB_APIKEY}",\n  authDomain: "demo.firebaseapp.com",\n  storageBucket: "demo.appspot.com",\n}};\nexport const app = initializeApp(firebaseConfig);\n')
+    w(R11, ".env", f"VITE_GEMINI_API_KEY={FAKE_GEMINI}\nVITE_FIREBASE_API_KEY={FAKE_FB_APIKEY}\n")
+    w(R11, ".gitignore", ".env*\n")
+    w(R11, "firebase.json", '{"firestore":{"rules":"firestore.rules"}}\n')
+    w(R11, "firestore.rules", "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /users/{userId} {\n      allow read, write: if request.auth != null && request.auth.uid == userId;\n    }\n  }\n}\n")
+    R12 = HERE / "fbproj12"   # 壊れた database.rules.json・Gemini の痕跡が無い apiKey（言い過ぎないこと）
+    w(R12, "firebase.json", '{"database":{"rules":"database.rules.json"}}\n')
+    w(R12, "database.rules.json", '{"rules": {".read": ')
+    w(R12, "package.json", json.dumps({"name": "r12", "dependencies": {"firebase": "^11.0.0"}}, indent=2))
+    w(R12, "src/firebase.ts", f'const firebaseConfig = {{ apiKey: "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
+    w(R12, ".gitignore", ".env*\n")
+    R13 = HERE / "fbproj13"   # #02・#03・#05・#06 と && の形（レビュー r1）：ブラウザ版と CLI が同じ結果を出すか
+    w(R13, "firebase.json", '{"firestore":{"rules":"firestore.rules"}}\n')
+    w(R13, "firestore.rules", "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /a/{id} { allow read: if request.auth.uid != null; }\n    match /b/{id} { allow read: if request.auth != null || true; }\n    match /c/{id} {\n      allow read: if\n        true;\n    }\n    match /d/{id} { allow read: if (request.auth != null); }\n    match /e/{id} { allow read: if isSignedIn() && customCheck(); }\n    match /f/{id} { allow write: if true && true; }\n    match /g/{id} {\n      allow read,\n        write: if request.auth != null && request.auth.uid == id;\n    }\n  }\n}\n")
+    w(R13, ".gitignore", ".env*\n")
+    R14 = HERE / "fbproj14"   # firebaseConfig と Gemini のキーが隣・同じ行
+    w(R14, "package.json", json.dumps({"name": "r14", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R14, "src/firebase.ts", f'const firebaseConfig = {{\n  apiKey: "{FAKE_FB_APIKEY}",\n  authDomain: "demo.firebaseapp.com",\n}};\nconst ai = new GoogleGenAI({{ apiKey: "{FAKE_GEMINI}" }});\n')
+    w(R14, "dist/assets/a.js", f'var c={{apiKey:"{FAKE_FB_APIKEY}",authDomain:"d.firebaseapp.com"}},g=new GoogleGenAI({{apiKey:"{FAKE_GEMINI}"}});\n')
+    w(R14, ".gitignore", ".env*\n")
+    R15 = HERE / "fbproj15"   # 閉じていない /* の database.rules.json
+    w(R15, "firebase.json", '{"database":{"rules":"database.rules.json"}}\n')
+    w(R15, "database.rules.json", '{"rules":{}}\n/* 閉じていないコメント\n')
+    w(R15, ".gitignore", ".env*\n")
+    R16 = HERE / "fbproj16"   # レビュー r2 の3件：true && auth・apiKey の後の長い空白・値の文字列に authDomain
+    w(R16, "package.json", json.dumps({"name": "r16", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R16, "firebase.json", '{"firestore":{"rules":"firestore.rules"}}\n')
+    w(R16, "firestore.rules", "service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if true && request.auth != null;\n    }\n  }\n}\n")
+    w(R16, "src/firebase.ts", f'const firebaseConfig = {{\n  apiKey:\n{" " * 80}"{FAKE_FB_APIKEY}",\n  authDomain: "demo.firebaseapp.com",\n}};\n')
+    w(R16, "src/ai.ts", f'export const ai = new GoogleGenAI({{ apiKey: "{FAKE_GEMINI}", note: "authDomain" }});\n')
+    w(R16, ".gitignore", ".env*\n")
+    R17 = HERE / "fbproj17"   # レビュー r3：名前と : の間のコメント・正規表現リテラルの }（読み切れない＝warn）
+    w(R17, "package.json", json.dumps({"name": "r17", "dependencies": {"firebase": "^11.0.0", "@google/genai": "^1.0.0"}}, indent=2))
+    w(R17, "src/a.ts", f'const c = {{ apiKey /* comment */ : "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
+    w(R17, "src/b.ts", f'const re = /}}/;\nconst c = {{ apiKey: "{FAKE_FB_APIKEY}", authDomain: "demo.firebaseapp.com" }};\n')
+    w(R17, ".gitignore", ".env*\n")
     print("ok")
 
 if __name__ == "__main__":

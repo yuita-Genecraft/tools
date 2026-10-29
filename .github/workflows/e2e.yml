@@ -41,3 +41,20 @@ jobs:
         # Independent of the notification report; run even if it failed.
         if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: python -u test/e2e_seizon.py
+      - name: Firebase check engine unit tests
+        # Node only (no browser). Independent of the other steps.
+        if: ${{ !cancelled() }}
+        run: |
+          node test/unit_engine.mjs
+          node test/gitcheck.mjs
+      - name: Firebase check web/CLI comparison
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: python -u test/e2e_fb.py
+      - name: Firebase check engine sync with the fbcheck repository
+        # Reports drift between fbcheck-web/engine.js and fbcheck.mjs on the fbcheck repo's main.
+        # Not blocking: a change to engine.js is merged first and synced to the fbcheck repo afterwards.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          curl -fsSL --max-time 30 https://raw.githubusercontent.com/yuita-Genecraft/fbcheck/main/fbcheck.mjs -o "$RUNNER_TEMP/fbcheck.mjs"
+          python3 test/check_engine_sync.py "$RUNNER_TEMP/fbcheck.mjs"

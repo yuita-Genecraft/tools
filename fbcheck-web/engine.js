@@ -16,6 +16,7 @@ const FIREBASE_CONFIG_KEYS = new Set(["authDomain", "projectId", "storageBucket"
 // 括弧が合わない・閉じないコメントなど、読み切れない時は null（呼ぶ側は「Firebase の設定ではない」＝除外しない側に倒す）
 function objectRanges(text) {
   const stack = [], out = [];
+  const top0 = () => stack[stack.length - 1];
   let i = 0, prev = "", pending = null;   // prev＝直前の意味のある文字（文字列・コメントを除く）／pending＝コロンまで読んだプロパティ名
   const n = text.length;
   while (i < n) {
@@ -40,7 +41,8 @@ function objectRanges(text) {
       const k = after(j + 1);
       if (k < 0) return null;
       if (top && (prev === "{" || prev === ",") && text[k] === ":") { top.keys.add(body); pending = body; prev = ":"; i = k + 1; continue; }
-      if (top && prev === ":") top.props.push({ name: pending, vs: i, ve: j });   // 名前が取れなかった値は name: null
+      // 値として読めるのは「: の直後の ' か " の文字列で、その直後が , か }」だけ（連結・括弧・テンプレート・式は simple: false）。名前が取れなかった値は name: null
+      if (top && prev === ":") top.props.push({ name: pending, vs: i, ve: j, simple: c !== "`" && (text[k] === "," || text[k] === "}") });
       pending = null; prev = '"'; i = j + 1; continue;
     }
     if (/[A-Za-z_$]/.test(c)) {
@@ -51,7 +53,8 @@ function objectRanges(text) {
       if (top && (prev === "{" || prev === ",") && text[k] === ":") { top.keys.add(word); pending = word; prev = ":"; i = k + 1; continue; }
       pending = null; prev = "a"; i = j; continue;
     }
-    if (c === "{") { stack.push({ s: i, e: -1, keys: new Set(), props: [] }); pending = null; prev = "{"; i++; continue; }
+    if (top0() && (prev === "{" || prev === ",") && (c === "[" || (c === "." && text.startsWith("...", i)))) top0().opaque = true;   // 計算されたキー・スプレッドで、直下のプロパティ名を取り切れない
+    if (c === "{") { stack.push({ s: i, e: -1, keys: new Set(), props: [], opaque: false }); pending = null; prev = "{"; i++; continue; }
     if (c === "}") { const o = stack.pop(); if (!o) return null; o.e = i; out.push(o); pending = null; prev = "}"; i++; continue; }
     pending = null; prev = c; i++;
   }
@@ -59,17 +62,19 @@ function objectRanges(text) {
 }
 // この位置の AIza… の鍵が何か：
 //   "firebase"＝囲む { } の直下のプロパティ名に authDomain・projectId などが並び、鍵がその { } の apiKey の値（Firebase の設定の apiKey）
-//   "other"＝{ } を読み切れて、Firebase の設定の中ではないと読めた
-//   "unknown"＝{ } を読み切れない（正規表現リテラルの { } ・括弧の不一致など）・鍵のプロパティ名が取れない＝言い切らない
+//   "other"＝鍵が { } のプロパティの値（' か " の文字列）と読めて、その { } が Firebase の設定ではないと読めた（肯定の条件が揃った時だけ）
+//   "unknown"＝それ以外の全部（{ } を読み切れない・プロパティ名が取れない・括弧・テンプレート・連結・位置引数・スプレッド・{ } の外）＝言い切らない
 function classifyAiza(text, at, cache) {
   if (cache.ranges === undefined) cache.ranges = objectRanges(text);
   if (!cache.ranges) return "unknown";
   let best = null;
   for (const r of cache.ranges) if (r.s < at && at < r.e && (!best || r.s > best.s)) best = r;
-  if (!best) return "other";
+  if (!best || best.opaque) return "unknown";
   const prop = best.props.find((p) => p.vs < at && at < p.ve);
-  if (prop && prop.name === null) return "unknown";
-  return prop && prop.name === "apiKey" && [...best.keys].some((k) => FIREBASE_CONFIG_KEYS.has(k)) ? "firebase" : "other";
+  if (!prop || prop.name === null || !prop.simple) return "unknown";                         // プロパティの値として読めない（括弧・テンプレート・連結・位置引数・{ } の外）
+  const fb = [...best.keys].some((k) => FIREBASE_CONFIG_KEYS.has(k));
+  if (fb) return prop.name === "apiKey" ? "firebase" : "unknown";
+  return "other";                                                                          // 肯定の条件が揃った時だけ：プロパティの値で、その { } は Firebase の設定ではない
 }
 const BUNDLE_DIRS = ["dist", "build", "out", "public", ".output"];
 // 見本として Git に入れる前提の .env（中身は本物の鍵を入れない約束のファイル）

@@ -107,7 +107,8 @@ const AK = ["AIza", "SyFAKEFAKEFAKEFAKEFAKE_12345-abc"].join("");
 const geminiTitles = (F) => F.danger.filter((f) => f.title.startsWith("Gemini のキー")).map((f) => f.title);
 t("B4：@google/genai ＋ ソースに AIza＝danger", geminiTitles(run({ "src/ai.ts": `import { GoogleGenAI } from "@google/genai";\nconst ai = new GoogleGenAI({ apiKey: "${AK}" });\n` })), ["Gemini のキーがブラウザ側に出ています"]);
 t("B4：VITE_GEMINI_API_KEY=AIza…（.env）が素通りしない", geminiTitles(run({ "package.json": '{"dependencies":{"@google/generative-ai":"^0.21.0"}}', ".env": `VITE_GEMINI_API_KEY=${AK}\n` }, { envStatus: new Map([[".env", "untracked_ignored"]]) })), ["Gemini のキーがブラウザ側に出ています"]);
-t("B4：配布物（dist）の AIza も拾う", geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "dist/assets/a.js": `var c="generativelanguage.googleapis.com";var k="${AK}";\n` })), ["Gemini のキーがブラウザ側に出ています"]);
+t("B4：配布物（dist）のオブジェクトのプロパティの AIza を拾う（danger）", geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "dist/assets/a.js": `var c="generativelanguage.googleapis.com";var g=new GoogleGenAI({apiKey:"${AK}"});\n` })), ["Gemini のキーがブラウザ側に出ています"]);
+t("B4：配布物の、プロパティの値と読めない AIza（var k=\"…\"）は言い切らず warn（迷ったら warn）", (() => { const F = run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "dist/assets/a.js": `var c="generativelanguage.googleapis.com";var k="${AK}";\n` }); return [geminiTitles(F), F.warn.map((f) => f.title)]; })(), [[], ["Firebase の設定か Gemini のキーか判定できなかった AIza… があります"]]);
 t("B4：痕跡が1つも無い apiKey: AIza…＝danger にしない（N3）", geminiTitles(run({ "src/fb.ts": `const c = { apiKey: "${AK}" };\n` })), []);
 t("B4：Gemini の痕跡があっても firebaseConfig の apiKey は Gemini と言わない", geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "src/fb.ts": `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d.firebaseapp.com",\n  storageBucket: "d.appspot.com",\n};\n` })), []);
 t("B4：サーバー側の .env（接頭辞なし）の GEMINI_API_KEY は Gemini の danger にしない", geminiTitles(run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', ".env": `GEMINI_API_KEY=${AK}\n` }, { envStatus: new Map([[".env", "untracked_ignored"]]) })), []);
@@ -161,7 +162,7 @@ t("r2-3：コメントの中の authDomain・別の { } にある authDomain で
 const UNSURE = "Firebase の設定か Gemini のキーか判定できなかった AIza… があります";
 const unsureOf = (files) => run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', ...files });
 t("r2-3：{ } が読み切れない（閉じない括弧）時は danger にも「正常」にもせず warn", (() => { const F = unsureOf({ "src/fb.ts": `const firebaseConfig = {\n  apiKey: "${AK}",\n  authDomain: "d",\n` }); return [geminiTitles(F), titles(F, "warn"), F.info.length]; })(), [[], [UNSURE], 0]);
-t("r2-3：{ } の外の apiKey（const apiKey = …）は Firebase の設定ではない＝Gemini の danger", G2({ "src/ai.ts": `const apiKey = "${AK}";\nconst firebaseConfig = { authDomain: "d" };\n` }), ["Gemini のキーがブラウザ側に出ています"]);
+t("r2-3：{ } の外の apiKey（const apiKey = …）はプロパティの値と読めない＝danger にせず warn", [G2({ "src/ai.ts": `const apiKey = "${AK}";\nconst firebaseConfig = { authDomain: "d" };\n` }), run({ "package.json": '{"dependencies":{"@google/genai":"^1"}}', "src/ai.ts": `const apiKey = "${AK}";\n` }).warn.length], [[], 1]);
 // ---- レビュー r3（BLOCK）：読み切れない時は warn（迷ったら warn）。danger は「Firebase の設定の中ではない」と読めた時だけ
 t("r3-1：名前と : の間のコメント（apiKey /* c */ : \"AIza…\"）を飛ばして Firebase の鍵と読む（danger にしない）", (() => { const F = unsureOf({ "src/fb.ts": `const c = { apiKey /* comment */ : "${AK}", authDomain: "d" };\n` }); return [geminiTitles(F), titles(F, "warn"), F.info.length]; })(), [[], [], 0]);
 t("r3-1：// コメントをはさんでも同じ", geminiTitles(unsureOf({ "src/fb.ts": `const c = {\n  apiKey // c\n  : "${AK}",\n  authDomain: "d",\n};\n` })), []);
@@ -169,6 +170,17 @@ t("r3-2：正規表現リテラルの } で範囲が崩れたら、danger にせ
 t("r3-2：正規表現リテラルの { で崩れても warn", titles(unsureOf({ "src/fb.ts": `const re = /{/; const c = { apiKey: "${AK}", authDomain: "d" };\n` }), "warn"), [UNSURE]);
 t("r3-2：warn には行の実物がつく", unsureOf({ "src/fb.ts": `const re = /}/;\nconst c = { apiKey: "${AK}", authDomain: "d" };\n` }).warn[0].evidence.map((e) => e.loc), ["src/fb.ts:2"]);
 t("r3：鍵のプロパティ名が取れない（[k]: \"AIza…\"）時は warn", (() => { const F = unsureOf({ "src/a.ts": `const o = { [k]: "${AK}" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
-t("r3：Firebase の設定の中ではないと読めた時は danger のまま（new GoogleGenAI({ apiKey })・位置引数）", [geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenAI({ apiKey: "${AK}" });\n` })), geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenerativeAI("${AK}");\n` }))], [["Gemini のキーがブラウザ側に出ています"], ["Gemini のキーがブラウザ側に出ています"]]);
+t("r3：danger は、プロパティの値と読めて Firebase の設定ではないと読めた時だけ（new GoogleGenAI({ apiKey: \"AIza…\" })）", geminiTitles(unsureOf({ "src/a.ts": `new GoogleGenAI({ apiKey: "${AK}" });\n` })), ["Gemini のキーがブラウザ側に出ています"]);
+t("r3：位置引数（new GoogleGenerativeAI(\"AIza…\")）はプロパティの値ではない＝warn", (() => { const F = unsureOf({ "src/a.ts": `new GoogleGenerativeAI("${AK}");\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
 t("r3：Gemini の痕跡が無ければ読み切れなくても何も言わない（N3）", run({ "src/fb.ts": `const re = /}/; const c = { apiKey: "${AK}", authDomain: "d" };\n` }).warn.length, 0);
+// ---- レビュー r4（BLOCK）：danger は肯定の条件が揃った時だけ。読み取れなかった値は全部 warn（既定は unknown）
+const cfgWith = (v) => `const c = { apiKey: ${v}, authDomain: "d" };\n`;
+for (const [name, v] of [["括弧（レビューの例そのまま）", `("${AK}")`], ["テンプレート文字列", `\`${AK}\``], ["連結", `"${AK}" + suffix`], ["三項演算子", `x ? "${AK}" : "y"`], ["関数呼び出しの引数", `f("${AK}")`]]) {
+  const F = unsureOf({ "src/fb.ts": cfgWith(v) });
+  t(`r4：apiKey の値が ${name}＝読めた Firebase の設定でも danger にせず、正常とも言わず warn`, [geminiTitles(F), titles(F, "warn"), F.info.length], [[], [UNSURE], 0]);
+}
+t("r4：スプレッド（{ ...base, apiKey: \"AIza…\" }）は直下のプロパティ名を取り切れない＝warn", (() => { const F = unsureOf({ "src/fb.ts": `const c = { ...base, apiKey: "${AK}" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r4：計算されたキー（{ [k]: 1, apiKey: \"AIza…\" }）も warn", (() => { const F = unsureOf({ "src/fb.ts": `const c = { [k]: 1, apiKey: "${AK}" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r4：Firebase の設定のキーが並ぶ { } で apiKey 以外のプロパティに AIza…＝言い切らず warn", (() => { const F = unsureOf({ "src/fb.ts": `const c = { key: "${AK}", authDomain: "d" };\n` }); return [geminiTitles(F), titles(F, "warn")]; })(), [[], [UNSURE]]);
+t("r4：読めた Firebase の設定は今までどおり無言（Gemini の痕跡があっても）", (() => { const F = unsureOf({ "src/fb.ts": cfgWith(`"${AK}"`) }); return [geminiTitles(F), F.warn.length, F.info.length]; })(), [[], 0, 1]);
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

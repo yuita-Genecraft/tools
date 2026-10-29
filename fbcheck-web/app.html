@@ -378,7 +378,7 @@ function readAllows(text) {
       if (d === "(" || d === "[") p++;
       else if (d === ")" || d === "]") p = Math.max(0, p - 1);
       else if (d === ";" && p === 0) { closed = true; j++; break; }
-      else if (p === 0 && /^(?:allow|match)$/.test(wordAt(j))) break;
+      else if (/^(?:allow|match)$/.test(wordAt(j))) break;   // 括弧が閉じていなくても、別の allow・match が来たらそこで打ち切る
       buf += d; j++;
     }
     const mm = /^\s*([a-z,\s]+?)\s*(?::\s*if\b([\s\S]*))?$/.exec(buf);

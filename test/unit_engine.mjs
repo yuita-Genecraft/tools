@@ -280,6 +280,27 @@ t("g-8：FBCHECK_VERSION は 0.3.1", /const FBCHECK_VERSION = "0\.3\.1";/.test(s
   t(`r3：完結した allow write: if true; は、未完・読めない・読める別の文と並んでも（区切り・並び順 ${n} 通り）danger に出て、別の文は自分の分だけ unresolved`, bad.slice(0, 4), []);
   const F2 = raw(`service cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow write: if true; allow read: if false\n      allow get: if false;\n    }\n  }\n}\n`);
   t("r3 の例：allow write: if true; allow read: if false の次行が allow get: if false;", [F2.danger.map((f) => f.title), F2.warn.filter(UNRES).length], [["誰でも書き込める状態です（firestore.rules）"], 1]);
+  // r4：括弧が閉じていない文（allow read: if f( ）の次行に完結した allow がある形。後続の allow で打ち切り、後続の danger を落とさない
+  for (const [name, head] of [["括弧が閉じていない", "allow read: if f("], ["[ が閉じていない", "allow read: if x in ["], ["括弧の中に文字列", "allow read: if f(\"a;b\""], ["括弧が深い", "allow read: if f(g("]]) for (const sep of ["\n      ", " ", "\n\n      // ; )\n      "]) {
+    const F = raw(RAW(`      ${head}${sep}allow write: if true;\n    }\n  }\n}\n`));
+    t(`r4：${name}文の次に完結した allow write: if true; が続いても、その danger は出し、括弧の文だけ unresolved [${sep.replace(/\n/g, "\\n")}]`, [F.danger.length, F.warn.filter(UNRES).length], [1, 1]);
+  }
+  const F4 = raw(RAW("      allow read: if f(\n      match /x/{y} { allow get: if true; }\n    }\n  }\n}\n"));
+  t("r4：括弧が閉じていない文の次が match でも、そこで打ち切る（x の get: true は全体の danger にしない）", [F4.danger.length, F4.warn.filter(UNRES).length], [0, 1]);
+  // 閉じていない ( [ { と、その後に来る allow・match・}・ファイルの終わり の組み合わせ（機械的に）。完結した後続の allow write: if true; は必ず danger に出て、閉じていない文だけが unresolved
+  {
+    const OPEN = ["allow read: if f(", "allow read: if f(g(", "allow read: if x in [", "allow read: if f([", "allow read: if f(\"a;)\"", "allow read: if x == {", "allow read: if f({"];
+    const NEXT = [["allow write: if true;", 1], ["match /x/{y} { allow write: if true; }", 1], ["}", 0], ["", 0]];
+    const SEP4 = ["\n      ", " ", "\n      // ( [ {\n      ", " /* ) ] } */ "];
+    const bad4 = []; let n4 = 0;
+    for (const o of OPEN) for (const [nx, dng] of NEXT) for (const sp of SEP4) {
+      const F = raw(RAW(`      ${o}${sp}${nx}\n    }\n  }\n}\n`));
+      const u = F.warn.filter(UNRES).length, d = F.danger.length;
+      n4++;
+      if (u !== 1 || d !== dng) bad4.push(`[${o}${sp.replace(/\n/g, "\\n")}${nx}] unres=${u}/1 danger=${d}/${dng}`);
+    }
+    t(`r4：閉じていない ( [ { の文は、後に allow・match・}・終わりが来ても ${n4} 通り、その文だけ unresolved（後続の完結した allow・match の中の allow の danger は落とさない）`, bad4.slice(0, 4), []);
+  }
   t("コメント・文字列の中の ; { } は文の区切りにしない", (() => { const F = raw(RAW("      // allow write: if true;\n      /* allow read: if true; */\n      allow read: if resource.data.s == \"; } {\";\n    }\n  }\n}\n")); return [F.danger.length, F.warn.length]; })(), [0, 0]);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

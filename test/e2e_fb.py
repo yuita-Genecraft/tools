@@ -115,8 +115,9 @@ t9 = lambda r, k: [f["title"] for f in r[k]]
 ok("誰でも読み書きできる状態です（firestore.rules）" in t9(r9, "danger"), "N1: allow read, write;（条件なし）を danger で出す")
 ok("誰でも読める状態です（storage.rules）" in t9(r9, "danger") and any(x.startswith("ログインすれば、すべてのファイルを書き込めます") for x in t9(r9, "danger")), "B1: Storage の allow read; と write の auth の両方を出す")
 un9 = [f for f in r9["warn"] if f["title"].startswith("判定できなかった allow の行があります")]
-ok(len(un9) == 1 and un9[0]["title"].startswith("判定できなかった allow の行があります（2 行") and any("isSignedIn()" in e for e in un9[0]["ev"]) and any(e.endswith("allow write: if") for e in un9[0]["ev"]), "N2: 関数・次の行の条件の allow を行の実物つきで出す（無言にしない）")
-ok(not any("request.auth.uid == userId" in e for f in allf(r9) for e in f["ev"]), "B8: 持ち主のルールの行は出さない（言い過ぎない）")
+ok(len(un9) == 1 and un9[0]["title"].startswith("判定できなかった allow の行があります（2 行") and any("isSignedIn()" in e for e in un9[0]["ev"]) and any("&&" in e and "request.auth.uid == userId" in e for e in un9[0]["ev"]), "N2: 関数・&& でつないだ条件の allow を行の実物つきで出す（無言にしない）。次の行に続く条件（allow write: if ⏎ request.auth != null;）は、つないで読んで判定する")
+ok(any(x.startswith("ログインすれば、すべての文書を") or x.startswith("ログインしている人なら誰でも") for x in t9(r9, "danger") + t9(r9, "warn")), "N2: 次の行に続く条件を、つないで読んで auth と判定する")
+ok(not any("request.auth.uid == userId" in e for f in r9["danger"] + r9["info"] for e in f["ev"]), "B8: 持ち主のルールの行を danger にしない（&& を含むので「判定できなかった行」に出る）")
 ok(any(x.startswith("期限まで無認証で許可するルール") and "Realtime Database" in x for x in t9(r10, "danger")), "B5: コメント入り・末尾カンマの RTDB（now < 期限内）を読んで danger")
 ok(any(x.startswith("ログインしている人なら誰でも読める場所があります（Realtime Database") for x in t9(r10, "warn")), "B5: RTDB の一部の auth != null を warn")
 ok(t9(r12, "warn") == ["database.rules.json を読めませんでした"] and t9(r12, "danger") == [] , "N4: 壊れた RTDB の JSON は warn（無言にしない）・danger にもしない")
@@ -128,12 +129,12 @@ g13 = res["fbproj13"]
 ok(any(f["title"].startswith("ログインしている人なら誰でも読める場所があります") and f["ev"][0].startswith("firestore.rules:3") for f in g13["warn"]), "N5/B3: #02 request.auth.uid != null を auth と同じに読む（ブラウザ版と CLI が一致）")
 u13 = [f for f in g13["warn"] if f["title"].startswith("判定できなかった allow の行があります")]
 ok(len(u13) == 1 and u13[0]["title"].startswith("判定できなかった allow の行があります（5 行") , "N5/N2: #03・#05・#06・&& の関数・複数行の ops を無言にしない（5 行）")
-ok(any("if true && true" in e or "true && true" in e for f in g13["danger"] for e in f["ev"]) and not any("firestore.rules:11" in e for f in g13["warn"] for e in f["ev"]), "B2: if true && true は読めない行ではなく danger 側")
+ok(not any("true && true" in e for f in g13["danger"] for e in f["ev"]) and any("true && true" in e for f in u13 for e in f["ev"]), "B2: if true && true は && を含むので danger ではなく判定できなかった行（全体がちょうど true の時だけ true）")
 g14 = res["fbproj14"]
 ok(len([f for f in g14["danger"] if f["title"] == "Gemini のキーがブラウザ側に出ています"][0]["ev"]) == 2 and len(g14["info"]) == 1 and g14["info"][0]["ev"] == ["src/firebase.ts:2（対応不要）"], "B4: firebaseConfig の隣・同じ行の Gemini キーを見逃さず、Firebase の鍵だけ info")
 ok(t9(res["fbproj15"], "warn") == ["database.rules.json を読めませんでした"], "N4: 閉じていない /* の database.rules.json は warn（無言にしない）")
 g16 = res["fbproj16"]
-ok(any(f["title"].startswith("ログインすれば、すべての文書を読み書きできます") for f in g16["danger"]) and not [f for f in g16["warn"] if f["title"].startswith("判定できなかった")], "r2-1: true && request.auth != null は auth と同じ（danger）で、判定できなかった行にしない")
+ok(not any(f["title"].startswith("ログインすれば、すべての文書を読み書きできます") for f in g16["danger"]) and any("true && request.auth != null" in e for f in g16["warn"] if f["title"].startswith("判定できなかった") for e in f["ev"]), "r2-1: true && request.auth != null は && を含むので danger にせず、判定できなかった行に出す")
 gm16 = [f for f in g16["danger"] if f["title"] == "Gemini のキーがブラウザ側に出ています"]
 ok(len(gm16) == 1 and [e.split(" ")[0] for e in gm16[0]["ev"]] == ["src/ai.ts:1"] and g16["info"] == [], "r2-2/3: 値の文字列に authDomain があるだけの Gemini だけを danger にし、長い空白をはさんだ firebaseConfig の鍵は Gemini にしない（info は同じ行に鍵が無いので出ない）")
 g17 = res["fbproj17"]

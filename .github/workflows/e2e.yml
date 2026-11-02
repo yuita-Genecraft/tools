@@ -2,7 +2,7 @@ name: Notification report E2E
 
 on:
   pull_request:
-    branches: [main, fix/logmap-repo-boundary]
+    branches: [main, fix/logmap-repo-boundary, feat/logmap-change-lab]
 
 permissions:
   contents: read

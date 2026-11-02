@@ -9,6 +9,21 @@
 """
 import argparse, html, json, pathlib, re
 
+def inline_scripts(src: str, source_dir: pathlib.Path) -> str:
+    """Embed explicit sibling JS assets; the built page keeps its no-network CSP."""
+    def replace(m):
+        code = (source_dir / m.group(1)).read_text(encoding="utf-8")
+        # An HTML parser ends a script even inside a JS string/comment.
+        code = re.sub(r"</script", r"<\\/script", code, flags=re.I)
+        return "<script>\n" + code + "\n</script>"
+    src = re.sub(r'<script data-embed="([A-Za-z0-9_-]+\.js)"></script>', replace, src)
+    def css(m):
+        code = (source_dir / m.group(1)).read_text(encoding="utf-8")
+        if re.search(r"</style", code, re.I):
+            raise ValueError("Embedded CSS must not contain a closing style tag")
+        return code
+    return re.sub(r'/\* @embed ([A-Za-z0-9_-]+\.css) \*/', css, src)
+
 CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
        "img-src data: blob:; connect-src 'none'; font-src {font}; form-action 'none'; base-uri 'none'")
 
@@ -44,5 +59,6 @@ if __name__ == "__main__":
     ap.add_argument("--url", default=""); ap.add_argument("--og", default="")
     a = ap.parse_args()
     out = pathlib.Path(a.out); out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(build(pathlib.Path(a.src).read_text(encoding="utf-8"), a.url, a.og), encoding="utf-8")
+    source = pathlib.Path(a.src)
+    out.write_text(build(inline_scripts(source.read_text(encoding="utf-8"), source.parent), a.url, a.og), encoding="utf-8")
     print(out, out.stat().st_size, "bytes")

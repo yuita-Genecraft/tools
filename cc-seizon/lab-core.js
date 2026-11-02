@@ -137,7 +137,7 @@
       sessions.push({ id, firstSeen });
       for (let k = 0; k < 15; k++) {
         const ts = firstSeen + k * 180000, big = d < 0 ? (j + k) % 4 === 0 : (j + k) % 19 === 0;
-        rows.push({ sid: id, ts, tool: j < 6 ? 'claude' : 'codex', project: 'p1', model: j < 6 ? 'Claude demo' : 'Codex demo', side: false, inp: 800, out: 900 + k * 30, cr: big ? 510000 : 120000 + k * 7500, cw: k === 0 ? 20000 : 0, cw1h: 0 });
+        rows.push({ sid: id, ts, tool: j < 6 ? 'claude' : j === 6 ? 'codex' : 'gemini', project: 'p1', model: j < 6 ? 'Claude demo' : j === 6 ? 'Codex demo' : 'Antigravity demo', side: false, inp: 800, out: 900 + k * 30, cr: big ? 510000 : 120000 + k * 7500, cw: k === 0 ? 20000 : 0, cw1h: 0 });
       }
       if (j === 0) compactions.push({ sid: id, ts: firstSeen + 2000000 });
     }

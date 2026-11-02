@@ -49,7 +49,7 @@
       const latest = data.rows.reduce((m, r) => Math.max(m, r.ts), 0) || Date.parse(data.collectedAt);
       const p = data.sample ? Date.UTC(2026, 9, 19) : Math.floor(latest / L.DAY) * L.DAY - 7 * L.DAY;
       state = restoredOptions || L.options({ pivot: p, days: 14, change: data.sample ? '圧縮設定を見直した' : '' }); restoredOptions = null;
-      selectValues('#labTool', data.rows.map(r => r.tool), v => names[v]);
+      selectValues('#labTool', Object.keys(names), v => names[v] + (data.rows.some(r => r.tool === v) ? '' : '（集計対象なし）'));
       selectValues('#labProject', data.rows.map(r => r.project).filter(Boolean), v => app.labLabels[v] || '作業 ' + v.slice(1));
       selectValues('#labModel', data.rows.map(r => r.model).filter(Boolean), v => v);
       setControls(state); render();
@@ -81,7 +81,7 @@
     const d = L.discover(data, state);
     $('#labDiscover').innerHTML = `<div class="lab-discover-heading"><div><p class="lab-section-label">START WITH YOUR LOGS</p><h2>まず、ここから確かめる。</h2></div><span class="lab-status">${data.sample ? '見本・架空データ' : '記録から機械的に抽出'}</span></div>
       <div class="lab-overview" id="labOverview"><div><p class="lab-section-label">対象全体 / ${esc(state.tool ? names[state.tool] : '全AI')}</p><strong>${precisePc(d.total.heavyShare)}</strong><p>文脈40万超の応答が占める重み付き量</p></div><div><p>${d.end ? `${dateTime(d.start)} ～ ${dateTime(d.end - 1)} UTC` : '対象の記録なし'}</p><p>最終記録から7日間 · ${n(d.total.n)} 応答 / ${n(d.total.sessions)} 会話<br>40万超 ${n(d.total.heavyN)} 応答</p><p>作業：${esc(state.project ? app.labLabels[state.project] || state.project : 'すべて')} / モデル：${esc(state.model || 'すべて')} / サブエージェント${state.includeSide ? '含む' : '除外'}</p><p class="lab-caption">料金・利用枠・削減可能量ではありません。候補の順位だけで調査の優先度を決めず、全体に占める割合を先に確認してください。</p></div></div>
-      <div class="lab-tool-scope" aria-label="確認するAI"><span>対象AI</span><button class="btn" type="button" data-lab-tool="" aria-pressed="${!state.tool}">全AI</button>${[...new Set(data.rows.map(r => r.tool))].sort().map(t => `<button class="btn" type="button" data-lab-tool="${esc(t)}" aria-pressed="${state.tool === t}">${esc(names[t])}</button>`).join('')}</div>
+      <div class="lab-tool-scope" aria-label="確認するAI"><span>対象AI</span><button class="btn" type="button" data-lab-tool="" aria-pressed="${!state.tool}">全AI</button>${Object.keys(names).map(t => `<button class="btn" type="button" data-lab-tool="${esc(t)}" aria-pressed="${state.tool === t}">${esc(names[t])}${data.rows.some(r => r.tool === t) ? '' : '（集計対象なし）'}</button>`).join('')}</div>
       <p class="lab-caption">AIを切り替えると、作業・モデルの絞り込みを解除します。変更日時は保ちます。表示期間はそのAIの最終記録を基準に更新します。</p>
       <div class="lab-tool-totals">${d.byTool.map(t => `<span>${esc(names[t.tool])}：${precisePc(t.heavyShare)} <small>そのAIの全応答が分母 · ${n(t.n)} 応答</small></span>`).join('')}</div>
       <details id="labCandidateDetails"><summary>内訳の候補を見る（${d.candidates.length} 会話・最大3件）</summary><p class="lab-caption">この期間・条件内で、40万超の重み付き量が大きい順です。異常や無駄の認定ではありません。上位でも寄与が小さい場合があります。</p>

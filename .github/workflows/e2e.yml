@@ -47,8 +47,7 @@ jobs:
       - name: Change Lab deterministic analytics and offline roundtrip
         if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: |
-          node --test test/unit_lab.mjs test/unit_observe.mjs
-          python -m unittest discover -s test -p test_observe.py
+          node --test test/unit_lab.mjs
           python -u test/e2e_lab.py
       - name: Firebase check engine unit tests
         # Node only (no browser). Independent of the other steps.

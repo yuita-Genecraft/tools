@@ -21,7 +21,7 @@ export function numericLine(line) {
     return JSON.stringify({ type: o.type, sessionId: o.sessionId, timestamp: o.timestamp, uuid: o.uuid, cwd: o.cwd, isSidechain: o.isSidechain, isMeta: o.isMeta,
       message: { id: o.message.id, role: o.message.role, model: o.message.model, usage: o.message.usage, content: [] } });
   }
-  if (o.type === 'system' && o.subtype === 'compact_boundary') return JSON.stringify({ type: o.type, subtype: o.subtype, sessionId: o.sessionId, timestamp: o.timestamp, uuid: o.uuid });
+  if (o.type === 'system' && o.subtype === 'compact_boundary') return JSON.stringify({ type: o.type, subtype: o.subtype, sessionId: o.sessionId, timestamp: o.timestamp, uuid: o.uuid, cwd: o.cwd });
   if (o.payload && typeof o.payload === 'object') {
     const p = o.payload;
     return JSON.stringify({ type: o.type, timestamp: o.timestamp, payload: { type: p.type, id: p.id, cwd: p.cwd, model: p.model, response_id: p.response_id, usage: p.usage } });

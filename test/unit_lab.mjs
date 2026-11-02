@@ -108,3 +108,9 @@ test('discovery uses scoped last seven days and heavy contribution over all weig
  assert.equal(L.discover({...data,rows:[row('s1',pivot,400000)]},opts).candidates.length,0);
  assert.equal(L.discover(data,{...opts,includeSide:true}).candidates[0].sid,'s3');
 });
+
+test('boundary-only project metadata matches browser and content-stripped CLI', () => {
+ const events=[{type:'system',subtype:'compact_boundary',sessionId:'s',uuid:'b',timestamp:new Date(pivot-1000).toISOString(),cwd:'/private/example-repo'},{type:'assistant',sessionId:'s',uuid:'m',timestamp:new Date(pivot+1000).toISOString(),message:{id:'m',role:'assistant',content:[],usage:{input_tokens:500000,output_tokens:10}}}];
+ const parse=(strip)=>{const a=parser.newLogAcc();for(const e of events){const line=JSON.stringify(e);parser.handleLogLine(strip?numericLine(line):line,a);}return parser.labDatasetFromAcc(a,'2026-11-02T00:00:00Z').data;};
+ const browser=parse(false),cli=parse(true);assert.deepEqual(cli,browser);assert.equal(cli.rows[0].project,'p1');assert.equal(L.analyze(cli,opts).ongoing.n,1);assert.ok(!JSON.stringify(cli).includes('/private'));
+});

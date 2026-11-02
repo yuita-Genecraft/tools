@@ -93,11 +93,28 @@ def export(root,dest):
     # cannot invalidate a filename already copied. Completed IDs suppress gaps.
     if pending.exists() or pending.is_symlink():
         pending=safe_dir(pending)
-        for p in pending.glob('*.pending'):
+        for p in sorted(pending.glob('*.pending')):
             match=re.fullmatch(r'(\d{16})-([0-9a-f-]{36})\.pending',p.name)
             if not match:raise ValueError('invalid pending name')
             when=datetime.datetime.fromtimestamp(int(match[1])/1000000,datetime.timezone.utc)
             if when<=cutoff:markers.append({'schema':SCHEMA,'id':match[2],'observedAt':when.isoformat(),'tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'})
+            if len(markers)>100000:raise ValueError('export limit exceeded')
+        for p in sorted(pending.glob('*.json')):
+            match=re.fullmatch(r'([0-9a-f-]{36})\.json',p.name)
+            if not match:raise ValueError('invalid pending name')
+            if len(markers)>=100000:raise ValueError('export limit exceeded')
+            with os.fdopen(open_private(p,os.O_RDONLY)) as f:
+                raw=f.read(65537)
+                if len(raw)>65536:raise ValueError('gap record too large')
+                rec=json.loads(raw)
+            if not isinstance(rec,dict) or rec.get('schema')!=SCHEMA or rec.get('kind')!='gap' or rec.get('id')!=match[1]:
+                raise ValueError('invalid legacy gap record')
+            when=datetime.datetime.fromisoformat(rec['observedAt'].replace('Z','+00:00'))
+            if when<=cutoff:
+                session=rec.get('session')
+                if not isinstance(session,str) or not re.fullmatch(r'[a-f0-9]{24}',session):session='0'*24
+                source=label(rec.get('source')) or 'capture_incomplete'
+                markers.append({'schema':SCHEMA,'id':match[1],'observedAt':rec['observedAt'],'tool':'claude','session':session,'kind':'gap','source':source})
             if len(markers)>100000:raise ValueError('export limit exceeded')
     events=[]
     for p in sorted(root.glob('*.jsonl')):
@@ -108,11 +125,14 @@ def export(root,dest):
                 if not line:break
                 if len(line)>65536:raise ValueError('export line limit exceeded')
                 event=json.loads(line)
-                if datetime.datetime.fromisoformat(event['observedAt'])<=cutoff:
+                if datetime.datetime.fromisoformat(event['observedAt'].replace('Z','+00:00'))<=cutoff:
                     if len(events)>=100000:raise ValueError('export limit exceeded')
                     events.append(event)
     completed={e['id'] for e in events}
-    events.extend(m for m in markers if m['id'] not in completed)
+    for m in markers:
+        if m['id'] not in completed:
+            completed.add(m['id'])
+            events.append(m)
     if len(events)>100000:raise ValueError('export limit exceeded')
     payload={'schema':SCHEMA,'events':events}
     fd=open_private(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL)

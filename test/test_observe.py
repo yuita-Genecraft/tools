@@ -78,4 +78,48 @@ class Observer(unittest.TestCase):
   out=self.root/'after-timeout.json';self.assertEqual(self.runobs('export',None,'--out',str(out)).returncode,0);self.assertEqual(json.loads(out.read_text())['events'][0]['kind'],'gap')
  def test_invalid_input_does_not_expose(self):
   r=self.runobs('hook',{'session_id':'SECRET','hook_event_name':'SECRET'});self.assertNotIn('SECRET',r.stderr);self.assertEqual(r.returncode,0)
+ def test_legacy_pending_exported_as_gap(self):
+  m.safe_dir(self.data);pending=m.safe_dir(self.data/'pending');ident='11111111-2222-3333-4444-555555555555'
+  rec={'schema':m.SCHEMA,'id':ident,'observedAt':'2026-11-02T10:00:00+00:00','tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'}
+  fd=m.open_private(pending/(ident+'.json'),os.O_WRONLY|os.O_CREAT|os.O_EXCL)
+  with os.fdopen(fd,'w') as f:json.dump(rec,f)
+  out=self.root/'export.json';self.assertEqual(self.runobs('export',None,'--out',str(out)).returncode,0)
+  events=json.loads(out.read_text())['events'];self.assertEqual(len(events),1);self.assertEqual(events[0]['kind'],'gap');self.assertEqual(events[0]['id'],ident);self.assertEqual(events[0]['source'],'capture_incomplete')
+ def test_mixed_legacy_and_current_pending(self):
+  m.safe_dir(self.data);pending=m.safe_dir(self.data/'pending');leg_id='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+  rec={'schema':m.SCHEMA,'id':leg_id,'observedAt':'2026-11-02T10:00:00+00:00','tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'}
+  fd=m.open_private(pending/(leg_id+'.json'),os.O_WRONLY|os.O_CREAT|os.O_EXCL)
+  with os.fdopen(fd,'w') as f:json.dump(rec,f)
+  self.runobs('hook',self.hook());cur_id='ffffffff-1111-2222-3333-444444444444'
+  fd2=m.open_private(pending/('1730541600000000-'+cur_id+'.pending'),os.O_WRONLY|os.O_CREAT|os.O_EXCL);os.close(fd2)
+  out=self.root/'export.json';self.assertEqual(self.runobs('export',None,'--out',str(out)).returncode,0)
+  events=json.loads(out.read_text())['events'];self.assertEqual(len(events),3)
+  kinds={e['id']:e['kind'] for e in events};self.assertEqual(kinds[leg_id],'gap');self.assertEqual(kinds[cur_id],'gap');self.assertEqual(len([e for e in events if e['kind']=='hook']),1)
+ def test_legacy_pending_with_concurrent_normal_operation(self):
+  m.safe_dir(self.data);pending=m.safe_dir(self.data/'pending');leg_id='22222222-3333-4444-5555-666666666666'
+  rec={'schema':m.SCHEMA,'id':leg_id,'observedAt':'2026-11-02T10:00:00+00:00','tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'}
+  fd=m.open_private(pending/(leg_id+'.json'),os.O_WRONLY|os.O_CREAT|os.O_EXCL)
+  with os.fdopen(fd,'w') as f:json.dump(rec,f)
+  def capture(i):return self.runobs('hook',self.hook())
+  def export(i):return self.runobs('export',None,'--out',str(self.root/('ce'+str(i)+'.json')))
+  with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+   fs=[]
+   for i in range(24):
+    fs.append(pool.submit(capture,i))
+    if i%2==0:fs.append(pool.submit(export,i))
+   results=[f.result() for f in fs]
+  self.assertTrue(all(r.returncode==0 and not r.stderr for r in results),[r.stderr for r in results])
+  for p in self.root.glob('ce*.json'):
+   events=json.loads(p.read_text())['events'];self.assertEqual(len({e['id'] for e in events}),len(events));self.assertTrue(any(e['id']==leg_id and e['kind']=='gap' for e in events))
+  final=self.root/'completed_legacy.json';self.assertEqual(self.runobs('export',None,'--out',str(final)).returncode,0)
+  events=json.loads(final.read_text())['events'];self.assertEqual(len(events),25);self.assertEqual(len([e for e in events if e['kind']=='hook']),24);self.assertEqual(len([e for e in events if e['id']==leg_id and e['kind']=='gap']),1)
+ def test_invalid_legacy_pending_rejected(self):
+  m.safe_dir(self.data);pending=m.safe_dir(self.data/'pending');p=pending/'not-uuid.json'
+  fd=m.open_private(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL)
+  with os.fdopen(fd,'w') as f:f.write('{}')
+  self.assertEqual(self.runobs('export',None,'--out',str(self.root/'e.json')).returncode,1);p.unlink()
+  good_name=pending/('33333333-4444-5555-6666-777777777777.json')
+  fd=m.open_private(good_name,os.O_WRONLY|os.O_CREAT|os.O_EXCL)
+  with os.fdopen(fd,'w') as f:json.dump({'schema':m.SCHEMA,'id':'wrong-id','observedAt':'2026-11-02T10:00:00+00:00','kind':'gap'},f)
+  self.assertEqual(self.runobs('export',None,'--out',str(self.root/'e2.json')).returncode,1)
 if __name__=='__main__':unittest.main()

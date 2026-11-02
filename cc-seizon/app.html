@@ -268,16 +268,24 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 .mark select,.since input{background:var(--bg-2);color:var(--ink);border:1px solid var(--rule);font:inherit;font-size:13px;padding:3px 6px;border-radius:2px}
 .since{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+/* @embed lab.css */
 </style>
 
 <div class="page">
+  <nav class="brandbar" aria-label="ページ情報"><a class="brand" href="#lab" aria-label="ログマップ 変更を検証"><span class="brand-mark" aria-hidden="true">↗</span>LOGMAP<span class="brand-ja">AI 開発ログマップ</span></a><span class="local-badge"><i></i>LOCAL ONLY <span>ログの外部送信なし</span></span></nav>
   <header class="masthead">
-    <h1>AI 開発ログマップ</h1>
-    <p class="lead">Claude Code・Codex・Antigravity の会話ログを、このページに落とすだけ。<b>文脈とトークン</b>では、使用量のどれだけが長い文脈の応答に行ったか（応答の数との差）と、間をあけて再開した時に何が起きたかを、ログだけで数えます。<b>コードの手直し</b>では、手元のプロジェクトのフォルダも入れて、AI が書いた行のその後（残った・AI が自分で書き直した・ログの外で変わった・ファイルごと消えた）と、書き直しが集中した所、繰り返した直しの型を出します。</p>
-    <p class="facts"><span>ブラウザの中だけで突き合わせ</span><span>通信なし</span><span>無料</span></p>
+    <div><p class="eyebrow">YOUR WORKFLOW. YOUR EVIDENCE.</p><h1>変えた。その効果を、<br><em>自分のログで。</em></h1><p class="lead">会話の区切り方、圧縮設定、頼み方。<br>AI 開発の工夫を、変更前後の数字で確かめる。</p></div>
+    <div class="hero-index" aria-label="使い方"><span><b>01</b>変更の前後を比べる</span><span><b>02</b>続けた会話と新しい会話を分ける</span><span><b>03</b>条件ごと保存し、また確かめる</span></div>
   </header>
-
-  <main class="layout">
+  <div class="tabs" role="tablist" aria-label="見るもの">
+    <button type="button" role="tab" class="tab" data-tab="lab" aria-selected="true" aria-controls="labPanel">01 <span>変更を検証</span><small>CHANGE LAB</small></button>
+    <button type="button" role="tab" class="tab" data-tab="tokens" aria-selected="false" aria-controls="legacyLayout">02 <span>使用量を探る</span><small>CONTEXT</small></button>
+    <button type="button" role="tab" class="tab" data-tab="rework" aria-selected="false" aria-controls="legacyLayout">03 <span>手直しを減らす</span><small>REWORK</small></button>
+  </div>
+  <p class="status" aria-live="polite"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のデータで操作を試せます。</span></p>
+  <details class="import-drawer" id="importDrawer"><summary><span>↥ <b>自分のログを読み込む</b><small>Claude Code / Codex / Antigravity</small></span><span class="drawer-plus" aria-hidden="true">＋</span></summary><div id="intakeSlot"></div></details>
+  <section id="labPanel" role="tabpanel" aria-label="変更を検証"></section>
+  <main class="layout" id="legacyLayout">
     <section class="sheet-col" aria-label="共有用のカード">
       <div class="intakes">
         <div class="intake" id="zoneLog">
@@ -325,12 +333,6 @@ td .mini span{display:block;height:100%;background:var(--alive)}
         <p id="progressText">読み込み中</p>
       </div>
 
-      <div class="tabs" role="tablist" aria-label="見るもの">
-        <button type="button" role="tab" class="tab" data-tab="tokens" aria-selected="true">文脈とトークン<small>ログだけ</small></button>
-        <button type="button" role="tab" class="tab" data-tab="rework" aria-selected="false">コードの手直し<small>ログ＋フォルダ</small></button>
-      </div>
-      <p class="status" aria-live="polite"><span class="pill" id="statusPill">見本</span><span id="statusText">架空のデータで表示しています。AI のログを入れると、あなたの数字に変わります。</span></p>
-
       <figure class="card">
         <img id="cardImg" width="1080" height="1350" alt="共有用のカードの画像">
       </figure>
@@ -372,6 +374,7 @@ td .mini span{display:block;height:100%;background:var(--alive)}
   </footer>
 </div>
 
+<script data-embed="lab-core.js"></script>
 <script>
 (() => {
 'use strict';
@@ -421,7 +424,7 @@ const normPath = p => String(p).replace(/\\/g, '/');
 const USE_NAMES = new Set(['Edit', 'MultiEdit', 'Write', 'Read']);
 const RX_NUMBERED = /^\s*\d+(?:→|\t)/;
 const LOG_SKIP_DIRS = new Set(['node_modules', '.git', 'plugins', 'shell-snapshots', 'statsig', 'todos', 'debug', 'file-history', 'session-env', 'backups', 'ide']);
-function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), resp: new Map(), sessLink: [], cur: newFileState(''), cxSeen: new Set(), gem: new Map(), gmSkipped: 0, prompts: new Map() }; }
+function newLogAcc(){ return { uses: new Map(), results: new Map(), files: 0, lines: 0, bad: 0, sess: new Map(), msgSid: new Map(), resp: new Map(), sessLink: [], cur: newFileState(''), cxSeen: new Set(), gem: new Map(), gmSkipped: 0, prompts: new Map(), compactions: new Map() }; }
 /* 会話ごとの「本人が打った指示」（時刻・冒頭 160 字）。書き直しの前の指示を出すため */
 function addPrompt(acc, sid, ts, text){
   if (!sid || !Number.isFinite(ts) || !text) return;
@@ -431,14 +434,14 @@ function addPrompt(acc, sid, ts, text){
 /* 読んでいる最中のファイルの状態（Codex は会話の ID と作業フォルダがファイルの頭にだけ書かれる・Gemini は会話の ID がフォルダ名にある） */
 /* 別の AI のログを足す：AI が違えば会話の ID も記録の ID も重ならないので、そのまま合わせる */
 function mergeAcc(a, b){
-  for (const k of ['uses', 'results', 'sess', 'msgSid', 'resp', 'gem', 'prompts']) for (const [x, v] of b[k]) if (!a[k].has(x)) a[k].set(x, v);
+  for (const k of ['uses', 'results', 'sess', 'msgSid', 'resp', 'gem', 'prompts', 'compactions']) for (const [x, v] of b[k]) if (!a[k].has(x)) a[k].set(x, v);
   for (const x of b.cxSeen) a.cxSeen.add(x);
   a.sessLink.push(...b.sessLink);
   a.files += b.files; a.lines += b.lines; a.bad += b.bad;
   return a;
 }
 function accTools(acc){ const s = new Set(); for (const sid of acc.sess.keys()) s.add(toolOf(sid)); if (acc.gem.size) s.add('gemini'); return s; }
-function newFileState(path){ return { path: String(path || ''), sid: '', cwd: '' }; }
+function newFileState(path){ return { path: String(path || ''), sid: '', cwd: '', model: '' }; }
 /* どの AI の会話か：会話の ID の頭で分ける（Claude Code はそのまま・Codex は codex:・Gemini は gemini:） */
 const TOOL_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Antigravity' };
 const toolOf = sid => (String(sid).startsWith('codex:') ? 'codex' : String(sid).startsWith('gemini:') ? 'gemini' : 'claude');
@@ -491,13 +494,18 @@ function handleLogLine(line, acc){
   acc.lines++;
   if (line.length < 40) return;
   // 読むのは Claude Code の user／assistant の message・Codex の payload・Gemini の step だけ。それ以外の行（summary・progress 等）は飛ばす
-  if (line.indexOf('"message"') < 0 && line.indexOf('"payload"') < 0 && line.indexOf('"step_index"') < 0) return;
+  if (line.indexOf('"message"') < 0 && line.indexOf('"payload"') < 0 && line.indexOf('"step_index"') < 0 && line.indexOf('"compact_boundary"') < 0) return;
   let o;
   try { o = JSON.parse(line); } catch (e) { acc.bad++; return; }
   if (!o || typeof o !== 'object') return;
   // 形で見分ける（本文に "payload" などの語が入っていても取り違えない）
   if (!o.message && o.payload && typeof o.payload === 'object' && typeof o.type === 'string') { handleCodex(o, acc); return; }
   if (!o.message && typeof o.step_index === 'number' && typeof o.type === 'string') { handleGemini(o, acc); return; }
+  if (o.type === 'system' && o.subtype === 'compact_boundary' && typeof o.sessionId === 'string') {
+    const ts = Date.parse(o.timestamp);
+    if (Number.isFinite(ts)) acc.compactions.set(o.uuid || o.sessionId + ':' + ts, { sid: o.sessionId, ts });
+    return;
+  }
   if (!o.message || typeof o.message !== 'object') return;
   const sid = typeof o.sessionId === 'string' ? o.sessionId : '';
   const tsRaw = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
@@ -535,7 +543,7 @@ function handleLogLine(line, acc){
         if (!r) { r = { sid, out: 0, inp: 0, cache: 0, cr: 0, cw: 0, cw1h: 0, ts, side: !!o.isSidechain, u: false }; acc.resp.set(mid, r); sv.msgs++; }
         const u = o.message.usage;
         if (u && typeof u === 'object') {
-          r.u = true;
+          r.u = true; r.model = safeModel(o.message.model);
           for (const [k, v] of [['out', u.output_tokens], ['inp', u.input_tokens], ['cache', (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)]]) {
             const n = typeof v === 'number' && v > 0 ? v : 0;
             if (n > r[k]) { sv[k] += n - r[k]; r[k] = n; }
@@ -604,10 +612,12 @@ function sessTouch(acc, sid, ts, cwd){
   if (!sv.cwd && cwd) sv.cwd = cwd;
   return sv;
 }
+function safeModel(v){ return typeof v === 'string' && /^[\w .:/-]{1,96}$/.test(v) ? v : ''; }
 function handleCodex(o, acc){
   const st = acc.cur, p = o.payload;
   if (o.type === 'session_meta') { if (!st.sid && typeof p.id === 'string' && p.id) st.sid = 'codex:' + p.id; if (!st.cwd && typeof p.cwd === 'string') st.cwd = normPath(p.cwd); }
   else if (o.type === 'turn_context' && typeof p.cwd === 'string') st.cwd = normPath(p.cwd);
+  if (o.type === 'turn_context') st.model = safeModel(p.model);
   const sid = st.sid || ('codex:' + (st.path || '?'));
   const ts = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
   const sv = sessTouch(acc, sid, ts, st.cwd);
@@ -616,7 +626,7 @@ function handleCodex(o, acc){
     const rid = 'cx:' + (typeof p.response_id === 'string' && p.response_id ? p.response_id : sid + ':' + (o.timestamp || ''));
     if (!u || typeof u !== 'object' || acc.resp.has(rid)) return;
     const cached = posNum(u.cached_input_tokens);
-    acc.resp.set(rid, { sid, ts, out: posNum(u.output_tokens), inp: Math.max(0, posNum(u.input_tokens) - cached), cr: cached, cw: posNum(u.cache_write_input_tokens), cw1h: 0, side: false });
+    acc.resp.set(rid, { sid, ts, out: posNum(u.output_tokens), inp: Math.max(0, posNum(u.input_tokens) - cached), cr: cached, cw: posNum(u.cache_write_input_tokens), cw1h: 0, side: false, model: safeModel(p.model) || st.model });
     sv.msgs++;
     sv.out += posNum(u.output_tokens); sv.inp += Math.max(0, posNum(u.input_tokens) - cached); sv.cache += cached + posNum(u.cache_write_input_tokens);
     return;
@@ -691,7 +701,7 @@ function finalizeGemini(acc){
     if (o.type !== 'PLANNER_RESPONSE') continue;
     sv.msgs++;
     sv.out += posNum(o.output_tokens); sv.inp += posNum(o.input_tokens); sv.cache += posNum(o.cache_read_tokens);
-    acc.resp.set('gm:' + conv + ':' + o.step_index, { sid, ts, out: posNum(o.output_tokens), inp: posNum(o.input_tokens), cr: posNum(o.cache_read_tokens), cw: 0, cw1h: 0, side: false });
+    acc.resp.set('gm:' + conv + ':' + o.step_index, { sid, ts, out: posNum(o.output_tokens), inp: posNum(o.input_tokens), cr: posNum(o.cache_read_tokens), cw: 0, cw1h: 0, side: false, model: safeModel(o.model) });
     const calls = Array.isArray(o.tool_calls) ? o.tool_calls : [];
     calls.forEach((t, i) => {
       if (!t || typeof t !== 'object') return;
@@ -846,7 +856,7 @@ function analyzeParsed(acc, project, projectName, strict, since){
   const cwdTop = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).map(e => e[0])[0] || '';
   const { root, matched, candidates, ambiguous, from } = findRoot(claude, project, cwds, projectName);
   const R = {
-    sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous, cwdTop,
+    sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous || !!(root && projectName && baseName(root) !== projectName), cwdTop,
     logFiles: acc.files, logLines: acc.lines, logBad: acc.bad, uses: acc.uses.size, edits: 0, sessions: 0,
     projectFiles: project.size, projectLines: 0, otherProjectFiles: 0, missingFiles: [],
     written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, droppedWritten: 0, aiLines: 0,
@@ -855,7 +865,7 @@ function analyzeParsed(acc, project, projectName, strict, since){
     rewriteTotal: { events: 0, lines: 0, files: 0 }, rewriteFiles: [], rewriteEvents: [],
     sessionStats: { outTotal: 0, outGone: 0, goneShare: 0, rows: [], costly: [], cheap: [] },
   };
-  if (!root) return R;
+  if (!root || R.rootAmbiguous) return R;
   const prefix = root + '/';
   const sids = new Set();
   const perSess = new Map();   // 会話（再開でつながったセッションをまとめたもの）ごと：このリポジトリに書いた行の内訳と編集回数（頼み方の節）
@@ -1641,7 +1651,7 @@ function tokenDetailsHTML(T, hidePrompts){
 function tokenShareText(T){
   if (!T.n) return '';
   const hv = T.heavy || { n: 0, w: 0 };
-  const lines = ['自分の AI コーディングのログで、使用量の行き先を数えました',
+  const lines = [T.sample ? '【見本・架空データ】AI 開発ログマップの表示例です' : '自分の AI コーディングのログで、使用量の行き先を数えました',
     `・使用量の ${pct(hv.w)} は、文脈が40万トークンを超えた応答だった`,
     `・その応答は、数では ${pctOf(hv.n, T.n)}（全 ${fmt(T.n)} 応答）`,
     `・1時間以上あけた再開 ${fmt(T.resumes)} 回のうち ${fmt(T.matched)} 回で大量のキャッシュ作成${T.matched ? `（使用量の ${pct(T.matchedW || 0)}）` : ''}`,
@@ -1866,13 +1876,37 @@ function shareText(R){
   if (R.sessionStats && R.sessionStats.outTotal) lines.push(`・今は無いコードに使った出力トークン：${pct(R.sessionStats.goneShare)}（${fmtTok(R.sessionStats.outGone)}／${fmtTok(R.sessionStats.outTotal)}）`);
   lines.push('#AI開発ログマップ via @yuita_Genecraft');
   if (TOOL_URL) lines.push(TOOL_URL);
-  return lines.join('\n');
+  return (R.sample ? ['【見本・架空データ】', ...lines] : lines).join('\n');
+}
+
+/* Numeric-only interchange. Original identifiers/paths/prompts never enter a snapshot. */
+function labDatasetFromAcc(acc, collectedAt = new Date().toISOString()){
+  const rs = resolveSessions(acc), reps = [...rs.sess.keys()].sort();
+  const sidMap = new Map(reps.map((id, i) => [id, 's' + (i + 1)]));
+  const paths = [...new Set([...rs.sess.values()].map(s => s.cwd).filter(Boolean))].sort();
+  const projects = new Map(paths.map((p, i) => [p, 'p' + (i + 1)]));
+  const labels = Object.fromEntries(paths.map(p => [projects.get(p), `${baseName(p)} · ${projects.get(p)}`]));
+  const sessions = reps.map(id => ({ id: sidMap.get(id), firstSeen: Number.isFinite(rs.sess.get(id).start) ? rs.sess.get(id).start : null }));
+  const coverage = { files: acc.files, lines: acc.lines, badLines: acc.bad, noTime: 0, noUsage: 0 };
+  const rows = [];
+  for (const r of acc.resp.values()) {
+    if (r.u === false) { coverage.noUsage++; continue; }
+    if (!Number.isFinite(r.ts)) { coverage.noTime++; continue; }
+    const rep = rs.repOf.get(r.sid) || r.sid;
+    if (!sidMap.has(rep)) continue;
+    rows.push({ sid: sidMap.get(rep), ts: r.ts, tool: toolOf(r.sid), project: projects.get(rs.sess.get(rep)?.cwd) || '', model: safeModel(r.model), side: !!r.side,
+      inp: posNum(r.inp), out: posNum(r.out), cr: posNum(r.cr), cw: posNum(r.cw), cw1h: Math.min(posNum(r.cw1h), posNum(r.cw)) });
+  }
+  rows.sort((a, b) => a.ts - b.ts || a.sid.localeCompare(b.sid) || LogmapLab.context(a) - LogmapLab.context(b));
+  const compactions = [...acc.compactions.values()].map(c => ({ sid: sidMap.get(rs.repOf.get(c.sid) || c.sid), ts: c.ts })).filter(c => c.sid).sort((a, b) => a.ts - b.ts || a.sid.localeCompare(b.sid));
+  return { data: { parser: LogmapLab.PARSER, sample: false, collectedAt, coverage, sessions, rows, compactions }, labels };
 }
 
 /* ---------- 画面 ---------- */
 let current = sampleResult();
 let currentT = sampleTokens();
-let tab = (typeof location !== 'undefined' && location.hash === '#rework') ? 'rework' : 'tokens';
+let tab = ['#rework', '#tokens'].includes(location.hash) ? location.hash.slice(1) : 'lab';
+let labData = LogmapLab.demo(), labLabels = {}, labImported = false;
 let lastCanvas = null;
 let inputs = { acc: null, project: null, projectName: '' };   // 読み込み済みの生データ（厳密モードの切り替えで再計算する）
 const opts = () => ({ strict: $('#optStrict').checked, hideFiles: $('#optHideFiles').checked, hideProject: $('#optHideProject').checked, examples: $('#optExamples').checked, hidePrompts: $('#optHidePrompts').checked });
@@ -1899,10 +1933,22 @@ function renderCard(){
   $('#xLink').href = 'https://x.com/intent/tweet?text=' + encodeURIComponent(txt);
 }
 function renderAll(){
+  $('#labPanel').hidden = tab !== 'lab';
+  $('#legacyLayout').hidden = tab === 'lab';
+  for (const b of document.querySelectorAll('.tab')) { b.disabled = labImported && b.dataset.tab !== 'lab'; b.setAttribute('tabindex', b.dataset.tab === tab ? '0' : '-1'); }
+  window.dispatchEvent(new Event('logmap:render'));
   for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
   for (const el of document.querySelectorAll('[data-only]')) el.hidden = el.dataset.only !== tab;
-  renderCard();
+  const blockedRoot = tab === 'rework' && !current.sample && (!current.root || current.rootAmbiguous);
+  $('.card').hidden = blockedRoot; $('.actions').hidden = blockedRoot;
+  if (tab !== 'lab' && !blockedRoot) renderCard();
   const pill = $('#statusPill'), st = $('#statusText');
+  if (tab === 'lab') {
+    pill.textContent = labData.sample ? '見本・架空データ' : labImported ? '保存データ' : 'あなたのログ';
+    pill.className = 'pill' + (labData.sample ? '' : ' mine');
+    st.textContent = labData.sample ? '操作できる見本です。あなたのログを入れると、同じ画面で確かめられます。' : `${fmt(labData.rows.length)} 応答を端末内で集計。` + (labImported ? '元の会話本文は含まれません。' : '会話本文・パスは外部へ送りません。');
+    return;
+  }
   if (tab === 'tokens') {
     $('#details').innerHTML = tokenDetailsHTML(currentT, opts().hidePrompts);
     if (currentT.sample) { pill.textContent = '見本'; pill.className = 'pill'; st.textContent = '架空のデータで表示しています。AI のログを入れると、あなたの数字に変わります（プロジェクトのフォルダは要りません）。'; }
@@ -1910,6 +1956,10 @@ function renderAll(){
     $('#resetBtn').hidden = !!currentT.sample;
     $('#snapRow').hidden = true;
     return;
+  }
+  if (blockedRoot) {
+    $('#details').innerHTML = sec('対象未確認', 'このフォルダとの対応を特定できません', '<p class="fine">同名ファイルだけで別のプロジェクトを結び付けないため、集計と改善提案を止めています。ログと同じ名前のリポジトリの最上位フォルダを選んでください。候補が複数なら、対象プロジェクトのログだけで読み直してください。</p>');
+    pill.textContent = '対象未確認'; pill.className = 'pill err'; st.textContent = '生存率・手直しの数字は未算出です。'; $('#snapRow').hidden = true; return;
   }
   renderDetails(current, opts());
   if (current.sample && !current.reset && (inputs.acc || inputs.project)) {
@@ -2059,7 +2109,8 @@ async function handleLogs(list){
     if (prev) { const a = accTools(prev), b = accTools(acc); if (b.size && ![...b].some(t => a.has(t))) acc = mergeAcc(prev, acc); }
     finalizeGemini(acc);
     if (!acc.uses.size && !acc.resp.size) { setError(`${fmt(files.length)}個のログを読みましたが、ファイルを書いた記録も、応答ごとのトークンの記録も見つかりませんでした。`); return; }
-    inputs.acc = acc;
+    inputs.acc = acc; labImported = false;
+    const normalized = labDatasetFromAcc(acc); labData = normalized.data; labLabels = normalized.labels;
     const z = $('#zoneLog'); z.classList.add('done');
     const lo = $('#logLoaded'); lo.hidden = false;
     const by = { claude: 0, codex: 0, gemini: 0 };
@@ -2111,6 +2162,7 @@ async function maybeAnalyze(){
   await tick();
   const R = analyzeParsed(inputs.acc, inputs.project, inputs.projectName, $('#optStrict').checked, sinceMs());
   if (!R.root) {
+    current = R; renderAll();
     setError(`ログに記録されたファイルがこのフォルダに1つも無く、フォルダ名（${inputs.projectName || '—'}）もログの作業フォルダ${R.cwdTop ? `（${baseName(R.cwdTop)}）` : ''}と合いませんでした。AI と作業したリポジトリの一番上のフォルダを選んでください。`);
     return;
   }
@@ -2161,7 +2213,7 @@ document.addEventListener('drop', async e => {
 $('#logInput').addEventListener('change', e => { handleLogs(e.target.files); e.target.value = ''; });
 $('#logClear').addEventListener('click', () => {
   inputs.acc = null; $('#zoneLog').classList.remove('done'); $('#logLoaded').hidden = true; $('#logClear').hidden = true;
-  current = sampleResult(); currentT = sampleTokens(); renderAll();
+  current = sampleResult(); currentT = sampleTokens(); labData = LogmapLab.demo(); labLabels = {}; labImported = false; renderAll();
 });
 $('#projInput').addEventListener('change', e => { handleProject(e.target.files); e.target.value = ''; });
 
@@ -2228,9 +2280,19 @@ function analyzeTexts(logs, project, projectName, strict, since){
   for (const { rel, text } of project) if (projectFilter(rel, String(text).length) && !looksBinary(String(text).slice(0, 4096))) pm.set(normPath(rel), String(text));
   return analyzeParsed(acc, pm, projectName || '', !!strict, since);
 }
-window.__seizon = { analyzeTexts, tokenTexts, tokenStats, tokenLead, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get currentT(){ return currentT; }, get tab(){ return tab; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
+window.__seizon = { labDatasetFromAcc, newLogAcc, newFileState, handleLogLine, finalizeGemini, get labData(){ return labData; }, get labLabels(){ return labLabels; }, importLab(data){ labData = data; labLabels = {}; labImported = true; tab = 'lab'; renderAll(); }, resetLab(){ labData = inputs.acc ? labDatasetFromAcc(inputs.acc).data : LogmapLab.demo(); labImported = false; renderAll(); }, analyzeTexts, tokenTexts, tokenStats, tokenLead, lineKeys, normLine, isTrivial, judge, drawCard, sampleResult, classifyPair, simScore, analyzeHabits, snapshotOf, loadPrev, get current(){ return current; }, get currentT(){ return currentT; }, get tab(){ return tab; }, get inputs(){ return inputs; }, get prevSnap(){ return prevSnap; } };
 // 埋め込んだ等幅フォントが使えるようになってから最初の描画（canvas は読み込み前の書体で描いてしまう）
 const fontsReady = (document.fonts && document.fonts.load) ? Promise.all(['400 16px PlexMonoSub', '500 16px PlexMonoSub', '600 16px PlexMonoSub'].map(f => document.fonts.load(f))).catch(() => {}) : Promise.resolve();
+$('#intakeSlot').appendChild($('.intakes'));
+$('#intakeSlot').appendChild($('#progress'));
+$('.tabs').addEventListener('keydown', e => {
+  if (!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+  const bs = [...document.querySelectorAll('.tab:not(:disabled)')], i = bs.indexOf(document.activeElement);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? bs.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + bs.length) % bs.length;
+  e.preventDefault(); bs[next].click(); bs[next].focus();
+});
 fontsReady.then(renderAll);
 })();
 </script>
+
+<script data-embed="lab-ui.js"></script>

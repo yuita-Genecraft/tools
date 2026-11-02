@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Passive local Claude hook/status-line observer. No network or model calls."""
-import contextlib, argparse, datetime, fcntl, hashlib, hmac, json, math, os, re, stat, sys, uuid
+import argparse, datetime, fcntl, hashlib, hmac, json, math, os, re, stat, sys, uuid
 from pathlib import Path
 SCHEMA = 'logmap-observations/1'
 EVENTS = {'SessionStart','SessionEnd','ConfigChange','PostCompact'}
@@ -67,13 +67,16 @@ def normalize(o,secret,kind,paths):
             if used is not None and reset is not None:r['limits'][name]={'used':used,'resetsAt':reset}
     return r
 def begin(root):
-    # A durable pending marker survives failures/crashes; export exposes the gap.
+    # Empty marker creation is atomic. Its filename holds all gap metadata,
+    # so export never reads a partially written/deleted marker's contents.
     pending=safe_dir(root/'pending')
-    r={'schema':SCHEMA,'id':str(uuid.uuid4()),'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'}
-    path=pending/(r['id']+'.json')
-    with os.fdopen(open_private(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL),'w') as f:
-        json.dump(r,f);f.flush();os.fsync(f.fileno())
-    return path
+    now=datetime.datetime.now(datetime.timezone.utc)
+    micros=int(now.timestamp()*1000000); identifier=str(uuid.uuid4())
+    path=pending/(str(micros)+'-'+identifier+'.pending')
+    fd=open_private(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+    return path,identifier
 
 def capture(root,r):
     p=root/(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')+'.jsonl')
@@ -84,6 +87,18 @@ def capture(root,r):
         if os.fstat(f.fileno()).st_size+len(line.encode('utf-8'))>50*1024*1024:raise ValueError('daily 50MB limit reached')
         f.write(line);f.flush();os.fsync(f.fileno())
 def export(root,dest):
+    cutoff=datetime.datetime.now(datetime.timezone.utc)
+    pending=root/'pending'; markers=[]
+    # Snapshot marker names BEFORE reading events. Completion/removal afterwards
+    # cannot invalidate a filename already copied. Completed IDs suppress gaps.
+    if pending.exists() or pending.is_symlink():
+        pending=safe_dir(pending)
+        for p in pending.glob('*.pending'):
+            match=re.fullmatch(r'(\d{16})-([0-9a-f-]{36})\.pending',p.name)
+            if not match:raise ValueError('invalid pending name')
+            when=datetime.datetime.fromtimestamp(int(match[1])/1000000,datetime.timezone.utc)
+            if when<=cutoff:markers.append({'schema':SCHEMA,'id':match[2],'observedAt':when.isoformat(),'tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'})
+            if len(markers)>100000:raise ValueError('export limit exceeded')
     events=[]
     for p in sorted(root.glob('*.jsonl')):
         with os.fdopen(open_private(p,os.O_RDONLY)) as f:
@@ -91,28 +106,17 @@ def export(root,dest):
             while True:
                 line=f.readline(65537)
                 if not line:break
-                if len(line)>65536 or len(events)>=100000:raise ValueError('export limit exceeded')
-                events.append(json.loads(line))
-    pending=root/'pending'
-    if pending.exists() or pending.is_symlink():
-        pending=safe_dir(pending)
-        for p in sorted(pending.glob('*.json')):
-            if len(events)>=100000:raise ValueError('export limit exceeded')
-            with os.fdopen(open_private(p,os.O_RDONLY)) as f:
-                raw=f.read(65537)
-                if len(raw)>65536:raise ValueError('gap record too large')
-                events.append(json.loads(raw))
-    # Local output contains pseudonyms, numeric activity, allowlisted settings only.
+                if len(line)>65536:raise ValueError('export line limit exceeded')
+                event=json.loads(line)
+                if datetime.datetime.fromisoformat(event['observedAt'])<=cutoff:
+                    if len(events)>=100000:raise ValueError('export limit exceeded')
+                    events.append(event)
+    completed={e['id'] for e in events}
+    events.extend(m for m in markers if m['id'] not in completed)
+    if len(events)>100000:raise ValueError('export limit exceeded')
     payload={'schema':SCHEMA,'events':events}
     fd=open_private(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL)
     with os.fdopen(fd,'w') as f:json.dump(payload,f,ensure_ascii=False,allow_nan=False);f.flush();os.fsync(f.fileno())
-@contextlib.contextmanager
-def transaction(root):
-    # Export and capture see a consistent pending/event state. flock is released
-    # by the OS on crash/timeout; the already-fsynced pending marker survives.
-    with os.fdopen(open_private(root/'.lock',os.O_RDWR|os.O_CREAT),'r+b') as f:
-        fcntl.flock(f,fcntl.LOCK_EX)
-        yield
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('mode',choices=['hook','status','export','config']);p.add_argument('--dir',required=True);p.add_argument('--settings',action='append',default=[]);p.add_argument('--out');p.add_argument('--base-settings');a=p.parse_args()
@@ -137,16 +141,15 @@ def main():
             original['statusLine']=fragment['statusLine'];fragment=original
         print(json.dumps(fragment,ensure_ascii=False,indent=2));return
     root=safe_dir(a.dir)
-    with transaction(root):
-        if a.mode=='export':
-            if not a.out:raise ValueError('--out required')
-            export(root,a.out);return
-        pending=begin(root)
-        raw=sys.stdin.buffer.read(1024*1024+1)
-        if len(raw)>1024*1024:raise ValueError('input too large')
-        r=normalize(json.loads(raw),key(root),a.mode,a.settings);capture(root,r)
-        pending.unlink()
-        if a.mode=='status':print('LOGMAP · '+(r.get('model') or '記録中'))
+    if a.mode=='export':
+        if not a.out:raise ValueError('--out required')
+        export(root,a.out);return
+    pending,identifier=begin(root)
+    raw=sys.stdin.buffer.read(1024*1024+1)
+    if len(raw)>1024*1024:raise ValueError('input too large')
+    r=normalize(json.loads(raw),key(root),a.mode,a.settings);r["id"]=identifier;capture(root,r)
+    pending.unlink()
+    if a.mode=='status':print('LOGMAP · '+(r.get('model') or '記録中'))
 if __name__=='__main__':
     try:main()
     except Exception as e:

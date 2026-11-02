@@ -43,7 +43,7 @@ class Observer(unittest.TestCase):
  def test_failure_exported_as_gap(self):
   self.runobs('hook',{'session_id':'x','hook_event_name':'invalid'});out=self.root/'export.json';self.assertEqual(self.runobs('export',None,'--out',str(out)).returncode,0);rs=json.loads(out.read_text())['events'];self.assertEqual(len(rs),1);self.assertEqual(rs[0]['kind'],'gap')
  def test_success_removes_pending(self):
-  self.runobs('hook',self.hook());self.assertEqual(list((self.data/'pending').glob('*.json')),[])
+  self.runobs('hook',self.hook());self.assertEqual(list((self.data/'pending').glob('*.pending')),[])
  def test_daily_byte_limit_before_append(self):
   root=m.safe_dir(self.data);p=root/(m.datetime.datetime.now(m.datetime.timezone.utc).strftime('%Y-%m-%d')+'.jsonl');fd=m.open_private(p,os.O_WRONLY|os.O_CREAT)
   with os.fdopen(fd,'wb') as f:f.truncate(50*1024*1024-1)
@@ -54,11 +54,28 @@ class Observer(unittest.TestCase):
   def capture(i):return self.runobs('hook',self.hook())
   def export(i):return self.runobs('export',None,'--out',str(self.root/('e'+str(i)+'.json')))
   with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
-   fs=[pool.submit(capture,i) for i in range(24)]+[pool.submit(export,i) for i in range(12)]
+   fs=[]
+   for i in range(24):
+    fs.append(pool.submit(capture,i))
+    if i%2==0:fs.append(pool.submit(export,i))
    results=[f.result() for f in fs]
   self.assertTrue(all(r.returncode==0 and not r.stderr for r in results),[r.stderr for r in results])
   for p in self.root.glob('e*.json'):
-   events=json.loads(p.read_text())['events'];self.assertEqual(len({e['id'] for e in events}),len(events));self.assertTrue(all(e['kind']=='hook' for e in events))
+   events=json.loads(p.read_text())['events'];self.assertEqual(len({e['id'] for e in events}),len(events));self.assertTrue(all(e['kind'] in ('hook','gap') for e in events))
+  final=self.root/'completed.json';self.assertEqual(self.runobs('export',None,'--out',str(final)).returncode,0);events=json.loads(final.read_text())['events'];self.assertEqual(len(events),24);self.assertTrue(all(e['kind']=='hook' for e in events))
+ def test_timeout_waiting_for_file_lock_leaves_gap(self):
+  import time
+  root=m.safe_dir(self.data);p=root/(m.datetime.datetime.now(m.datetime.timezone.utc).strftime('%Y-%m-%d')+'.jsonl')
+  fd=m.open_private(p,os.O_RDWR|os.O_CREAT)
+  with os.fdopen(fd,'r+') as lock:
+   m.fcntl.flock(lock,m.fcntl.LOCK_SH)
+   proc=subprocess.Popen([sys.executable,str(P),'hook','--dir',str(self.data)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+   proc.stdin.write(json.dumps(self.hook()));proc.stdin.close()
+   until=time.monotonic()+3
+   while not list((root/'pending').glob('*.pending')) and time.monotonic()<until:time.sleep(.01)
+   self.assertTrue(list((root/'pending').glob('*.pending')))
+   time.sleep(.1);self.assertIsNone(proc.poll());proc.kill();proc.wait();proc.stdout.close();proc.stderr.close()
+  out=self.root/'after-timeout.json';self.assertEqual(self.runobs('export',None,'--out',str(out)).returncode,0);self.assertEqual(json.loads(out.read_text())['events'][0]['kind'],'gap')
  def test_invalid_input_does_not_expose(self):
   r=self.runobs('hook',{'session_id':'SECRET','hook_event_name':'SECRET'});self.assertNotIn('SECRET',r.stderr);self.assertEqual(r.returncode,0)
 if __name__=='__main__':unittest.main()

@@ -980,7 +980,7 @@ def analyze(acc, project, project_name, strict, since=None):
             cwds[a["cwd"]] = cwds.get(a["cwd"], 0) + 1
     cwd_top = (sorted(cwds.items(), key=lambda e: (-e[1], e[0])) or [("", 0)])[0][0]
     root, matched, candidates, ambiguous, src = find_root(claude, project, cwds, project_name)
-    R = {"sample": False, "strict": bool(strict), "projectName": project_name or "", "root": root or "", "rootFrom": src, "rootAmbiguous": ambiguous, "cwdTop": cwd_top,
+    R = {"sample": False, "strict": bool(strict), "projectName": project_name or "", "root": root or "", "rootFrom": src, "rootAmbiguous": ambiguous or bool(root and project_name and root.split("/")[-1] != project_name), "cwdTop": cwd_top,
          "logFiles": acc["files"], "logLines": acc["lines"], "logBad": acc["bad"], "uses": len(acc["uses"]), "edits": 0, "sessions": 0,
          "projectFiles": len(project), "projectLines": 0, "otherProjectFiles": 0, "missingFiles": [],
          "written": 0, "alive": 0, "rewritten": 0, "human": 0, "dropped": 0, "droppedWritten": 0, "aiLines": 0,
@@ -989,7 +989,7 @@ def analyze(acc, project, project_name, strict, since=None):
          "since": datetime.fromtimestamp(since / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(since) % 1000:03d}Z" if since is not None else None,
          "rewriteTotal": {"events": 0, "lines": 0, "files": 0}, "rewriteFiles": [], "rewriteEvents": [],
          "sessionStats": {"outTotal": 0, "outGone": 0, "goneShare": 0, "rows": [], "costly": [], "cheap": []}}
-    if not root:
+    if not root or R["rootAmbiguous"]:
         return R
     prefix = root + "/"
     sids = set(); tmin = None; tmax = None

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """生存率を Chromium で開いて、見本表示・ログとフォルダの投入・集計値の突き合わせ（Python の別実装＋手で数えた期待値）・
 厳密モードの切り替え・CSP を効かせた状態の動作・外部通信ゼロ・横はみ出し無し、までを通す。"""
-import base64, json, pathlib, subprocess, sys
+import base64, json, pathlib, subprocess, sys, os
 from playwright.sync_api import sync_playwright
 
 HERE = pathlib.Path(__file__).parent
@@ -141,10 +141,14 @@ SCENES = {
     "tie-cwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t1")],
                     project={"index.ts": "export const root = 1;\n", "src/index.ts": IDX, "README.md": "# r\n"}, name="repo",
                     want=dict(root="/repo", rootFrom="files", rootAmbiguous=False, written=2, alive=2, human=0, dropped=0)),
-    # 同数で cwd も無い＝浅い方を選び、決めきれなかった印を立てる
+    # 同数で cwd も無い＝候補は残すが集計・提案を止める
     "tie-nocwd": dict(logs=[mk_write("/repo/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", None, "t2")],
                       project={"index.ts": "export const root = 1;\n", "src/index.ts": IDX, "README.md": "# r\n"}, name="repo",
-                      want=dict(root="/repo", rootFrom="files", rootAmbiguous=True, written=2, alive=2, human=0)),
+                      want=dict(root="/repo", rootFrom="files", rootAmbiguous=True, written=0, alive=0, human=0)),
+    # 共通のファイル名だけで別 repo と結び付けない。
+    "same-file-wrong-repo": dict(logs=[mk_write("/vela3d/src/index.ts", IDX, "2026-09-01T00:00:00.000Z", "/vela3d", "wrong")],
+                     project={"src/index.ts": IDX}, name="cc-jobs",
+                     want=dict(root="/vela3d", rootFrom="files", rootAmbiguous=True, written=0, alive=0, human=0)),
     # 触ったファイルが全部消えた＝フォルダ名が cwd の末尾と同じなら cwd を root にして「消えた」に数える
     "all-gone": dict(logs=[mk_write("/repo/gone.ts", IDX, "2026-09-01T00:00:00.000Z", "/repo", "t3")],
                      project={"README.md": "# r\n"}, name="repo",
@@ -156,7 +160,7 @@ SCENES = {
 }
 
 with sync_playwright() as p:
-    b = p.chromium.launch()
+    b = p.chromium.launch(executable_path=os.environ.get("PLAYWRIGHT_EXECUTABLE_PATH"))
     for label, vp, scheme in [("desktop-light", {"width": 1280, "height": 1000}, "light"), ("mobile-dark", {"width": 390, "height": 844}, "dark")]:
         ctx = b.new_context(viewport=vp, color_scheme=scheme, timezone_id="Asia/Tokyo", locale="ja-JP", device_scale_factor=2 if "mobile" in label else 1, bypass_csp=True)
         page = ctx.new_page()
@@ -164,10 +168,11 @@ with sync_playwright() as p:
         page.on("console", lambda m: errs.append(f"console.{m.type}: {m.text}") if m.type in ("error", "warning") else None)
         page.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
         page.on("request", lambda r: reqs.append(r.url))
-        page.goto(URL)
+        page.goto(URL + "#tokens")
+        page.evaluate("() => { const e = document.getElementById('importDrawer'); if (e) e.open = true; }")
         page.wait_for_function("document.getElementById('cardImg').src.startsWith('data:image/png')")
         page.screenshot(path=str(SHOTS / f"seizon-sample-{label}.png"), full_page=True)
-        check(f"{label} default tab tokens", (page.evaluate("window.__seizon.tab"), page.text_content("#statusPill")), ("tokens", "見本"))
+        check(f"{label} tokens deep link", (page.evaluate("window.__seizon.tab"), page.text_content("#statusPill")), ("tokens", "見本"))
         page.click(".tab[data-tab=rework]"); page.wait_for_timeout(200)
         page.screenshot(path=str(SHOTS / f"seizon-sample-rework-{label}.png"), full_page=True)
         check(f"{label} rework sample rewrites shown", page.evaluate("document.querySelectorAll('#details .rwev').length > 0"), True)
@@ -450,7 +455,8 @@ with sync_playwright() as p:
     page.on("pageerror", lambda e: errs.append(str(e)))
     page.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
     page.on("request", lambda r: reqs.append(r.url))
-    page.goto(URL)
+    page.goto(URL + "#tokens")
+    page.evaluate("() => { const e = document.getElementById('importDrawer'); if (e) e.open = true; }")
     page.locator("#statusPill", has_text="見本").wait_for()
     page.wait_for_function("""() => {
         const img = document.getElementById('cardImg');

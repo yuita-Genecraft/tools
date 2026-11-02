@@ -846,7 +846,7 @@ function analyzeParsed(acc, project, projectName, strict, since){
   const cwdTop = [...cwds.entries()].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).map(e => e[0])[0] || '';
   const { root, matched, candidates, ambiguous, from } = findRoot(claude, project, cwds, projectName);
   const R = {
-    sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous, cwdTop,
+    sample: false, strict: !!strict, projectName: projectName || '', root: root || '', rootFrom: from, rootAmbiguous: ambiguous || !!(root && projectName && baseName(root) !== projectName), cwdTop,
     logFiles: acc.files, logLines: acc.lines, logBad: acc.bad, uses: acc.uses.size, edits: 0, sessions: 0,
     projectFiles: project.size, projectLines: 0, otherProjectFiles: 0, missingFiles: [],
     written: 0, alive: 0, rewritten: 0, human: 0, dropped: 0, droppedWritten: 0, aiLines: 0,
@@ -855,7 +855,7 @@ function analyzeParsed(acc, project, projectName, strict, since){
     rewriteTotal: { events: 0, lines: 0, files: 0 }, rewriteFiles: [], rewriteEvents: [],
     sessionStats: { outTotal: 0, outGone: 0, goneShare: 0, rows: [], costly: [], cheap: [] },
   };
-  if (!root) return R;
+  if (!root || R.rootAmbiguous) return R;
   const prefix = root + '/';
   const sids = new Set();
   const perSess = new Map();   // 会話（再開でつながったセッションをまとめたもの）ごと：このリポジトリに書いた行の内訳と編集回数（頼み方の節）
@@ -1901,7 +1901,10 @@ function renderCard(){
 function renderAll(){
   for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
   for (const el of document.querySelectorAll('[data-only]')) el.hidden = el.dataset.only !== tab;
-  renderCard();
+  const blockedRoot = tab === 'rework' && !current.sample && (!current.root || current.rootAmbiguous);
+  $('.card').hidden = blockedRoot; $('.actions').hidden = blockedRoot;
+  if (blockedRoot) { lastCanvas = null; $('#cardImg').removeAttribute('src'); $('#shareText').value = ''; $('#xLink').removeAttribute('href'); }
+  if (!blockedRoot) renderCard();
   const pill = $('#statusPill'), st = $('#statusText');
   if (tab === 'tokens') {
     $('#details').innerHTML = tokenDetailsHTML(currentT, opts().hidePrompts);
@@ -1910,6 +1913,10 @@ function renderAll(){
     $('#resetBtn').hidden = !!currentT.sample;
     $('#snapRow').hidden = true;
     return;
+  }
+  if (blockedRoot) {
+    $('#details').innerHTML = sec('対象未確認', 'このフォルダとの対応を特定できません', '<p class="fine">同名ファイルだけで別のプロジェクトを結び付けないため、集計と改善提案を止めています。ログと同じ名前のリポジトリの最上位フォルダを選んでください。候補が複数なら、対象プロジェクトのログだけで読み直してください。</p>');
+    pill.textContent = '対象未確認'; pill.className = 'pill err'; st.textContent = '生存率・手直しの数字は未算出です。'; $('#snapRow').hidden = true; return;
   }
   renderDetails(current, opts());
   if (current.sample && !current.reset && (inputs.acc || inputs.project)) {
@@ -1935,6 +1942,7 @@ function downloadBlob(blob, name){
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 $('#saveJson').addEventListener('click', () => {
+  if (!current.sample && (!current.root || current.rootAmbiguous)) return;
   if (current.sample) return;
   const snap = snapshotOf(current);
   const name = `claude-code-seizon-${(current.projectName || 'project').replace(/[^\w.-]+/g, '_')}-${snap.savedAt}.json`;
@@ -2111,6 +2119,7 @@ async function maybeAnalyze(){
   await tick();
   const R = analyzeParsed(inputs.acc, inputs.project, inputs.projectName, $('#optStrict').checked, sinceMs());
   if (!R.root) {
+    current = R; renderAll();
     setError(`ログに記録されたファイルがこのフォルダに1つも無く、フォルダ名（${inputs.projectName || '—'}）もログの作業フォルダ${R.cwdTop ? `（${baseName(R.cwdTop)}）` : ''}と合いませんでした。AI と作業したリポジトリの一番上のフォルダを選んでください。`);
     return;
   }

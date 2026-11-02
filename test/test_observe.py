@@ -49,6 +49,16 @@ class Observer(unittest.TestCase):
   with os.fdopen(fd,'wb') as f:f.truncate(50*1024*1024-1)
   with self.assertRaises(ValueError):m.capture(root,{'x':'large'})
   self.assertEqual(p.stat().st_size,50*1024*1024-1)
+ def test_export_during_parallel_capture(self):
+  m.safe_dir(self.data)
+  def capture(i):return self.runobs('hook',self.hook())
+  def export(i):return self.runobs('export',None,'--out',str(self.root/('e'+str(i)+'.json')))
+  with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+   fs=[pool.submit(capture,i) for i in range(24)]+[pool.submit(export,i) for i in range(12)]
+   results=[f.result() for f in fs]
+  self.assertTrue(all(r.returncode==0 and not r.stderr for r in results),[r.stderr for r in results])
+  for p in self.root.glob('e*.json'):
+   events=json.loads(p.read_text())['events'];self.assertEqual(len({e['id'] for e in events}),len(events));self.assertTrue(all(e['kind']=='hook' for e in events))
  def test_invalid_input_does_not_expose(self):
   r=self.runobs('hook',{'session_id':'SECRET','hook_event_name':'SECRET'});self.assertNotIn('SECRET',r.stderr);self.assertEqual(r.returncode,0)
 if __name__=='__main__':unittest.main()

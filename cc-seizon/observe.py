@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Passive local Claude hook/status-line observer. No network or model calls."""
-import argparse, datetime, fcntl, hashlib, hmac, json, math, os, re, stat, sys, uuid
+import contextlib, argparse, datetime, fcntl, hashlib, hmac, json, math, os, re, stat, sys, uuid
 from pathlib import Path
 SCHEMA = 'logmap-observations/1'
 EVENTS = {'SessionStart','SessionEnd','ConfigChange','PostCompact'}
@@ -106,6 +106,14 @@ def export(root,dest):
     payload={'schema':SCHEMA,'events':events}
     fd=open_private(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL)
     with os.fdopen(fd,'w') as f:json.dump(payload,f,ensure_ascii=False,allow_nan=False);f.flush();os.fsync(f.fileno())
+@contextlib.contextmanager
+def transaction(root):
+    # Export and capture see a consistent pending/event state. flock is released
+    # by the OS on crash/timeout; the already-fsynced pending marker survives.
+    with os.fdopen(open_private(root/'.lock',os.O_RDWR|os.O_CREAT),'r+b') as f:
+        fcntl.flock(f,fcntl.LOCK_EX)
+        yield
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('mode',choices=['hook','status','export','config']);p.add_argument('--dir',required=True);p.add_argument('--settings',action='append',default=[]);p.add_argument('--out');p.add_argument('--base-settings');a=p.parse_args()
     if len(a.settings)>20:raise ValueError('at most 20 explicit settings files')
@@ -129,15 +137,16 @@ def main():
             original['statusLine']=fragment['statusLine'];fragment=original
         print(json.dumps(fragment,ensure_ascii=False,indent=2));return
     root=safe_dir(a.dir)
-    if a.mode=='export':
-        if not a.out:raise ValueError('--out required')
-        export(root,a.out);return
-    pending=begin(root)
-    raw=sys.stdin.buffer.read(1024*1024+1)
-    if len(raw)>1024*1024:raise ValueError('input too large')
-    r=normalize(json.loads(raw),key(root),a.mode,a.settings);capture(root,r)
-    pending.unlink()
-    if a.mode=='status':print('LOGMAP · '+(r.get('model') or '記録中'))
+    with transaction(root):
+        if a.mode=='export':
+            if not a.out:raise ValueError('--out required')
+            export(root,a.out);return
+        pending=begin(root)
+        raw=sys.stdin.buffer.read(1024*1024+1)
+        if len(raw)>1024*1024:raise ValueError('input too large')
+        r=normalize(json.loads(raw),key(root),a.mode,a.settings);capture(root,r)
+        pending.unlink()
+        if a.mode=='status':print('LOGMAP · '+(r.get('model') or '記録中'))
 if __name__=='__main__':
     try:main()
     except Exception as e:

@@ -9,7 +9,7 @@
 3. `python3 observe.py export --dir /absolute/private-observations --out /absolute/private-export.json` で書き出し、LOGMAPの「観測ファイルを開く」で表示します。出力は既存ファイルを上書きしません。画面の上側のログ集計とは独立した観測パネルです。
 4. 解除時は生成された4イベントのcommand hookとLOGMAPのstatusLineだけを取り除きます。既存hookや他設定は保持します。収集ファイルは自動削除しません。
 
-出力ディレクトリは実パス（symlink不可）・本人所有0700、記録と鍵は0600。同時書込みはflockで保護し、session IDはローカル鍵によるHMAC別名になります。`.key`を失うと以降の会話別名が変わります。同一OSユーザーからの改ざんを防ぐ権限分離ではありません。設定は明示指定のファイルだけ読み、payload内のcwdやfile_pathを読み先に使いません。
+出力ディレクトリは実パス（symlink不可）・本人所有0700、記録と鍵は0600。収集とexport全体を共通flockで直列化し、未完了ファイルの作成/読取/削除の競合も防ぎ、session IDはローカル鍵によるHMAC別名になります。`.key`を失うと以降の会話別名が変わります。同一OSユーザーからの改ざんを防ぐ権限分離ではありません。設定は明示指定のファイルだけ読み、payload内のcwdやfile_pathを読み先に使いません。
 
 ## 観測できるものと限界
 

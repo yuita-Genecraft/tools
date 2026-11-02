@@ -1941,6 +1941,7 @@ function renderAll(){
   for (const el of document.querySelectorAll('[data-only]')) el.hidden = el.dataset.only !== tab;
   const blockedRoot = tab === 'rework' && !current.sample && (!current.root || current.rootAmbiguous);
   $('.card').hidden = blockedRoot; $('.actions').hidden = blockedRoot;
+  if (blockedRoot) { lastCanvas = null; $('#cardImg').removeAttribute('src'); $('#shareText').value = ''; $('#xLink').removeAttribute('href'); }
   if (tab !== 'lab' && !blockedRoot) renderCard();
   const pill = $('#statusPill'), st = $('#statusText');
   if (tab === 'lab') {
@@ -1985,6 +1986,7 @@ function downloadBlob(blob, name){
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 $('#saveJson').addEventListener('click', () => {
+  if (!current.sample && (!current.root || current.rootAmbiguous)) return;
   if (current.sample) return;
   const snap = snapshotOf(current);
   const name = `claude-code-seizon-${(current.projectName || 'project').replace(/[^\w.-]+/g, '_')}-${snap.savedAt}.json`;

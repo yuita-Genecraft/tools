@@ -115,7 +115,7 @@ test('boundary-only project metadata matches browser and content-stripped CLI', 
  const browser=parse(false),cli=parse(true);assert.deepEqual(cli,browser);assert.equal(cli.rows[0].project,'p1');assert.equal(L.analyze(cli,opts).ongoing.n,1);assert.ok(!JSON.stringify(cli).includes('/private'));
 });
 test('discovery AI denominators and boundary evidence respect scope and window without changing totals', () => {
-  const d = fixture(); d.rows[3].tool = 'codex';
+  const d = fixture(); d.rows[3].tool = 'codex'; d.rows.at(-1).ts = pivot + 6 * D;
   d.compactions.push({sid:'s1',ts:pivot}, {sid:'s1',ts:pivot+8*D}, {sid:'s2',ts:pivot+2});
   const a=L.discover(d,opts);
   assert.equal(a.byTool.reduce((v,t)=>v+t.n,0),a.total.n);

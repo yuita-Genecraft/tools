@@ -66,7 +66,7 @@ with sync_playwright() as pw, tempfile.TemporaryDirectory(prefix='logmap-e2e-') 
     check(page.evaluate('window.__seizon.labData.rows.length') == 9, 'real logs replace sample, no synthetic fallback')
     data_browser = page.evaluate('JSON.parse(JSON.stringify(window.__seizon.labData))')
     out, html = tmp / 'fixture.json', tmp / 'report.html'
-    cmd = ['node', str(ROOT / 'cc-seizon/collect.mjs'), '--logs', str(ROOT / 'test/seizon/logs4'), '--out', str(out), '--html', str(html), '--pivot', '2026-09-21T00:00:00Z', '--days', '7', '--change', '</script><img onerror=alert(1)>']
+    cmd = ['node', str(ROOT / 'cc-seizon/collect.mjs'), '--logs', str(ROOT / 'test/seizon/logs4'), '--out', str(out), '--html', str(html), '--pivot', '2026-09-21T00:00:00Z', '--days', '7', '--change', '$& $$ $` $\' </script><img onerror=alert(1)>']
     cp = subprocess.run(cmd, capture_output=True, text=True)
     check(cp.returncode == 0, 'local collector completes')
     cli = json.loads(out.read_text())
@@ -81,6 +81,7 @@ with sync_playwright() as pw, tempfile.TemporaryDirectory(prefix='logmap-e2e-') 
     check(page.evaluate('window.__logmapLab.result.before.n') == 6, 'offline report boots with actual data')
     check(page.evaluate('window.__logmapLab.result.after.n') == 2, 'offline report retains sidechain exclusion')
     check(page.evaluate('document.querySelectorAll("img[onerror]").length') == 0, 'change label cannot escape inline bootstrap')
+    check(page.evaluate('window.__logmapLab.state.change') == cmd[-1], 'replacement tokens in label remain literal')
     check('保存データ' == page.text_content('#statusPill'), 'offline report identifies stored data')
     page.select_option('#labTool', 'codex')
     check(page.evaluate('window.__logmapLab.result.deltaPoints') is None, 'missing baseline is not a zero-percent baseline')

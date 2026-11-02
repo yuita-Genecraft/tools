@@ -81,3 +81,10 @@ test('content-stripped CLI parser agrees with original page parser for metadata 
 test('analysis does not mutate inputs', () => {
   const data = fixture(), before = L.stable(data); L.analyze(data, opts); assert.equal(L.stable(data), before);
 });
+
+test('Antigravity missing usage is excluded and disclosed, measured zero retained', () => {
+ const acc=parser.newLogAcc(); acc.cur=parser.newFileState('/logs/conversations/abc/steps.jsonl');
+ for (const [step_index,usage] of [[1,{}],[2,{input_tokens:0,output_tokens:0}]]) parser.handleLogLine(JSON.stringify({type:'PLANNER_RESPONSE',step_index,created_at:'2026-10-19T01:00:00Z',...usage}),acc);
+ parser.finalizeGemini(acc); const {data}=parser.labDatasetFromAcc(acc);
+ assert.equal(data.coverage.noUsage,1); assert.equal(data.rows.length,1); assert.equal(data.rows[0].inp,0);
+});

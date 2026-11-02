@@ -59,7 +59,7 @@ try {
       execFileSync('python3', [fileURLToPath(new URL('../build_standalone.py', import.meta.url)), fileURLToPath(new URL('./app.html', import.meta.url)), built], { stdio: 'pipe' });
       const html = await readFile(built, 'utf8');
       const json = JSON.stringify(doc).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
-      const reportHTML = html.replace('</body>', '<script>window.__logmapLab.restore(' + json + ').catch(e => { document.getElementById("labMessage").textContent = "読込失敗: " + e.message; });</script>\n</body>');
+      const reportHTML = html.replace('</body>', () => '<script>window.__logmapLab.restore(' + json + ').catch(e => { document.getElementById("labMessage").textContent = "読込失敗: " + e.message; });</script>\n</body>');
       await writeFile(resolve(a.html), reportHTML, { flag: 'wx', mode: 0o600 });
     } finally { await rm(temp, { recursive: true, force: true }); }
   }

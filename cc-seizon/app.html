@@ -701,7 +701,7 @@ function finalizeGemini(acc){
     if (o.type !== 'PLANNER_RESPONSE') continue;
     sv.msgs++;
     sv.out += posNum(o.output_tokens); sv.inp += posNum(o.input_tokens); sv.cache += posNum(o.cache_read_tokens);
-    acc.resp.set('gm:' + conv + ':' + o.step_index, { sid, ts, out: posNum(o.output_tokens), inp: posNum(o.input_tokens), cr: posNum(o.cache_read_tokens), cw: 0, cw1h: 0, side: false, model: safeModel(o.model) });
+    acc.resp.set('gm:' + conv + ':' + o.step_index, { sid, ts, out: posNum(o.output_tokens), inp: posNum(o.input_tokens), cr: posNum(o.cache_read_tokens), cw: 0, cw1h: 0, side: false, model: safeModel(o.model), u: typeof o.input_tokens === 'number' && Number.isFinite(o.input_tokens) && o.input_tokens >= 0 && typeof o.output_tokens === 'number' && Number.isFinite(o.output_tokens) && o.output_tokens >= 0 });
     const calls = Array.isArray(o.tool_calls) ? o.tool_calls : [];
     calls.forEach((t, i) => {
       if (!t || typeof t !== 'object') return;

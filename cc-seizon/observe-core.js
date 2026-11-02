@@ -6,7 +6,7 @@
     if (!doc || doc.schema !== SCHEMA || !Array.isArray(doc.events) || doc.events.length > 100000) throw Error('観測ファイルの形式が違います');
     const ids = new Map(), result = [];
     for (const e of doc.events) {
-      if (!e || e.schema !== SCHEMA || e.tool !== 'claude' || !['hook','status'].includes(e.kind) || typeof e.id !== 'string' || !/^[a-f0-9-]{36}$/.test(e.id) || typeof e.session !== 'string' || !/^[a-f0-9]{24}$/.test(e.session) || typeof e.observedAt !== 'string' || !Number.isFinite(Date.parse(e.observedAt))) throw Error('観測レコードが不正です');
+      if (!e || e.schema !== SCHEMA || e.tool !== 'claude' || !['hook','status','gap'].includes(e.kind) || typeof e.id !== 'string' || !/^[a-f0-9-]{36}$/.test(e.id) || typeof e.session !== 'string' || !/^[a-f0-9]{24}$/.test(e.session) || typeof e.observedAt !== 'string' || !Number.isFinite(Date.parse(e.observedAt))) throw Error('観測レコードが不正です');
       if (e.kind === 'hook' && !['SessionStart','SessionEnd','ConfigChange','PostCompact'].includes(e.event)) throw Error('未対応のイベントです');
       for (const k of ['model','source','version','effort']) if (e[k] != null && (typeof e[k] !== 'string' || e[k].length > 96)) throw Error('ラベルが不正です');
       for (const k of ['inputTotal','outputTotal','contextWindow','estimatedUsd']) if (e[k] != null && !finite(e[k])) throw Error('数値が不正です');
@@ -36,6 +36,7 @@
     if (points.length<2) return {...empty,reason:'利用枠の記録が2点以上必要です'};
     const first=points[0], last=points.at(-1), reset=first.limits[window].resetsAt;
     if (first.ts===last.ts) return {...empty,reason:'異なる時刻の記録が必要です'};
+    if(events.some(e=>e.ts>=first.ts && e.ts<=last.ts && (e.kind==='gap' || (e.kind==='status' && !e.limits?.[window])))) return {...empty,reason:'区間内に収集未完了・利用枠未取得の記録があるため算出しません'};
     for(let i=0;i<points.length;i++) {
       const p=points[i], w=p.limits[window];
       if(w.resetsAt!==reset || p.ts>=reset*1000) return {...empty,reason:'リセットをまたぐ／期限切れの記録は差分にしません'};

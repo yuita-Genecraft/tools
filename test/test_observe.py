@@ -40,6 +40,15 @@ class Observer(unittest.TestCase):
   p=self.root/'base.json';p.write_text('{"statusLine":{"type":"command","command":"old"}}');r=self.runobs('config',None,'--base-settings',str(p));self.assertEqual(r.returncode,1);self.assertEqual(r.stdout,'')
  def test_fifo_settings_nonblocking(self):
   p=self.root/'pipe';os.mkfifo(p);self.runobs('hook',self.hook(),'--settings',str(p));self.assertEqual(json.loads(next(self.data.glob('*.jsonl')).read_text())['settings'][0]['state'],'unavailable')
+ def test_failure_exported_as_gap(self):
+  self.runobs('hook',{'session_id':'x','hook_event_name':'invalid'});out=self.root/'export.json';self.assertEqual(self.runobs('export',None,'--out',str(out)).returncode,0);rs=json.loads(out.read_text())['events'];self.assertEqual(len(rs),1);self.assertEqual(rs[0]['kind'],'gap')
+ def test_success_removes_pending(self):
+  self.runobs('hook',self.hook());self.assertEqual(list((self.data/'pending').glob('*.json')),[])
+ def test_daily_byte_limit_before_append(self):
+  root=m.safe_dir(self.data);p=root/(m.datetime.datetime.now(m.datetime.timezone.utc).strftime('%Y-%m-%d')+'.jsonl');fd=m.open_private(p,os.O_WRONLY|os.O_CREAT)
+  with os.fdopen(fd,'wb') as f:f.truncate(50*1024*1024-1)
+  with self.assertRaises(ValueError):m.capture(root,{'x':'large'})
+  self.assertEqual(p.stat().st_size,50*1024*1024-1)
  def test_invalid_input_does_not_expose(self):
   r=self.runobs('hook',{'session_id':'SECRET','hook_event_name':'SECRET'});self.assertNotIn('SECRET',r.stderr);self.assertEqual(r.returncode,0)
 if __name__=='__main__':unittest.main()

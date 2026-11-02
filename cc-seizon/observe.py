@@ -66,13 +66,23 @@ def normalize(o,secret,kind,paths):
             x=obj(obj(o.get('rate_limits')).get(name));used=number(x.get('used_percentage'),100);reset=number(x.get('resets_at'),4102444800)
             if used is not None and reset is not None:r['limits'][name]={'used':used,'resetsAt':reset}
     return r
+def begin(root):
+    # A durable pending marker survives failures/crashes; export exposes the gap.
+    pending=safe_dir(root/'pending')
+    r={'schema':SCHEMA,'id':str(uuid.uuid4()),'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'tool':'claude','session':'0'*24,'kind':'gap','source':'capture_incomplete'}
+    path=pending/(r['id']+'.json')
+    with os.fdopen(open_private(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL),'w') as f:
+        json.dump(r,f);f.flush();os.fsync(f.fileno())
+    return path
+
 def capture(root,r):
     p=root/(datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')+'.jsonl')
     fd=open_private(p,os.O_WRONLY|os.O_APPEND|os.O_CREAT)
     with os.fdopen(fd,'a') as f:
         fcntl.flock(f,fcntl.LOCK_EX)
-        if os.fstat(f.fileno()).st_size>50*1024*1024:raise ValueError('daily 50MB limit reached')
-        f.write(json.dumps(r,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n');f.flush();os.fsync(f.fileno())
+        line=json.dumps(r,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n'
+        if os.fstat(f.fileno()).st_size+len(line.encode('utf-8'))>50*1024*1024:raise ValueError('daily 50MB limit reached')
+        f.write(line);f.flush();os.fsync(f.fileno())
 def export(root,dest):
     events=[]
     for p in sorted(root.glob('*.jsonl')):
@@ -83,6 +93,15 @@ def export(root,dest):
                 if not line:break
                 if len(line)>65536 or len(events)>=100000:raise ValueError('export limit exceeded')
                 events.append(json.loads(line))
+    pending=root/'pending'
+    if pending.exists() or pending.is_symlink():
+        pending=safe_dir(pending)
+        for p in sorted(pending.glob('*.json')):
+            if len(events)>=100000:raise ValueError('export limit exceeded')
+            with os.fdopen(open_private(p,os.O_RDONLY)) as f:
+                raw=f.read(65537)
+                if len(raw)>65536:raise ValueError('gap record too large')
+                events.append(json.loads(raw))
     # Local output contains pseudonyms, numeric activity, allowlisted settings only.
     payload={'schema':SCHEMA,'events':events}
     fd=open_private(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL)
@@ -113,9 +132,11 @@ def main():
     if a.mode=='export':
         if not a.out:raise ValueError('--out required')
         export(root,a.out);return
+    pending=begin(root)
     raw=sys.stdin.buffer.read(1024*1024+1)
     if len(raw)>1024*1024:raise ValueError('input too large')
     r=normalize(json.loads(raw),key(root),a.mode,a.settings);capture(root,r)
+    pending.unlink()
     if a.mode=='status':print('LOGMAP · '+(r.get('model') or '記録中'))
 if __name__=='__main__':
     try:main()

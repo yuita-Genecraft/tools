@@ -10,3 +10,5 @@ test('expired quota refuses',()=>assert.equal(O.quota(read([base,next({observedA
 test('same timestamp conflict refuses',()=>assert.equal(O.quota(read([base,next({observedAt:base.observedAt})]),'five_hour').delta,null));
 test('duplicate exact IDs dedup and conflicts refuse',()=>{assert.equal(read([base,base]).length,1);assert.throws(()=>read([base,{...base,model:'other'}]));});
 test('invalid numbers / settings / schema rejected',()=>{for(const row of [{...base,inputTotal:-1},{...base,settings:[{slot:1,state:'read',sha256:'bad',values:{}}]},{...base,observedAt:'bad'}]) assert.throws(()=>read([row]));assert.throws(()=>O.read({schema:'wrong',events:[]}));});
+
+test('durable failure gap or missing quota inside interval refuses delta',()=>{for(const event of [next({kind:'gap',limits:undefined}),next({limits:{}})]){event.observedAt='2026-11-02T00:30:00Z';event.id='00000000-0000-0000-0000-000000000003';assert.equal(O.quota(read([base,event,next()]),'five_hour').delta,null);}});

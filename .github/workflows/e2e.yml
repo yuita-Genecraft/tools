@@ -2,7 +2,7 @@ name: Notification report E2E
 
 on:
   pull_request:
-    branches: [main, fix/logmap-repo-boundary]
+    branches: [main, fix/logmap-repo-boundary, feat/logmap-change-lab]
 
 permissions:
   contents: read
@@ -47,7 +47,8 @@ jobs:
       - name: Change Lab deterministic analytics and offline roundtrip
         if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: |
-          node --test test/unit_lab.mjs
+          node --test test/unit_lab.mjs test/unit_observe.mjs
+          python -m unittest discover -s test -p test_observe.py
           python -u test/e2e_lab.py
       - name: Firebase check engine unit tests
         # Node only (no browser). Independent of the other steps.

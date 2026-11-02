@@ -1,7 +1,7 @@
 /* Shared, deterministic analytics. No DOM, network, storage, or model calls. */
 (function (root) {
   'use strict';
-  const VERSION = 'logmap-change-lab/1';
+  const VERSION = 'logmap-change-lab/2';
   const PARSER = 'cc-seizon/2026-11-02.1';
   const DAY = 86400000;
   const WEIGHTS = Object.freeze({ input: 1, output: 5, read: 0.1, write5m: 1.25, write1h: 2 });
@@ -35,7 +35,9 @@
   }
   function analyze(data, rawOptions) {
     const o = options(rawOptions), start = o.pivot - o.days * DAY, end = o.pivot + o.days * DAY;
-    const sessions = new Map(data.sessions.map(s => [s.id, s]));
+    const sessions = new Map(data.sessions.map(s => [s.id, { ...s }]));
+    // Explicit boundaries are observation evidence, including in older saved datasets.
+    for (const c of data.compactions) { const session = sessions.get(c.sid); if (session && (session.firstSeen === null || c.ts < session.firstSeen)) session.firstSeen = c.ts; }
     const scoped = data.rows.filter(r => (!o.tool || r.tool === o.tool) && (!o.project || r.project === o.project) &&
       (!o.model || r.model === o.model) && (o.includeSide || !r.side));
     const rows = scoped.filter(r => r.ts >= start && r.ts < end);
@@ -67,6 +69,23 @@
       warnings, mixShift, daily: bins.map(b => ({ start: b.start, ...summarize(b.rows), compactions: b.compactions })),
       coverage: { included: rows.length, outsideWindow: scoped.length - rows.length, outsideScope: data.rows.length - scoped.length },
       total: summarize(data.rows), source: data.sample ? 'sample' : 'logs' };
+  }
+  function discover(data, rawOptions) {
+    const o = options(rawOptions);
+    const scoped = data.rows.filter(r => (!o.tool || r.tool === o.tool) && (!o.project || r.project === o.project) && (!o.model || r.model === o.model) && (o.includeSide || !r.side));
+    const end = scoped.reduce((m, r) => Math.max(m, r.ts + 1), 0);
+    const start = end ? end - 7 * DAY : null;
+    const rows = scoped.filter(r => r.ts >= start && r.ts < end), total = summarize(rows);
+    const grouped = new Map();
+    for (const r of rows) { if (!grouped.has(r.sid)) grouped.set(r.sid, []); grouped.get(r.sid).push(r); }
+    const candidates = [...grouped].map(([sid, rs]) => {
+      const heavy = rs.filter(r => context(r) > 400000), heavyWeight = heavy.reduce((v, r) => v + weight(r), 0);
+      return { sid, n: rs.length, heavyN: heavy.length, heavyWeight, share: total.weight ? heavyWeight / total.weight : null,
+        tool: rs[0].tool, projects: sorted(new Set(rs.map(r => r.project))), models: sorted(new Set(rs.map(r => r.model))),
+        first: rs.reduce((m, r) => Math.min(m, r.ts), Infinity), last: rs.reduce((m, r) => Math.max(m, r.ts), -Infinity),
+        examples: heavy.sort((a, b) => weight(b) - weight(a) || a.ts - b.ts).slice(0, 5).map(r => ({ ts: r.ts, context: context(r), weight: round(weight(r)), model: r.model })) };
+    }).filter(c => c.heavyN && c.heavyWeight > 0).sort((a, b) => b.heavyWeight - a.heavyWeight || a.sid.localeCompare(b.sid)).slice(0, 3);
+    return { start, end: end || null, total, candidates };
   }
   function stable(value) {
     if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -103,12 +122,12 @@
     return { ...payload, sha256: await digest(payload) };
   }
   async function restore(doc) {
-    if (!doc || doc.schema !== VERSION || stable(doc.weights) !== stable(WEIGHTS) || typeof doc.sha256 !== 'string') throw Error('保存データの版または重みが対応していません。');
+    if (!doc || ![VERSION, 'logmap-change-lab/1'].includes(doc.schema) || stable(doc.weights) !== stable(WEIGHTS) || typeof doc.sha256 !== 'string') throw Error('保存データの版または重みが対応していません。');
     validate(doc.data);
     const opts = options(doc.options);
-    const payload = { schema: VERSION, weights: WEIGHTS, data: doc.data, options: opts };
+    const payload = { schema: doc.schema, weights: WEIGHTS, data: doc.data, options: opts };
     if (await digest(payload) !== doc.sha256) throw Error('保存データの識別子と内容が一致しません。元の JSON を読み直してください。');
-    return { data: doc.data, options: opts, sha256: doc.sha256 };
+    return { data: doc.data, options: opts, sha256: doc.sha256, legacy: doc.schema !== VERSION };
   }
   function demo() {
     const pivot = Date.UTC(2026, 9, 19), rows = [], sessions = [], compactions = [];
@@ -122,9 +141,9 @@
       if (j === 0) compactions.push({ sid: id, ts: firstSeen + 2000000 });
     }
     // Sessions observed before the change that continue afterwards.
-    for (let j = 0; j < 6; j++) for (let k = 0; k < 22; k++) rows.push({ sid: 's' + j, ts: pivot + (j + 1) * DAY + k * 180000, tool: 'claude', project: 'p1', model: 'Claude demo', side: false, inp: 800, out: 700, cr: k % 3 === 0 ? 530000 : 180000, cw: 0, cw1h: 0 });
+    for (let j = 0; j < 6; j++) for (let k = 0; k < 22; k++) rows.push({ sid: 's' + j, ts: pivot + (j + 8) * DAY + k * 180000, tool: 'claude', project: 'p1', model: 'Claude demo', side: false, inp: 800, out: 700, cr: k % 3 === 0 ? 530000 : 180000, cw: 0, cw1h: 0 });
     rows.sort((a, b) => a.ts - b.ts || a.sid.localeCompare(b.sid));
     return { parser: PARSER, sample: true, collectedAt: new Date(pivot + 14 * DAY).toISOString(), coverage: { files: 224, lines: 0, badLines: 0, noTime: 0, noUsage: 0 }, sessions, rows, compactions };
   }
-  root.LogmapLab = Object.freeze({ VERSION, PARSER, WEIGHTS, DAY, context, weight, summarize, analyze, options, stable, digest, validate, snapshot, restore, demo });
+  root.LogmapLab = Object.freeze({ VERSION, PARSER, WEIGHTS, DAY, context, weight, summarize, analyze, discover, options, stable, digest, validate, snapshot, restore, demo });
 })(globalThis);

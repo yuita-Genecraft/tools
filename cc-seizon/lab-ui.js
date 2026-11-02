@@ -11,7 +11,7 @@
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const inputTime = t => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   let data = null, state = null, result = null, restoredOptions = null, savedHash = '';
-  panel.innerHTML = `<form id="labForm"><div class="lab-control">
+  panel.innerHTML = `<section id="labDiscover" aria-label="ログから見つける確認候補"></section><form id="labForm"><div class="lab-control">
     <label class="lab-field"><span>確かめたい変更</span><input id="labName" maxlength="120" placeholder="例：圧縮設定を変えた"></label>
     <label class="lab-field"><span>変更日時 <small>${esc(zone)}</small></span><input id="labPivot" type="datetime-local" required></label>
     <label class="lab-field"><span>比較する期間</span><select id="labDays"><option value="7">前後 7 日ずつ</option><option value="14" selected>前後 14 日ずつ</option><option value="30">前後 30 日ずつ</option></select></label>
@@ -56,6 +56,7 @@
     }
   }
   function render() {
+    renderDiscovery();
     result = L.analyze(data, state); savedHash = ''; $('#labHash').textContent = '';
     const R = result, B = R.before, A = R.after, D = R.deltaPoints;
     const delta = D === null ? '—' : (D > 0 ? '+' : '') + D.toFixed(1);
@@ -67,12 +68,25 @@
     if (!state.change) warnings.unshift('変更内容と日時を指定してから、結果を判断してください。');
     const chartBars = R.daily.map((d, i) => `<div class="lab-day${i >= state.days ? ' after' : ''}${!d.n ? ' empty' : ''}" tabindex="0" role="img" aria-label="${dateTime(d.start)} UTC から24時間。${n(d.n)}応答、40万超の重み付き割合 ${pc(d.heavyShare)}、圧縮境界 ${d.compactions}件"><i style="height:${(d.heavyShare || 0) * 100}%"></i><span class="lab-tooltip">${shortDate(d.start)} · ${pc(d.heavyShare)}<br>${n(d.n)} responses<br>圧縮境界 ${d.compactions}</span></div>`).join('');
     $('#labResult').innerHTML = `<div class="lab-topline"><p class="lab-section-label">01 / CHANGE REPORT</p><span class="lab-status">${data.sample ? '見本・架空データ' : valid ? '比較を表示 · 効果は未判定' : '比較する記録が不足'}</span></div>
-      <section class="lab-score" aria-label="変更前後の観測差"><div><p class="lab-section-label">${esc(subtitle)}</p><h2>長い文脈が占める割合の変化</h2><div class="lab-n${D > 0 ? ' rise' : ''}">${delta}<small>pt</small></div><p class="lab-caption">文脈 <b>40万トークン超</b>の応答が、重み付き使用量に占める割合。<br>この差は、料金や利用枠の削減率ではありません。</p></div>
-      <div class="lab-compare">${bar('BEFORE', B, '')}${bar('AFTER', A, 'after')}<div class="lab-comparison-note"><span>${shortDate(R.start)} — ${shortDate(state.pivot)} — ${shortDate(R.end)}</span><span>各 ${state.days} 日 / UTC</span></div><p class="lab-caption">${valid ? '前後の差を観測しています。作業内容・モデル・会話の構成が変わるため、設定の効果とはまだ断定できません。' : '片側に記録がない場合は 0% として比べません。日時や条件を見直してください。'}</p></div></section>
+      <section class="lab-score" aria-label="変更前後の観測差"><div><p class="lab-section-label">${esc(subtitle)}</p><h2>長い文脈が占める割合の変化</h2><div class="lab-n">${delta}<small>pt</small></div><p class="lab-caption">文脈 <b>40万トークン超</b>の応答が、重み付き使用量に占める割合。<br>この差は、料金や利用枠の削減率ではありません。</p></div>
+      <div class="lab-compare"><p class="lab-near-limit">観測差です。改善・悪化や設定の効果は未判定。${R.mixShift ? '<br>前後のAI・モデル・作業の構成が異なります。' : ''}${R.end > Date.parse(data.collectedAt) ? '<br>変更後の比較期間はまだ終わっていません。' : ''}</p>${bar('BEFORE', B, '')}${bar('AFTER', A, 'after')}<div class="lab-comparison-note"><span>${shortDate(R.start)} — ${shortDate(state.pivot)} — ${shortDate(R.end)}</span><span>各 ${state.days} 日 / UTC</span></div><p class="lab-caption">${valid ? '前後の差を観測しています。作業内容・モデル・会話の構成が変わるため、設定の効果とはまだ断定できません。' : '片側に記録がない場合は 0% として比べません。日時や条件を見直してください。'}</p></div></section>
       <div class="lab-metrics">${metric('応答数', n(B.n), n(A.n), '対象の量も合わせて確認')}${metric('1 応答あたりの重み付き量', n(B.perResponse), n(A.perResponse), '共通の重み · 金額ではありません')}${metric('文脈の中央値', n(B.p50), n(A.p50), '入力＋キャッシュ読み・書き / tokens')}${metric('記録のある会話', n(B.sessions), n(A.sessions), '会話数は完了した仕事の数ではありません')}</div>
       <section class="lab-chart-section"><div class="lab-chart-title"><div><p class="lab-section-label">OVER TIME</p><h3>変化は、続いているか。</h3></div><div class="lab-chart-legend"><span>変更前</span><span>変更後</span></div></div><div class="lab-chart"><span class="lab-axis top">100%</span><span class="lab-axis mid">50%</span><span class="lab-axis">0%</span><div class="lab-chart-bars">${chartBars}</div><div class="lab-change-line"><span>変更 ${shortDate(state.pivot)}</span></div></div><div class="lab-xaxis"><span>${shortDate(R.start)}</span><span>${shortDate(R.end)}</span></div><p class="lab-caption">変更日時を境に 24 時間ずつ集計。縦軸は文脈 40万超の重み付き割合。記録のない区間は空欄です。棒に触れると件数・圧縮境界の記録数を確認できます。</p></section>
       <div class="lab-bottom"><section class="lab-cohorts"><p class="lab-section-label">SESSION COHORTS</p><h3>続けた会話に、差が残っていないか。</h3>${cohort('変更前から記録がある会話', R.ongoing)}${cohort('変更後に初めて記録された会話', R.fresh)}${R.unknown.n ? cohort('開始時期が分からない会話', R.unknown) : ''}<p class="lab-caption">どちらも<b>変更後の応答だけ</b>を比較。開始時期は手元のログで最初に観測した時刻です。ログの欠落や再開のため、実際の新規作成日時とは限りません。設定が読み込まれたかどうかは、この数字だけでは分かりません。</p></section>
       <section class="lab-evidence"><p class="lab-section-label">EVIDENCE & LIMITS</p><h3>この数字から、言えること。</h3>${warnings.slice(0, 4).map(w => `<div class="lab-check">${esc(w)}</div>`).join('')}${warnings.length > 4 ? `<details><summary>ほか ${warnings.length - 4} 件の確認点</summary>${warnings.slice(4).map(w => `<p>${esc(w)}</p>`).join('')}</details>` : ''}<div class="lab-check limit">完了時間・受入件数・本人の手間は、このログだけでは未測定。小さい数字をそのまま「改善」とは扱いません。</div><details id="labProvenance"><summary>集計条件と取り込みの内訳</summary><dl><dt>期間の開始（含む）</dt><dd>${dateTime(R.start)} UTC</dd><dt>期間の終了（含まない）</dt><dd>${dateTime(R.end)} UTC</dd><dt>収集日時</dt><dd>${dateTime(Date.parse(data.collectedAt))} UTC</dd><dt>入力ファイル</dt><dd>${n(data.coverage.files)}</dd><dt>入力の全応答</dt><dd>${n(data.rows.length)}</dd><dt>今回の対象</dt><dd>${n(R.coverage.included)}</dd><dt>AI・作業・モデル等で除外</dt><dd>${n(R.coverage.outsideScope)}</dd><dt>期間外</dt><dd>${n(R.coverage.outsideWindow)}</dd><dt>日時不明 / 使用量なし</dt><dd>${n(data.coverage.noTime)} / ${n(data.coverage.noUsage)}</dd><dt>読めなかった対象行</dt><dd>${n(data.coverage.badLines)}</dd></dl><p>入力 1・出力 5・キャッシュ読み 0.1・書き込み 5分 1.25 / 1時間 2。モデルの単価差は含みません。</p><p>作業フォルダは会話の最初の cwd です。複数 repo にまたがる作業を厳密に分離するものではありません。保存時は匿名番号になります。</p><code>${esc(data.parser)} · ${esc(L.VERSION)}</code></details></section></div>`;
+  }
+  function renderDiscovery() {
+    const d = L.discover(data, state);
+    $('#labDiscover').innerHTML = `<div class="lab-discover-heading"><div><p class="lab-section-label">START WITH YOUR LOGS</p><h2>まず、ここから確かめる。</h2></div><span class="lab-status">${data.sample ? '見本・架空データ' : '記録から機械的に抽出'}</span></div>
+      <p class="lab-caption">変更日時が分からなくても使えます。選択中のAI・作業・モデルで、${d.end ? `最終記録から7日間（${dateTime(d.start)} ～ ${dateTime(d.end - 1)} UTC）` : '対象の記録なし'}を確認。重み付き量が大きい順に、文脈40万超を含む会話を最大3件表示します。無駄や異常の判定ではありません。</p>
+      <div class="lab-candidates">${d.candidates.map((c, i) => `<article class="lab-candidate"><p class="lab-section-label">0${i + 1} / ${esc(names[c.tool])} · 会話 ${esc(c.sid)}</p><h3>長い文脈に、どれだけ使っているか。</h3><strong>${pc(c.share)}<small>対象期間の全応答の重み付き量のうち</small></strong><p>${n(c.n)} 応答中 ${n(c.heavyN)} 応答が40万超。<br>${esc(c.projects.map(p => app.labLabels[p] || (p ? '作業 ' + p.slice(1) : '作業不明')).join(' / '))}</p><details><summary>根拠の記録を見る</summary><p>この会話の期間：${dateTime(c.first)} ～ ${dateTime(c.last)} UTC。40万超の応答から重みの大きい順に最大5件。本文は表示しません。</p><ul>${c.examples.map(r => `<li>${dateTime(r.ts)} UTC<br>文脈 ${n(r.context)} tokens · 重み ${n(r.weight)} · ${esc(r.model || 'モデル不明')}</li>`).join('')}</ul></details><button class="btn" type="button" data-discover="${i}">この条件で前後を確かめる ↗</button></article>`).join('') || '<p class="lab-discovery-empty">この範囲では、重み付き量のある40万超の応答は見つかりませんでした。効率や品質が良いという判定ではありません。</p>'}</div>
+      <p class="lab-caption">割合の分母は、この7日間の対象全応答です。会話ごとの料金や削減可能量ではありません。変更を試した場合は、下で実際の変更日時を指定して観測を比べられます。</p>`;
+    for (const b of $('#labDiscover').querySelectorAll('[data-discover]')) b.addEventListener('click', () => {
+      const c = d.candidates[Number(b.dataset.discover)];
+      state = L.options({ ...state, tool: c.tool, project: c.projects.length === 1 ? c.projects[0] : '', model: c.models.length === 1 ? c.models[0] : '' });
+      setControls(state); render(); $('#labPivot').focus(); $('#labForm').scrollIntoView({ block: 'start' });
+      message('同じAI・作業・モデルに絞りました。会話1件だけの比較ではありません。実際の変更日時を指定してください。日時は自動で決めません。');
+    });
   }
   function reportText() {
     const R = result;
@@ -106,7 +120,7 @@
   async function restoreDocument(doc) {
     const restored = await L.restore(doc);
     restoredOptions = restored.options; app.importLab(restored.data); savedHash = restored.sha256;
-    $('#labHash').textContent = 'SHA-256 ' + savedHash.slice(0, 16) + '…'; message('内容の一致を確認しました。同じ条件で再表示しています。使用量の詳細・手直しには元のログを読み込んでください。');
+    $('#labHash').textContent = 'SHA-256 ' + savedHash.slice(0, 16) + '…'; message(restored.legacy ? '内容の一致を確認しました。旧版の保存データを新版で再計算しています。圧縮記録を含む会話群の結果が変わる場合があります。' : '内容の一致を確認しました。同じ条件で再表示しています。使用量の詳細・手直しには元のログを読み込んでください。');
     return restored;
   }
   $('#labFile').addEventListener('change', async e => {
@@ -130,13 +144,13 @@
       text(data.sample ? '見本・架空データ' : '手元のログから集計した観測値', 130, 20, '#b7bdab');
       text(state.change || '変更前後の比較', 200, 34);
       text('文脈40万超の応答が、重み付き使用量に占める割合', 252, 24, '#b7bdab');
-      text(`${pc(result.before.heavyShare)}  →  ${pc(result.after.heavyShare)}`, 382, 76, '#d4f77d');
+      text(`${pc(result.before.heavyShare)}  →  ${pc(result.after.heavyShare)}`, 382, 76, '#eff1e7');
       text(`差 ${result.deltaPoints === null ? '未算出' : result.deltaPoints.toFixed(1) + ' ポイント'} / 前 ${n(result.before.n)} 応答・後 ${n(result.after.n)} 応答`, 446, 26);
       text(`変更 ${dateTime(state.pivot)} UTC · 前後 ${state.days} 日ずつ`, 515, 24, '#b7bdab');
       text(`${state.tool ? names[state.tool] : '全 AI'} / ${state.project || '全作業'} / ${state.model || '全モデル'}`, 558, 22, '#b7bdab');
       text(`変更前から記録あり ${pc(result.ongoing.heavyShare)} / 変更後に初記録 ${pc(result.fresh.heavyShare)}`, 625, 24);
       text('設定の効果、料金・利用枠の削減率、仕事の品質は未判定。', 726, 24, '#d4f77d');
-      text('同じ AI・モデル・作業でも、内容やログ欠落の影響が残ります。', 767, 20, '#b7bdab');
+      text(result.warnings[0] || '同じ条件でも、作業内容やログ欠落の影響が残ります。', 767, 20, '#b7bdab');
       text(`${data.parser} · 入力1 / 出力5 / cache読0.1 / 書1.25–2`, 839, 17, '#939c86');
       c.toBlob(blob => download(blob, 'logmap-change-report.png'), 'image/png');
     } catch (err) { message(err.message, true); }

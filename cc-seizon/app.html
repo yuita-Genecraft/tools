@@ -274,8 +274,8 @@ td .mini span{display:block;height:100%;background:var(--alive)}
 <div class="page">
   <nav class="brandbar" aria-label="ページ情報"><a class="brand" href="#lab" aria-label="ログマップ 変更を検証"><span class="brand-mark" aria-hidden="true">↗</span>LOGMAP<span class="brand-ja">AI 開発ログマップ</span></a><span class="local-badge"><i></i>LOCAL ONLY <span>ログの外部送信なし</span></span></nav>
   <header class="masthead">
-    <div><p class="eyebrow">YOUR WORKFLOW. YOUR EVIDENCE.</p><h1>変えた。その効果を、<br><em>自分のログで。</em></h1><p class="lead">会話の区切り方、圧縮設定、頼み方。<br>AI 開発の工夫を、変更前後の数字で確かめる。</p></div>
-    <div class="hero-index" aria-label="使い方"><span><b>01</b>変更の前後を比べる</span><span><b>02</b>続けた会話と新しい会話を分ける</span><span><b>03</b>条件ごと保存し、また確かめる</span></div>
+    <div><p class="eyebrow">YOUR WORKFLOW. YOUR EVIDENCE.</p><h1>変えた前後に、<br><em>何が起きたか。</em></h1><p class="lead">会話の区切り方、圧縮設定、頼み方。<br>AI 開発の工夫を、変更前後の数字で確かめる。</p></div>
+    <div class="hero-index" aria-label="使い方"><span><b>01</b>ログから確認点を見つける</span><span><b>02</b>続けた会話と新しい会話を分ける</span><span><b>03</b>条件ごと保存し、また確かめる</span></div>
   </header>
   <div class="tabs" role="tablist" aria-label="見るもの">
     <button type="button" role="tab" class="tab" data-tab="lab" aria-selected="true" aria-controls="labPanel">01 <span>変更を検証</span><small>CHANGE LAB</small></button>
@@ -503,7 +503,10 @@ function handleLogLine(line, acc){
   if (!o.message && typeof o.step_index === 'number' && typeof o.type === 'string') { handleGemini(o, acc); return; }
   if (o.type === 'system' && o.subtype === 'compact_boundary' && typeof o.sessionId === 'string') {
     const ts = Date.parse(o.timestamp);
-    if (Number.isFinite(ts)) acc.compactions.set(o.uuid || o.sessionId + ':' + ts, { sid: o.sessionId, ts });
+    if (Number.isFinite(ts)) {
+      sessTouch(acc, o.sessionId, ts, typeof o.cwd === 'string' ? normPath(o.cwd) : '');
+      acc.compactions.set(o.uuid || o.sessionId + ':' + ts, { sid: o.sessionId, ts });
+    }
     return;
   }
   if (!o.message || typeof o.message !== 'object') return;

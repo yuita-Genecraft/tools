@@ -88,3 +88,23 @@ test('Antigravity missing usage is excluded and disclosed, measured zero retaine
  parser.finalizeGemini(acc); const {data}=parser.labDatasetFromAcc(acc);
  assert.equal(data.coverage.noUsage,1); assert.equal(data.rows.length,1); assert.equal(data.rows[0].inp,0);
 });
+test('compaction evidence predating available messages places responses in ongoing cohort', () => {
+ for (const reverse of [false,true]) {
+  const acc=parser.newLogAcc(); const events=[{type:'system',subtype:'compact_boundary',sessionId:'boundary-session',uuid:'b',timestamp:new Date(pivot-1000).toISOString()},{type:'assistant',sessionId:'boundary-session',uuid:'m',timestamp:new Date(pivot+1000).toISOString(),message:{id:'m',role:'assistant',content:[],usage:{input_tokens:500000,output_tokens:10}}}];
+  for(const e of reverse?events.reverse():events)parser.handleLogLine(JSON.stringify(e),acc);
+  const {data}=parser.labDatasetFromAcc(acc); assert.equal(data.sessions[0].firstSeen,pivot-1000);
+  assert.equal(L.analyze(data,opts).ongoing.n,1); assert.equal(L.analyze(data,opts).fresh.n,0);
+  data.sessions[0].firstSeen=pivot+1000; assert.equal(L.analyze(data,opts).ongoing.n,1); // retained legacy boundary
+ }
+});
+test('legacy saved payload is authenticated before explicit new-version recalculation', async () => {
+ const doc=await L.snapshot(fixture(),opts);doc.schema='logmap-change-lab/1';const {sha256,...payload}=doc;doc.sha256=await L.digest(payload);
+ assert.equal((await L.restore(doc)).legacy,true);doc.data.rows[0].cr++;await assert.rejects(()=>L.restore(doc));
+});
+test('discovery uses scoped last seven days and heavy contribution over all weight', () => {
+ const data=fixture();data.rows=[row('s1',pivot,500000),row('s2',pivot+1,100000),row('s3',pivot-8*D,900000),row('s3',pivot+2,900000,{side:true})];
+ const d=L.discover(data,opts);assert.equal(d.total.n,2);assert.equal(d.candidates.length,1);assert.equal(d.candidates[0].sid,'s1');assert.ok(Math.abs(d.candidates[0].share-5/6)<1e-9);
+ assert.equal(L.discover(data,{...opts,tool:'gemini'}).candidates.length,0);
+ assert.equal(L.discover({...data,rows:[row('s1',pivot,400000)]},opts).candidates.length,0);
+ assert.equal(L.discover(data,{...opts,includeSide:true}).candidates[0].sid,'s3');
+});

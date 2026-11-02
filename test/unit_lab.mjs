@@ -114,3 +114,14 @@ test('boundary-only project metadata matches browser and content-stripped CLI', 
  const parse=(strip)=>{const a=parser.newLogAcc();for(const e of events){const line=JSON.stringify(e);parser.handleLogLine(strip?numericLine(line):line,a);}return parser.labDatasetFromAcc(a,'2026-11-02T00:00:00Z').data;};
  const browser=parse(false),cli=parse(true);assert.deepEqual(cli,browser);assert.equal(cli.rows[0].project,'p1');assert.equal(L.analyze(cli,opts).ongoing.n,1);assert.ok(!JSON.stringify(cli).includes('/private'));
 });
+test('discovery AI denominators and boundary evidence respect scope and window without changing totals', () => {
+  const d = fixture(); d.rows[3].tool = 'codex';
+  d.compactions.push({sid:'s1',ts:pivot}, {sid:'s1',ts:pivot+8*D}, {sid:'s2',ts:pivot+2});
+  const a=L.discover(d,opts);
+  assert.equal(a.byTool.reduce((v,t)=>v+t.n,0),a.total.n);
+  assert.equal(a.byTool.find(t=>t.tool==='codex').heavyShare,0);
+  assert.deepEqual(a.candidates.find(c=>c.sid==='s1').compactions,[pivot]);
+  const b=L.discover(d,{...opts,tool:'codex'});
+  assert.equal(b.byTool.length,1);assert.equal(b.total.heavyN,0);assert.equal(b.candidates.length,0);
+  assert.equal(L.discover({...d,rows:[]},opts).total.heavyShare,null);
+});

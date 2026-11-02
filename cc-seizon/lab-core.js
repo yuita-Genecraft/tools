@@ -82,10 +82,11 @@
       const heavy = rs.filter(r => context(r) > 400000), heavyWeight = heavy.reduce((v, r) => v + weight(r), 0);
       return { sid, n: rs.length, heavyN: heavy.length, heavyWeight, share: total.weight ? heavyWeight / total.weight : null,
         tool: rs[0].tool, projects: sorted(new Set(rs.map(r => r.project))), models: sorted(new Set(rs.map(r => r.model))),
+        compactions: [...new Set(data.compactions.filter(c => c.sid === sid && c.ts >= start && c.ts < end).map(c => c.ts))].sort((a, b) => a - b),
         first: rs.reduce((m, r) => Math.min(m, r.ts), Infinity), last: rs.reduce((m, r) => Math.max(m, r.ts), -Infinity),
         examples: heavy.sort((a, b) => weight(b) - weight(a) || a.ts - b.ts).slice(0, 5).map(r => ({ ts: r.ts, context: context(r), weight: round(weight(r)), model: r.model })) };
     }).filter(c => c.heavyN && c.heavyWeight > 0).sort((a, b) => b.heavyWeight - a.heavyWeight || a.sid.localeCompare(b.sid)).slice(0, 3);
-    return { start, end: end || null, total, candidates };
+    return { start, end: end || null, total, candidates, byTool: sorted(new Set(rows.map(r => r.tool))).map(tool => ({ tool, ...summarize(rows.filter(r => r.tool === tool)) })) };
   }
   function stable(value) {
     if (value === null || typeof value !== 'object') return JSON.stringify(value);

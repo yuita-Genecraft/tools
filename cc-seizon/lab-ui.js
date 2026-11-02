@@ -5,13 +5,14 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const n = v => v === null ? '—' : Math.round(v).toLocaleString('ja-JP');
   const pc = v => v === null ? '—' : (v * 100).toFixed(1) + '%';
+  const precisePc = v => v === null ? '—' : v > 0 && v < .0001 ? '<0.01%' : (v * 100).toFixed(2) + '%';
   const shortDate = t => new Date(t).toISOString().slice(5, 10).replace('-', '/');
   const dateTime = t => new Date(t).toISOString().slice(0, 16).replace('T', ' ');
   const names = { claude: 'Claude', codex: 'Codex', gemini: 'Antigravity' };
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const inputTime = t => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   let data = null, state = null, result = null, restoredOptions = null, savedHash = '';
-  panel.innerHTML = `<section id="labDiscover" aria-label="ログから見つける確認候補"></section><form id="labForm"><div class="lab-control">
+  panel.innerHTML = `<section id="labDiscover" aria-label="ログから見つける確認候補"></section><form id="labForm"><p class="lab-scope-help">設定を変えたAIに絞って比較してください。全AIの合計から、特定AIの設定効果は判断できません。</p><div class="lab-control">
     <label class="lab-field"><span>確かめたい変更</span><input id="labName" maxlength="120" placeholder="例：圧縮設定を変えた"></label>
     <label class="lab-field"><span>変更日時 <small>${esc(zone)}</small></span><input id="labPivot" type="datetime-local" required></label>
     <label class="lab-field"><span>比較する期間</span><select id="labDays"><option value="7">前後 7 日ずつ</option><option value="14" selected>前後 14 日ずつ</option><option value="30">前後 30 日ずつ</option></select></label>
@@ -65,11 +66,12 @@
     const metric = (label, a, b, detail) => `<div class="lab-metric"><span>${label}</span><strong>${a}<i>→</i>${b}</strong><small>${detail}</small></div>`;
     const cohort = (title, c) => `<div class="lab-cohort-row"><span>${title}</span><b>${pc(c.heavyShare)}</b><small>${n(c.sessions)} 会話 · ${n(c.n)} 応答 · 40万超 ${n(c.heavyN)} 応答</small><span class="lab-mini"><i style="width:${(c.heavyShare || 0) * 100}%"></i></span></div>`;
     const warnings = [...R.warnings];
+    if (!state.tool && new Set(data.rows.map(r => r.tool)).size > 1) warnings.unshift('全AIを含む比較です。特定AIの設定を確かめる場合は、対象AIに絞ってください。');
     if (!state.change) warnings.unshift('変更内容と日時を指定してから、結果を判断してください。');
     const chartBars = R.daily.map((d, i) => `<div class="lab-day${i >= state.days ? ' after' : ''}${!d.n ? ' empty' : ''}" tabindex="0" role="img" aria-label="${dateTime(d.start)} UTC から24時間。${n(d.n)}応答、40万超の重み付き割合 ${pc(d.heavyShare)}、圧縮境界 ${d.compactions}件"><i style="height:${(d.heavyShare || 0) * 100}%"></i><span class="lab-tooltip">${shortDate(d.start)} · ${pc(d.heavyShare)}<br>${n(d.n)} responses<br>圧縮境界 ${d.compactions}</span></div>`).join('');
     $('#labResult').innerHTML = `<div class="lab-topline"><p class="lab-section-label">01 / CHANGE REPORT</p><span class="lab-status">${data.sample ? '見本・架空データ' : valid ? '比較を表示 · 効果は未判定' : '比較する記録が不足'}</span></div>
       <section class="lab-score" aria-label="変更前後の観測差"><div><p class="lab-section-label">${esc(subtitle)}</p><h2>長い文脈が占める割合の変化</h2><div class="lab-n">${delta}<small>pt</small></div><p class="lab-caption">文脈 <b>40万トークン超</b>の応答が、重み付き使用量に占める割合。<br>この差は、料金や利用枠の削減率ではありません。</p></div>
-      <div class="lab-compare"><p class="lab-near-limit">観測差です。改善・悪化や設定の効果は未判定。${R.mixShift ? '<br>前後のAI・モデル・作業の構成が異なります。' : ''}${R.end > Date.parse(data.collectedAt) ? '<br>変更後の比較期間はまだ終わっていません。' : ''}</p>${bar('BEFORE', B, '')}${bar('AFTER', A, 'after')}<div class="lab-comparison-note"><span>${shortDate(R.start)} — ${shortDate(state.pivot)} — ${shortDate(R.end)}</span><span>各 ${state.days} 日 / UTC</span></div><p class="lab-caption">${valid ? '前後の差を観測しています。作業内容・モデル・会話の構成が変わるため、設定の効果とはまだ断定できません。' : '片側に記録がない場合は 0% として比べません。日時や条件を見直してください。'}</p></div></section>
+      <div class="lab-compare"><p class="lab-near-limit">観測差です。改善・悪化や設定の効果は未判定。${!state.tool && new Set(data.rows.map(r => r.tool)).size > 1 ? '<br>全AIの合計です。設定を変えたAIへ絞ってください。' : ''}${R.mixShift ? '<br>前後のAI・モデル・作業の構成が異なります。' : ''}${R.end > Date.parse(data.collectedAt) ? '<br>変更後の比較期間はまだ終わっていません。' : ''}</p>${bar('BEFORE', B, '')}${bar('AFTER', A, 'after')}<div class="lab-comparison-note"><span>${shortDate(R.start)} — ${shortDate(state.pivot)} — ${shortDate(R.end)}</span><span>各 ${state.days} 日 / UTC</span></div><p class="lab-caption">${valid ? '前後の差を観測しています。作業内容・モデル・会話の構成が変わるため、設定の効果とはまだ断定できません。' : '片側に記録がない場合は 0% として比べません。日時や条件を見直してください。'}</p></div></section>
       <div class="lab-metrics">${metric('応答数', n(B.n), n(A.n), '対象の量も合わせて確認')}${metric('1 応答あたりの重み付き量', n(B.perResponse), n(A.perResponse), '共通の重み · 金額ではありません')}${metric('文脈の中央値', n(B.p50), n(A.p50), '入力＋キャッシュ読み・書き / tokens')}${metric('記録のある会話', n(B.sessions), n(A.sessions), '会話数は完了した仕事の数ではありません')}</div>
       <section class="lab-chart-section"><div class="lab-chart-title"><div><p class="lab-section-label">OVER TIME</p><h3>変化は、続いているか。</h3></div><div class="lab-chart-legend"><span>変更前</span><span>変更後</span></div></div><div class="lab-chart"><span class="lab-axis top">100%</span><span class="lab-axis mid">50%</span><span class="lab-axis">0%</span><div class="lab-chart-bars">${chartBars}</div><div class="lab-change-line"><span>変更 ${shortDate(state.pivot)}</span></div></div><div class="lab-xaxis"><span>${shortDate(R.start)}</span><span>${shortDate(R.end)}</span></div><p class="lab-caption">変更日時を境に 24 時間ずつ集計。縦軸は文脈 40万超の重み付き割合。記録のない区間は空欄です。棒に触れると件数・圧縮境界の記録数を確認できます。</p></section>
       <div class="lab-bottom"><section class="lab-cohorts"><p class="lab-section-label">SESSION COHORTS</p><h3>続けた会話に、差が残っていないか。</h3>${cohort('変更前から記録がある会話', R.ongoing)}${cohort('変更後に初めて記録された会話', R.fresh)}${R.unknown.n ? cohort('開始時期が分からない会話', R.unknown) : ''}<p class="lab-caption">どちらも<b>変更後の応答だけ</b>を比較。開始時期は手元のログで最初に観測した時刻です。ログの欠落や再開のため、実際の新規作成日時とは限りません。設定が読み込まれたかどうかは、この数字だけでは分かりません。</p></section>
@@ -78,9 +80,18 @@
   function renderDiscovery() {
     const d = L.discover(data, state);
     $('#labDiscover').innerHTML = `<div class="lab-discover-heading"><div><p class="lab-section-label">START WITH YOUR LOGS</p><h2>まず、ここから確かめる。</h2></div><span class="lab-status">${data.sample ? '見本・架空データ' : '記録から機械的に抽出'}</span></div>
-      <p class="lab-caption">変更日時が分からなくても使えます。選択中のAI・作業・モデルで、${d.end ? `最終記録から7日間（${dateTime(d.start)} ～ ${dateTime(d.end - 1)} UTC）` : '対象の記録なし'}を確認。重み付き量が大きい順に、文脈40万超を含む会話を最大3件表示します。無駄や異常の判定ではありません。</p>
-      <div class="lab-candidates">${d.candidates.map((c, i) => `<article class="lab-candidate"><p class="lab-section-label">0${i + 1} / ${esc(names[c.tool])} · 会話 ${esc(c.sid)}</p><h3>長い文脈に、どれだけ使っているか。</h3><strong>${pc(c.share)}<small>対象期間の全応答の重み付き量のうち</small></strong><p>${n(c.n)} 応答中 ${n(c.heavyN)} 応答が40万超。<br>${esc(c.projects.map(p => app.labLabels[p] || (p ? '作業 ' + p.slice(1) : '作業不明')).join(' / '))}</p><details><summary>根拠の記録を見る</summary><p>この会話の期間：${dateTime(c.first)} ～ ${dateTime(c.last)} UTC。40万超の応答から重みの大きい順に最大5件。本文は表示しません。</p><ul>${c.examples.map(r => `<li>${dateTime(r.ts)} UTC<br>文脈 ${n(r.context)} tokens · 重み ${n(r.weight)} · ${esc(r.model || 'モデル不明')}</li>`).join('')}</ul></details><button class="btn" type="button" data-discover="${i}">この条件で前後を確かめる ↗</button></article>`).join('') || '<p class="lab-discovery-empty">この範囲では、重み付き量のある40万超の応答は見つかりませんでした。効率や品質が良いという判定ではありません。</p>'}</div>
+      <div class="lab-overview" id="labOverview"><div><p class="lab-section-label">対象全体 / ${esc(state.tool ? names[state.tool] : '全AI')}</p><strong>${precisePc(d.total.heavyShare)}</strong><p>文脈40万超の応答が占める重み付き量</p></div><div><p>${d.end ? `${dateTime(d.start)} ～ ${dateTime(d.end - 1)} UTC` : '対象の記録なし'}</p><p>最終記録から7日間 · ${n(d.total.n)} 応答 / ${n(d.total.sessions)} 会話<br>40万超 ${n(d.total.heavyN)} 応答</p><p>作業：${esc(state.project ? app.labLabels[state.project] || state.project : 'すべて')} / モデル：${esc(state.model || 'すべて')} / サブエージェント${state.includeSide ? '含む' : '除外'}</p><p class="lab-caption">料金・利用枠・削減可能量ではありません。候補の順位だけで調査の優先度を決めず、全体に占める割合を先に確認してください。</p></div></div>
+      <div class="lab-tool-scope" aria-label="確認するAI"><span>対象AI</span><button class="btn" type="button" data-lab-tool="" aria-pressed="${!state.tool}">全AI</button>${[...new Set(data.rows.map(r => r.tool))].sort().map(t => `<button class="btn" type="button" data-lab-tool="${esc(t)}" aria-pressed="${state.tool === t}">${esc(names[t])}</button>`).join('')}</div>
+      <p class="lab-caption">AIを切り替えると、作業・モデルの絞り込みを解除します。変更日時は保ちます。表示期間はそのAIの最終記録を基準に更新します。</p>
+      <div class="lab-tool-totals">${d.byTool.map(t => `<span>${esc(names[t.tool])}：${precisePc(t.heavyShare)} <small>そのAIの全応答が分母 · ${n(t.n)} 応答</small></span>`).join('')}</div>
+      <details id="labCandidateDetails"><summary>内訳の候補を見る（${d.candidates.length} 会話・最大3件）</summary><p class="lab-caption">この期間・条件内で、40万超の重み付き量が大きい順です。異常や無駄の認定ではありません。上位でも寄与が小さい場合があります。</p>
+      <div class="lab-candidates">${d.candidates.map((c, i) => `<article class="lab-candidate"><p class="lab-section-label">0${i + 1} / ${esc(names[c.tool])} · 会話 ${esc(c.sid)}</p><h3>長い文脈に、どれだけ使っているか。</h3><strong>${precisePc(c.share)}<small>対象期間の全応答の重み付き量のうち</small></strong><p>${n(c.n)} 応答中 ${n(c.heavyN)} 応答が40万超。<br>${esc(c.projects.map(p => app.labLabels[p] || (p ? '作業 ' + p.slice(1) : '作業不明')).join(' / '))}</p><details><summary>根拠の記録を見る</summary><p>この会話の期間：${dateTime(c.first)} ～ ${dateTime(c.last)} UTC。40万超の応答から重みの大きい順に最大5件。本文は表示しません。</p><ul>${c.examples.map(r => `<li>${dateTime(r.ts)} UTC<br>文脈 ${n(r.context)} tokens · 重み ${n(r.weight)} · ${esc(r.model || 'モデル不明')}</li>`).join('')}</ul><div class="lab-boundaries"><h4>会話内の記録</h4><p>この7日間に記録された圧縮境界：${n(c.compactions.length)} 件</p>${c.compactions.length ? `<ul>${c.compactions.slice(-5).map(t => `<li>${dateTime(t)} UTC · 圧縮境界</li>`).join('')}</ul><small>最新5件まで。コピーされた同時刻の境界は1件にまとめています。</small>` : ''}<p>再起動・設定の再読込：未確認。圧縮や応答の空白、ログファイルの分割は、その証拠として扱いません。以前の履歴がコピーされるため、会話の初観測時刻も再起動時刻ではありません。</p></div></details><button class="btn" type="button" data-discover="${i}">この条件で前後を確かめる ↗</button></article>`).join('') || '<p class="lab-discovery-empty">この範囲では、重み付き量のある40万超の応答は見つかりませんでした。効率や品質が良いという判定ではありません。</p>'}</div></details>
       <p class="lab-caption">割合の分母は、この7日間の対象全応答です。会話ごとの料金や削減可能量ではありません。変更を試した場合は、下で実際の変更日時を指定して観測を比べられます。</p>`;
+    for (const b of $('#labDiscover').querySelectorAll('[data-lab-tool]')) b.addEventListener('click', () => {
+      state = L.options({ ...state, tool: b.dataset.labTool, project: '', model: '' });
+      setControls(state); render();
+      message('対象AIを切り替えました。作業・モデルの絞り込みは解除し、変更日時は保っています。');
+    });
     for (const b of $('#labDiscover').querySelectorAll('[data-discover]')) b.addEventListener('click', () => {
       const c = d.candidates[Number(b.dataset.discover)];
       state = L.options({ ...state, tool: c.tool, project: c.projects.length === 1 ? c.projects[0] : '', model: c.models.length === 1 ? c.models[0] : '' });
@@ -97,7 +108,7 @@
       `応答数：${n(R.before.n)} → ${n(R.after.n)}、1応答あたり重み付き量：${n(R.before.perResponse)} → ${n(R.after.perResponse)}`,
       `変更後のうち、前から記録のある会話：${pc(R.ongoing.heavyShare)} / 後に初記録の会話：${pc(R.fresh.heavyShare)}`,
       '共通の料金比で重み付けした観測値。設定の効果・料金や利用枠の削減率・仕事の品質は未判定。',
-      ...R.warnings.map(w => '確認点：' + w), savedHash ? '保存データ SHA-256: ' + savedHash : '',
+      ...(!state.tool ? ['確認点：全AIを含む比較です。特定AIの設定効果は判断できません。'] : []), ...R.warnings.map(w => '確認点：' + w), savedHash ? '保存データ SHA-256: ' + savedHash : '',
       '解析版：' + data.parser].filter(Boolean).join('\n');
   }
   function download(blob, name) {

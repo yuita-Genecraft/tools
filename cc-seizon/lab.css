@@ -26,3 +26,12 @@ body{background-image:radial-gradient(ellipse at 80% 0,#303d1d25,transparent 50%
 .lab-score .lab-n,.lab-score .lab-n.rise{color:var(--ink)}.lab-near-limit{font-size:12px;line-height:1.8;color:var(--ink-2);margin:0;border-left:2px solid var(--rule-2);padding-left:12px}
 #labDiscover{border-top:1px solid var(--rule);padding:24px 0 30px;margin-bottom:30px;border-bottom:1px solid var(--rule)}.lab-discover-heading{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:12px}.lab-discover-heading h2{font-size:22px;margin:8px 0}.lab-candidates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:20px 0}.lab-candidate{border:1px solid var(--rule);border-radius:6px;background:var(--bg-2);padding:20px;min-width:0}.lab-candidate h3{font-size:14px;margin:14px 0}.lab-candidate strong{font:500 32px var(--f-mono);display:block}.lab-candidate strong small{display:block;font:11px var(--f-sans);color:var(--ink-3);margin-top:6px}.lab-candidate p,.lab-candidate details,.lab-discovery-empty{font-size:12px;line-height:1.8;color:var(--ink-2);overflow-wrap:anywhere}.lab-candidate summary{cursor:pointer;color:var(--accent)}.lab-candidate ul{padding-left:18px}.lab-candidate li{margin-bottom:10px}.lab-candidate .btn{margin-top:15px;width:100%}.lab-discovery-empty{grid-column:1/-1}
 @media(max-width:900px){.lab-candidates{grid-template-columns:1fr}.lab-discover-heading{align-items:flex-start}.lab-discover-heading h2{font-size:19px}.lab-discover-heading .lab-status{white-space:nowrap}}
+
+/* Read the scale before ranking the examples. */
+.lab-overview{display:grid;grid-template-columns:1fr 1.5fr;gap:32px;padding:28px 0;border-top:1px solid var(--line,#49503e)}
+.lab-overview strong{font:500 clamp(40px,6vw,76px)/1.2 monospace;color:#eff1e7}.lab-overview p{line-height:1.7}
+.lab-tool-scope{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.lab-tool-scope [aria-pressed=true]{border-color:#d4f77d;color:#d4f77d}
+.lab-tool-totals{display:flex;gap:20px;flex-wrap:wrap;margin:18px 0}.lab-tool-totals small{display:block;color:#b7bdab}
+#labCandidateDetails>summary{cursor:pointer;padding:20px 0;border-top:1px solid #49503e;font-size:18px}
+.lab-boundaries{border-top:1px solid #49503e;margin-top:16px;padding-top:8px}.lab-scope-help{color:#b7bdab;line-height:1.7}
+@media(max-width:700px){.lab-overview{grid-template-columns:1fr;gap:8px}.lab-tool-totals{flex-direction:column;gap:12px}}
